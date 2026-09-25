@@ -351,7 +351,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = false)
                     }
                     if (_activeCall.value.isActive && (update.status == "ACCEPTED" || update.status == "CONNECTED")) {
-                        startCallTimer()
+                        startCallTimer(update.connectedAt)
                     }
                 }
             } catch (e: Throwable) {
@@ -1877,7 +1877,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         val session = sessionRes.getOrNull()
                         if (session != null) {
                             val status = session.status.uppercase()
-                            if (status == "ACCEPTED" || status == "CONNECTED") {
+                            if (status == "CONNECTED") {
                                 val connTime = session.connectedAt ?: (if (callConnectTimestamp > 0) callConnectTimestamp else System.currentTimeMillis())
                                 if (!_activeCall.value.isConnected) {
                                     startCallTimer(connTime)
@@ -1923,12 +1923,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             callType = call.callType,
             isVideo = isVideo
         )
-        val connectTime = System.currentTimeMillis()
-        callConnectTimestamp = connectTime
-
         _activeCall.value = ActiveCallState(
             isActive = true,
-            isConnected = true,
+            isConnected = false,
             contactId = call.callerId,
             contactName = callerName,
             contactAvatar = call.callerAvatar ?: "",
@@ -1945,7 +1942,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             durationSeconds = 0
         )
         viewModelScope.launch {
-            SupabaseService.updateCallSessionStatus(call.id, "ACCEPTED", connectedAt = connectTime)
+            SupabaseService.updateCallSessionStatus(call.id, "ACCEPTED")
         }
 
         // Trigger full screen navigation
@@ -1955,7 +1952,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             com.example.navigation.BitChatRoutes.audioCall(call.callerId, callerName)
         }
 
-        startCallTimer(connectTime)
         startActiveCallStatusSync(call.id)
     }
 
@@ -2196,8 +2192,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         activeCallStatusSyncJob = null
         callEngine.endCall()
         val lastState = _activeCall.value
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
         val sessId = activeCallSessionId
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
         val targetContactId = lastState.contactId
         if (sessId != null) {
             viewModelScope.launch {
