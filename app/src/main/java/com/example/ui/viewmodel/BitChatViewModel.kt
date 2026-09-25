@@ -161,20 +161,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private var activeChatSyncJob: Job? = null
 
     fun setActiveChatId(chatId: String?) {
+        if (_activeChatId.value == chatId) return
         _activeChatId.value = chatId
         com.example.util.NotificationHelper.activeChatId = chatId
+        SupabaseRealtimeManager.setCurrentActiveChat(chatId)
         activeChatSyncJob?.cancel()
+        activeChatSyncJob = null
+
         if (!chatId.isNullOrBlank()) {
             activeChatSyncJob = viewModelScope.launch {
+                // One initial REST catch-up only. Realtime owns live message delivery.
                 repository.syncMessagesForChat(chatId)
-                while (true) {
-                    delay(12000L) // 12 seconds interval to strictly satisfy low-egress constraint
-                    repository.syncMessagesForChat(chatId)
-                }
             }
         }
     }
-
     fun clearLoginSession() {
         viewModelScope.launch {
             repository.clearLoginSession()
