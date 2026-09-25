@@ -370,6 +370,9 @@ object NotificationHelper {
         }
     }
 
+    private fun callNotificationId(callId: String, callerName: String): Int =
+        if (callId.isNotBlank()) 20000 + Math.abs(callId.hashCode() % 100000) else 20000 + Math.abs(callerName.hashCode() % 100000)
+
     fun showIncomingCallNotification(
         context: Context,
         callerName: String,
@@ -391,7 +394,7 @@ object NotificationHelper {
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            callerName.hashCode(),
+            callNotificationId(callId, callerName),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -405,7 +408,7 @@ object NotificationHelper {
         }
         val acceptPendingIntent = PendingIntent.getBroadcast(
             context,
-            callerName.hashCode() + 1,
+            callNotificationId(callId, callerName) + 1,
             acceptIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -419,7 +422,7 @@ object NotificationHelper {
         }
         val declinePendingIntent = PendingIntent.getBroadcast(
             context,
-            callerName.hashCode() + 2,
+            callNotificationId(callId, callerName) + 2,
             declineIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -478,20 +481,21 @@ object NotificationHelper {
 
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            manager?.notify(callerName.hashCode(), builder.build())
+            manager?.notify(callNotificationId(callId, callerName), builder.build())
         } catch (e: Throwable) {
             android.util.Log.e("BitChat_Debug", "Error showing call notification: ${e.message}", e)
         }
     }
 
-    fun cancelCallNotification(context: Context, callerName: String? = null) {
+    fun cancelCallNotification(context: Context, callerName: String? = null, callId: String? = null) {
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            if (!callerName.isNullOrBlank()) {
-                manager?.cancel(callerName.hashCode())
+            if (!callId.isNullOrBlank() || !callerName.isNullOrBlank()) {
+                manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller"))
+                manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller") + 1)
+                manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller") + 2)
             }
             manager?.cancel(10099)
-            manager?.cancelAll()
         } catch (e: Throwable) {
             android.util.Log.e("BitChat_Debug", "Error cancelling call notification: ${e.message}", e)
         }
