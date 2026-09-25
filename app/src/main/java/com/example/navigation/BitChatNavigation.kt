@@ -203,20 +203,6 @@ fun BitChatNavHost(
         if (call != null) {
             pendingIncomingCallSession = null
             bitChatViewModel.acceptIncomingCall(call)
-            val callerName = when {
-                call.callerName.isNotBlank() && !call.callerName.startsWith("chat_", ignoreCase = true) && !call.callerName.startsWith("user_", ignoreCase = true) -> call.callerName
-                else -> {
-                    bitChatViewModel.contacts.value.find { it.id == call.callerId }?.name
-                        ?: bitChatViewModel.allChats.value.find { it.id == call.callerId }?.name
-                        ?: "Incoming Caller"
-                }
-            }
-            val route = if (call.callType.equals("VIDEO", ignoreCase = true)) {
-                BitChatRoutes.videoCall(call.callerId, callerName)
-            } else {
-                BitChatRoutes.audioCall(call.callerId, callerName)
-            }
-            navController.navigate(route)
         }
     }
 
