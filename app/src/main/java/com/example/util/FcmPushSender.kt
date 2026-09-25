@@ -138,10 +138,8 @@ object FcmPushSender {
         }
 
         try {
-            val isCall = type == "call" || type == "incoming_call"
-            val channelId = if (isCall) "knotlink_calls_channel" else "knotlink_msg_channel_v4"
-            val ttl = if (isCall) "60s" else "86400s"
-
+            // All call lifecycle events remain data-only so FirebaseMessagingService
+            // receives them while the app is backgrounded/closed.
             val isCall = type == "call" || type == "incoming_call" ||
                 type == "call_ended" || type == "call_declined" || type == "call_cancelled"
             val channelId = if (type == "call" || type == "incoming_call") "knotlink_calls_channel" else "knotlink_msg_channel_v4"
@@ -150,28 +148,11 @@ object FcmPushSender {
             val messageObj = JSONObject().apply {
                 put("token", targetFcmToken)
 
-                // Call signaling is data-only so FirebaseMessagingService receives it
-                // while the app is backgrounded/closed. Android must not create its
-                // own generic notification and bypass our custom call UI.
-                if (!isCall) {
-                    put("notification", JSONObject().apply {
-                        put("title", title)
-                        put("body", body)
-                    })
-                }
-
+                // All notifications are data-only so KnotLinkFirebaseMessagingService
+                // consistently renders messages/calls and can attach profile avatars.
                 put("android", JSONObject().apply {
-                    put("priority", if (isCall) "HIGH" else "NORMAL")
+                    put("priority", "HIGH")
                     put("ttl", ttl)
-                    if (!isCall) {
-                        put("notification", JSONObject().apply {
-                            put("channel_id", channelId)
-                            put("default_sound", true)
-                            put("default_vibrate_timings", true)
-                            put("notification_priority", "PRIORITY_MAX")
-                            put("visibility", "PUBLIC")
-                        })
-                    }
                 })
 
                 put("data", JSONObject().apply {
