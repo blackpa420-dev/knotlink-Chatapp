@@ -27,6 +27,8 @@ object SupabaseService {
     private data class ProfileCacheEntry(val profile: SupabaseProfile?, val cachedAt: Long)
     private const val PROFILE_CACHE_TTL_MS = 60_000L
     private val profileCache = ConcurrentHashMap<String, ProfileCacheEntry>()
+    private val presenceUpdateTimes = ConcurrentHashMap<String, Long>()
+    private const val PRESENCE_HEARTBEAT_TTL_MS = 60_000L
 
     private fun getCachedProfile(key: String): SupabaseProfile? {
         val normalized = key.trim().lowercase()
@@ -1298,6 +1300,18 @@ object SupabaseService {
         try {
             if (userId.isBlank()) return@withContext Result.success(false)
             val now = System.currentTimeMillis()
+
+            // Avoid repeated identical presence PATCHes from multiple lifecycle/realtime paths.
+            // Online heartbeats are sent at most once per minute; offline transitions are immediate.
+            if (isOnline) {
+                val last = presenceUpdateTimes[userId] ?: 0L
+                if (now - last < PRESENCE_HEARTBEAT_TTL_MS) {
+                    return@withContext Result.success(true)
+                }
+                presenceUpdateTimes[userId] = now
+            } else {
+                presenceUpdateTimes.remove(userId)
+            }
             val bodyObj = JSONObject().apply {
                 put("is_online", isOnline)
                 put("last_seen", now)
