@@ -180,41 +180,12 @@ class MainActivity : FragmentActivity() {
     val callType = intent.getStringExtra("call_type") ?: "AUDIO"
 
     val vm = bitChatViewModel ?: return
-    if (actionAcceptCall) {
-      vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = true)
-    } else if (actionIncomingCallScreen) {
-      vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = false)
-    } else {
-        val finalCallId = callId.ifBlank { "call_${callerName.hashCode()}" }
-        val finalCallerId = callerId.ifBlank { "caller_${callerName.hashCode()}" }
-        val session = com.example.data.supabase.SupabaseCallSession(
-          id = finalCallId,
-          callId = finalCallId,
-          callerId = finalCallerId,
-          receiverId = "me",
-          callerName = callerName,
-          callType = callType,
-          status = "RINGING"
-        )
-        vm.acceptIncomingCall(session)
-      }
-    } else if (actionIncomingCallScreen) {
-      val finalCallId = callId.ifBlank { "call_${callerName.hashCode()}" }
-      val finalCallerId = callerId.ifBlank { "caller_${callerName.hashCode()}" }
-      val session = com.example.data.supabase.SupabaseCallSession(
-        id = finalCallId,
-        callId = finalCallId,
-        callerId = finalCallerId,
-        receiverId = "me",
-        callerName = callerName,
-        callType = callType,
-        status = "RINGING"
-      )
-      vm.setIncomingCallSession(session)
-    } else {
-      val openChatId = intent.getStringExtra("open_chat_id") ?: intent.getStringExtra("chat_id")
-      if (!openChatId.isNullOrBlank()) {
-        vm.setActiveChatId(openChatId)
+    when {
+      actionAcceptCall -> vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = true)
+      actionIncomingCallScreen -> vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = false)
+      else -> {
+        val openChatId = intent.getStringExtra("open_chat_id") ?: intent.getStringExtra("chat_id")
+        if (!openChatId.isNullOrBlank()) vm.setActiveChatId(openChatId)
       }
     }
   }
