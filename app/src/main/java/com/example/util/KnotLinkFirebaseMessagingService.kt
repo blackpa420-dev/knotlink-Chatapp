@@ -93,7 +93,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                 type.equals("call_cancelled", ignoreCase = true)) {
 
                 Log.i("KnotLinkFCM", "Received call termination push ($type) for $callerName")
-                NotificationHelper.cancelCallNotification(applicationContext, callerName)
+                NotificationHelper.cancelCallNotification(applicationContext, callerName, chatId)
 
                 val endIntent = Intent("com.knotlink.CALL_ENDED").apply {
                     putExtra("caller_name", callerName)
