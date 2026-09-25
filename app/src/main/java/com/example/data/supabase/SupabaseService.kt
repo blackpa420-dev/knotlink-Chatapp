@@ -970,6 +970,69 @@ object SupabaseService {
         }
     }
 
+    suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
+        try {
+            if (chatId.isBlank()) return@withContext Result.success(emptyList())
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed messages: ${response.code}"))
+            val arr = JSONArray(body)
+            val list = mutableListOf<SupabaseMessage>()
+            for (i in 0 until arr.length()) list.add(SupabaseMessage.fromJson(arr.getJSONObject(i)))
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in fetchMessagesSince", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchUserMessagesSince(
+        userId: String,
+        username: String? = null,
+        email: String? = null,
+        sinceTimestamp: Long,
+        limit: Int = 200
+    ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
+        try {
+            val ids = mutableListOf(userId)
+            if (!username.isNullOrBlank()) {
+                ids.add(username)
+                ids.add(username.removePrefix("@"))
+                ids.add(if (username.endsWith(".link")) username else "$username.link")
+            }
+            if (!email.isNullOrBlank()) ids.add(email)
+            val orParts = ids.filter { it.isNotBlank() }.distinct().flatMap {
+                val enc = java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+                listOf("recipient_id.eq.$enc", "sender_id.eq.$enc")
+            }
+            if (orParts.isEmpty()) return@withContext Result.success(emptyList())
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string() ?: ""
+            if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed user messages: ${response.code}"))
+            val arr = JSONArray(body)
+            val list = mutableListOf<SupabaseMessage>()
+            for (i in 0 until arr.length()) list.add(SupabaseMessage.fromJson(arr.getJSONObject(i)))
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in fetchUserMessagesSince", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun fetchMessages(chatId: String, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&order=created_at.desc&limit=$limit&select=*"
