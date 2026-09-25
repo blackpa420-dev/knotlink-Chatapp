@@ -9,6 +9,43 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface BitChatDao {
 
+
+    @Query("SELECT * FROM cached_profiles WHERE uid = :uid LIMIT 1")
+    suspend fun getCachedProfile(uid: String): CachedProfileEntity?
+
+    @Query("SELECT * FROM cached_profiles WHERE username = :username COLLATE NOCASE LIMIT 1")
+    suspend fun getCachedProfileByUsername(username: String): CachedProfileEntity?
+
+    @Query("SELECT * FROM cached_profiles WHERE email = :email COLLATE NOCASE LIMIT 1")
+    suspend fun getCachedProfileByEmail(email: String): CachedProfileEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCachedProfile(profile: CachedProfileEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCachedProfiles(profiles: List<CachedProfileEntity>)
+
+    @Query("SELECT * FROM cached_profiles")
+    suspend fun getAllCachedProfiles(): List<CachedProfileEntity>
+
+    @Query("DELETE FROM cached_profiles")
+    suspend fun clearCachedProfiles()
+
+    @Query("SELECT * FROM sync_state WHERE key = :key LIMIT 1")
+    suspend fun getSyncState(key: String): SyncStateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSyncState(state: SyncStateEntity)
+
+    @Query("DELETE FROM sync_state WHERE key = :key")
+    suspend fun deleteSyncState(key: String)
+
+    @Query("DELETE FROM sync_state")
+    suspend fun clearSyncStates()
+
+    @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId")
+    suspend fun getLatestLocalMessageTimestamp(chatId: String): Long?
+
     @Query("SELECT * FROM user_identity WHERE id = 1 LIMIT 1")
     fun getUserIdentity(): Flow<UserIdentityEntity?>
 
