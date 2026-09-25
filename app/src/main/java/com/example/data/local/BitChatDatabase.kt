@@ -27,6 +27,17 @@ import androidx.room.RoomDatabase
 abstract class BitChatDatabase : RoomDatabase() {
     abstract fun bitChatDao(): BitChatDao
 
+    private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS cached_profiles (uid TEXT NOT NULL PRIMARY KEY, username TEXT NOT NULL, fullName TEXT NOT NULL, avatarUrl TEXT, bio TEXT NOT NULL, profession TEXT NOT NULL, email TEXT NOT NULL, lastSeen INTEGER NOT NULL, isOnline INTEGER NOT NULL, updatedAt INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS sync_state (key TEXT NOT NULL PRIMARY KEY, lastSyncedAt INTEGER NOT NULL)"
+            )
+        }
+    }
+
     companion object {
         @Volatile
         private var INSTANCE: BitChatDatabase? = null
