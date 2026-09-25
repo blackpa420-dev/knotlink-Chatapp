@@ -89,6 +89,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private val _toastEvent = MutableStateFlow<ModernToastData?>(null)
     val toastEvent: StateFlow<ModernToastData?> = _toastEvent.asStateFlow()
 
+    // Fresh-install bootstrap state: Room is populated before an empty chat list is presented.
+    private val initialHistorySyncStartedUids = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val _initialHistorySyncing = MutableStateFlow(false)
+    val initialHistorySyncing: StateFlow<Boolean> = _initialHistorySyncing.asStateFlow()
+    private val _initialHistorySyncError = MutableStateFlow<String?>(null)
+    val initialHistorySyncError: StateFlow<String?> = _initialHistorySyncError.asStateFlow()
+
     val userPrivacySettings: StateFlow<com.example.data.repository.UserPrivacySettings> = repository.userPrivacySettings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.repository.UserPrivacySettings())
 
@@ -181,6 +188,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun retryInitialHistorySync() {
+        val identity = userIdentity.value ?: return
+        val uid = identity.supabaseUid.ifBlank { identity.email }
+        if (uid.isBlank()) return
+
+        initialHistorySyncStartedUids.add(uid)
+        _initialHistorySyncing.value = true
+        _initialHistorySyncError.value = null
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = repository.syncAllChatHistory(uid, identity.username)
+            withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                _initialHistorySyncing.value = false
+                _initialHistorySyncError.value = if (success) null else "Could not restore chat history."
+            }
+        }
+    }
+
     private val appLaunchTime = System.currentTimeMillis()
 
     init {
@@ -225,8 +250,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         try {
                             NotificationHelper.registerFcmToken(getApplication(), currentUid)
                             SupabaseRealtimeManager.startRealtime(currentUid, currentUsername, currentEmail)
-                            launch {
-                                repository.syncAllChatHistory(currentUid, currentUsername)
+
+                            // One bootstrap sync per signed-in UID for this process.
+                            // Realtime/incremental sync continues to handle live changes afterwards.
+                            if (initialHistorySyncStartedUids.add(currentUid)) {
+                                _initialHistorySyncing.value = true
+                                _initialHistorySyncError.value = null
+                                launch(Dispatchers.IO) {
+                                    val success = repository.syncAllChatHistory(currentUid, currentUsername)
+                                    withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                                        _initialHistorySyncing.value = false
+                                        _initialHistorySyncError.value = if (success) null else "Could not restore chat history."
+                                    }
+                                }
                             }
                         } catch (e: Throwable) {
                             Log.w("BitChat_Debug", "Realtime startup warning: ${e.message}")
