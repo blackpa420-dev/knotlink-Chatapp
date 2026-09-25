@@ -83,7 +83,6 @@ fun VideoCallScreen(
     var isCameraOff by remember { mutableStateOf(false) }
     var isFrontCamera by remember { mutableStateOf(true) }
     var isSpeakerOn by remember { mutableStateOf(true) }
-    var secondsElapsed by remember { mutableIntStateOf(0) }
 
     // Auto-hide UI controls after 3 seconds of inactivity (Rule 1)
     var isControlsVisible by remember { mutableStateOf(true) }
@@ -132,10 +131,6 @@ fun VideoCallScreen(
                 )
             }
         }
-        while (true) {
-            delay(1000)
-            secondsElapsed++
-        }
     }
 
     // Auto-exit if call terminates remotely
@@ -145,6 +140,7 @@ fun VideoCallScreen(
         }
     }
 
+    val secondsElapsed = activeCall.secondsElapsed
     val minutes = secondsElapsed / 60
     val seconds = secondsElapsed % 60
     val timeFormatted = String.format("%02d:%02d", minutes, seconds)
