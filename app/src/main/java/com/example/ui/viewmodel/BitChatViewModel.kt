@@ -2197,11 +2197,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         val targetContactId = lastState.contactId
         if (sessId != null) {
             viewModelScope.launch {
+                val session = SupabaseService.getCallSession(sessId).getOrNull()
+                val myUid = repository.userIdentity.firstOrNull()?.supabaseUid.orEmpty()
+                val peerId = session?.let { if (it.callerId == myUid) it.receiverId else it.callerId }.orEmpty().ifBlank { targetContactId }
+
                 SupabaseService.updateCallSessionStatus(sessId, "ENDED", endedAt = System.currentTimeMillis())
-                if (targetContactId.isNotBlank()) {
+                if (peerId.isNotBlank()) {
                     try {
                         FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = targetContactId,
+                            targetUserIdOrName = peerId,
                             type = "call_ended",
                             title = "Call Ended",
                             body = "Call was ended",
