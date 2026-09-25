@@ -160,7 +160,9 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                 // Send broadcast intent for active app receivers
                 val callIntent = Intent("com.knotlink.INCOMING_CALL_PUSH").apply {
                     putExtra("caller_name", callerName)
+                    putExtra("caller_id", senderId)
                     putExtra("call_type", callType)
+                    putExtra("call_id", chatId)
                     putExtra("room_id", chatId)
                     setPackage(packageName)
                 }
