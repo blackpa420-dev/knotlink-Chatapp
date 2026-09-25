@@ -139,6 +139,26 @@ data class BlockedUserEntity(
     val blockedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "cached_profiles")
+data class CachedProfileEntity(
+    @PrimaryKey val uid: String,
+    val username: String = "",
+    val fullName: String = "",
+    val avatarUrl: String? = null,
+    val bio: String = "",
+    val profession: String = "",
+    val email: String = "",
+    val lastSeen: Long = 0L,
+    val isOnline: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "sync_state")
+data class SyncStateEntity(
+    @PrimaryKey val key: String,
+    val lastSyncedAt: Long = 0L
+)
+
 @Entity(tableName = "user_sessions", primaryKeys = ["deviceId"])
 data class UserSessionEntity(
     val deviceId: String,
