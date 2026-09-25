@@ -1432,17 +1432,14 @@ class BitChatRepository(val dao: BitChatDao) {
             val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
             val fetchedMessages = mutableListOf<SupabaseMessage>()
 
-            val res1 = SupabaseService.fetchUserMessages(myUid, limit = 200)
-            if (res1.isSuccess) res1.getOrNull()?.let { fetchedMessages.addAll(it) }
-
-            if (myUsername.isNotBlank() && myUsername != myUid) {
-                val res2 = SupabaseService.fetchUserMessages(myUsername, limit = 200)
-                if (res2.isSuccess) res2.getOrNull()?.let { fetchedMessages.addAll(it) }
-            }
-
-            if (myEmail.isNotBlank() && myEmail != myUid && myEmail != myUsername) {
-                val res3 = SupabaseService.fetchUserMessages(myEmail, limit = 200)
-                if (res3.isSuccess) res3.getOrNull()?.let { fetchedMessages.addAll(it) }
+            val historyRes = SupabaseService.fetchUserMessages(
+                userId = myUid,
+                username = myUsername.takeIf { it.isNotBlank() && it != myUid },
+                email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
+                limit = 200
+            )
+            if (historyRes.isSuccess) {
+                historyRes.getOrNull()?.let { fetchedMessages.addAll(it) }
             }
 
             val uniqueMessages = fetchedMessages.distinctBy { it.id }.sortedBy { it.timestamp }
