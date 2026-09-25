@@ -181,6 +181,7 @@ object FcmPushSender {
                     put("caller_name", callerName)
                     put("sender_name", callerName)
                     put("chat_id", chatId)
+                    put("call_id", chatId)
                     put("room_id", chatId)
                     put("call_type", callType)
                     put("sender_avatar", senderAvatar ?: "")
