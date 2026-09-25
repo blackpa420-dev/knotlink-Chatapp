@@ -825,50 +825,39 @@ object SupabaseService {
         try {
             val raw = username.trim().removePrefix("@").lowercase()
             if (raw.isBlank()) return@withContext Result.success(false)
+
             val base = raw.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
             val withSuffix = "$base.link"
-
-            // 1. Check all registered profiles in database
-            val allRes = fetchAllProfiles()
-            if (allRes.isSuccess) {
-                val list = allRes.getOrNull() ?: emptyList()
-                for (p in list) {
-                    if (excludeUid != null && (p.id.equals(excludeUid, ignoreCase = true) || (p.email.isNotBlank() && p.email.equals(excludeUid, ignoreCase = true)))) {
-                        continue
-                    }
-                    val remoteUser = p.username.trim().removePrefix("@").lowercase()
-                    val remoteBase = remoteUser.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-                    val remoteEmail = p.email.trim().lowercase()
-                    val remoteEmailPrefix = remoteEmail.substringBefore("@")
-                    if (remoteUser == raw || remoteBase == base || remoteUser == withSuffix || remoteBase == raw || remoteEmailPrefix == base || remoteEmail == raw) {
-                        return@withContext Result.success(true)
-                    }
-                }
-                return@withContext Result.success(false)
-            }
-
-            // 2. Fallback direct SQL query
             val encBase = java.net.URLEncoder.encode(base, "UTF-8")
             val encSuffix = java.net.URLEncoder.encode(withSuffix, "UTF-8")
             val encEmail = java.net.URLEncoder.encode("$base@%", "UTF-8")
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$encBase,username.ilike.$encSuffix,email.ilike.$encEmail)&select=id,username,email,full_name"
+
+            // Availability checks must query only matching rows, never download all profiles.
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
+                "?or=(username.ilike.$encBase,username.ilike.$encSuffix,email.ilike.$encEmail)" +
+                "&select=id,username,email&limit=20"
+
             val req = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .get()
                 .build()
+
             val resp = httpClient.newCall(req).execute()
             val str = resp.body?.string() ?: ""
-            if (resp.isSuccessful && str.isNotBlank()) {
-                val arr = JSONArray(str)
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    val id = obj.optString("id", "")
-                    if (excludeUid != null && id == excludeUid) continue
-                    return@withContext Result.success(true)
-                }
+            if (!resp.isSuccessful || str.isBlank()) {
+                return@withContext Result.success(false)
             }
+
+            val arr = JSONArray(str)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.optString("id", "")
+                if (excludeUid != null && id.equals(excludeUid, ignoreCase = true)) continue
+                return@withContext Result.success(true)
+            }
+
             Result.success(false)
         } catch (e: Exception) {
             Log.e(TAG, "Error in isUsernameTaken", e)
