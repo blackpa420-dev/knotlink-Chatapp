@@ -36,8 +36,8 @@ enum class CallQuality(
 }
 
 enum class NetworkStatus(val label: String, val colorHex: Long) {
-    EXCELLENT("Excellent Network (1080p HD)", 0xFF10B981),
-    GOOD("Good Network (720p HD)", 0xFF3B82F6),
+    EXCELLENT("Excellent Network (up to 2K)", 0xFF10B981),
+    GOOD("Good Network (720p+)", 0xFF3B82F6),
     MODERATE("Fair Network (480p)", 0xFFF59E0B),
     POOR("Poor Network (Adapting)", 0xFFEF4444)
 }
