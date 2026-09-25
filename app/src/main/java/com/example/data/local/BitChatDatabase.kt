@@ -27,6 +27,7 @@ import androidx.room.RoomDatabase
 abstract class BitChatDatabase : RoomDatabase() {
     abstract fun bitChatDao(): BitChatDao
 
+    companion object {
     private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL(
@@ -38,7 +39,6 @@ abstract class BitChatDatabase : RoomDatabase() {
         }
     }
 
-    companion object {
         @Volatile
         private var INSTANCE: BitChatDatabase? = null
 
