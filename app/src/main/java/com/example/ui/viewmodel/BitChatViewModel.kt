@@ -236,28 +236,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
-        // Initial background catch-up sync (runs once on startup as soon as user identity is ready)
-        viewModelScope.launch {
-            try {
-                repository.userIdentity
-                    .filterNotNull()
-                    .filter { it.supabaseUid.isNotBlank() || it.email.isNotBlank() || it.username.isNotBlank() }
-                    .take(1)
-                    .collect { identity ->
-                        val uid = identity.supabaseUid.ifBlank { identity.email }.ifBlank { identity.username }
-                        val username = identity.username
-                        if (uid.isNotBlank()) {
-                            repository.syncAllChatHistory(uid, username)
-                            val activeChat = _activeChatId.value
-                            if (!activeChat.isNullOrBlank()) {
-                                repository.syncMessagesForChat(activeChat)
-                            }
-                        }
-                    }
-            } catch (e: Throwable) {
-                Log.w("BitChat_Debug", "Initial sync warning: ${e.message}")
-            }
-        }
+        // Startup history sync is handled by the identity/Reatime initialization path above.
 
         // Listen for Incoming Messages via Supabase Realtime and sync with Room DB
         viewModelScope.launch {
