@@ -2010,6 +2010,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     callTimerJob = null
                     callConnectTimestamp = 0L
                     _activeCall.value = ActiveCallState(isActive = false)
+                    activeCallSessionId = null
+                    currentCallLogId = null
                 }
             } else {
                 callEngine.endCall()
@@ -2025,7 +2027,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun declineIncomingCall(call: SupabaseCallSession) {
         _incomingCallSession.value = null
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), call.callerName)
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), call.callerName, call.id)
         viewModelScope.launch {
             SupabaseService.updateCallSessionStatus(call.id, "DECLINED", endedAt = System.currentTimeMillis())
             try {
