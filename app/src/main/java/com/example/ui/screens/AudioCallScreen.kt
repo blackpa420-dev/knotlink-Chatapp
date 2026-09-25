@@ -236,13 +236,29 @@ fun AudioCallScreen(
                         .border(2.dp, Color.White.copy(alpha = 0.2f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = contactName.take(1),
-                        color = Color.White,
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    val avatarUrl = activeCall.contactAvatar
+                    if (avatarUrl.isNotBlank()) {
+                        coil.compose.SubcomposeAsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "Contact avatar",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            loading = {
+                                Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+                            },
+                            error = {
+                                Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+                            }
+                        )
+                    } else {
+                        Text(
+                            text = contactName.take(1).uppercase().ifBlank { "U" },
+                            color = Color.White,
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
 
