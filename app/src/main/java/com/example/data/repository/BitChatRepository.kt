@@ -473,23 +473,7 @@ class BitChatRepository(val dao: BitChatDao) {
             }
         }
 
-        // 4. Fallback search against all profiles
-        try {
-            val allProfs = SupabaseService.fetchAllProfiles().getOrNull() ?: emptyList()
-            for (cand in distinctCandidates) {
-                val candClean = cand.removePrefix("@").lowercase().removeSuffix(".link")
-                val matched = allProfs.find { p ->
-                    p.id.equals(cand, ignoreCase = true) ||
-                    p.username.trim().removePrefix("@").lowercase().removeSuffix(".link") == candClean ||
-                    p.email.trim().lowercase() == cand.lowercase() ||
-                    p.fullName.equals(cand, ignoreCase = true)
-                }
-                if (matched != null && matched.id.isNotBlank()) {
-                    return matched.id
-                }
-            }
-        } catch (_: Throwable) {}
-
+        // No table-wide profile scan. Specific UID/email/username lookups above are sufficient.
         return null
     }
 
