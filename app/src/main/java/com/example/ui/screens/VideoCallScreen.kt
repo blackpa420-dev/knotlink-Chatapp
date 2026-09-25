@@ -237,6 +237,17 @@ fun VideoCallScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val avatarUrl = activeCall.contactAvatar
+                    if (avatarUrl.isNotBlank()) {
+                        coil.compose.SubcomposeAsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "Contact avatar",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.size(96.dp).clip(CircleShape),
+                            error = { Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold) }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
                     Text(
                         text = contactName,
                         color = Color.White,
