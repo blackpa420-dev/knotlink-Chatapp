@@ -368,7 +368,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     _activeCall.value = ActiveCallState(isActive = false)
                     activeCallSessionId = null
                 } else if (engineState.isCallActive && engineState.isConnected) {
-                    startCallTimer(engineState.connectedAt)
+                    val connectedAt = engineState.connectedAt ?: System.currentTimeMillis()
+                    if (activeCallSessionId != null && _activeCall.value.isActive) {
+                        if (callConnectTimestamp != connectedAt) {
+                            callConnectTimestamp = connectedAt
+                            viewModelScope.launch {
+                                SupabaseService.updateCallSessionStatus(activeCallSessionId!!, "CONNECTED", connectedAt = connectedAt)
+                            }
+                        }
+                    }
+                    startCallTimer(connectedAt)
                 }
             }
         }
@@ -1904,6 +1913,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isConnected = true,
             contactId = call.callerId,
             contactName = callerName,
+            contactAvatar = call.callerAvatar ?: "",
             callType = call.callType,
             secondsElapsed = 0,
             isMuted = false,
@@ -1942,16 +1952,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _activeCall.value = _activeCall.value.copy(isConnected = true, callStatus = "CONNECTED")
         callTimerJob?.cancel()
         callTimerJob = viewModelScope.launch {
-            var elapsed = 0
-            if (callConnectTimestamp > 0L) {
-                val calculated = maxOf(0L, (System.currentTimeMillis() - callConnectTimestamp) / 1000L).toInt()
-                // If the calculation yields something reasonable (not affected by massive clock-drift/mismatch), use it as baseline
-                elapsed = if (calculated in 0..15) calculated else 0
-            }
-            while (true) {
+            while (isActive && _activeCall.value.isActive) {
+                val elapsed = maxOf(0L, (System.currentTimeMillis() - callConnectTimestamp) / 1000L).toInt()
                 _activeCall.value = _activeCall.value.copy(secondsElapsed = elapsed)
                 delay(1000)
-                elapsed++
             }
         }
     }
@@ -1995,6 +1999,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 callTimerJob = null
                 callConnectTimestamp = 0L
                 _activeCall.value = ActiveCallState(isActive = false)
+                activeCallSessionId = null
+                currentCallLogId = null
             }
         }
     }
@@ -2032,6 +2038,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun startCall(contactId: String, contactName: String, callType: String = "AUDIO") {
         callTimerJob?.cancel()
+        callConnectTimestamp = 0L
         val isVideo = callType.equals("VIDEO", ignoreCase = true)
         val callId = UUID.randomUUID().toString()
         activeCallSessionId = callId
@@ -2040,6 +2047,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isActive = true,
             contactId = contactId,
             contactName = contactName,
+            contactAvatar = "",
             callType = callType,
             secondsElapsed = 0,
             isMuted = false,
@@ -2052,6 +2060,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             val myUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
             val myName = currentIdentity?.fullName?.ifBlank { currentIdentity.username } ?: "BitChat User"
 
+            var resolvedAvatar = currentIdentity?.avatarPath ?: ""
             val resolvedReceiverId = if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
                 val chat = repository.getChatById(contactId)
                 val uids = chat?.participantUids?.split(",")?.map { it.trim() }?.filter { it != myUid && it.isNotBlank() }
@@ -2060,8 +2069,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 val prof = SupabaseService.getProfile(contactId).getOrNull()
                     ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
                     ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
+                if (prof != null) resolvedAvatar = prof.avatarUrl ?: resolvedAvatar
                 prof?.id?.ifBlank { contactId } ?: contactId
             }
+
+            _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
 
             // Create initial Call Session row in Supabase database FIRST
             SupabaseService.createCallSession(
@@ -2740,6 +2752,7 @@ data class ActiveCallState(
     val isConnected: Boolean = false,
     val contactId: String = "",
     val contactName: String = "Alex Rivera",
+    val contactAvatar: String = "",
     val callType: String = "AUDIO",
     val secondsElapsed: Int = 0,
     val isMuted: Boolean = false,
