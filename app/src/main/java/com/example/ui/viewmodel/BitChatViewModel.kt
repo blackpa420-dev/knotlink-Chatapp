@@ -294,12 +294,26 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     // ONLY show notification if the message was actually addressed to me and not sent by me
                     if (!isFromMe && handledEntity.id > 0L && activeChat != supaMsg.chatId && isFreshMessage) {
                         try {
+                            val senderDisplayName = handledEntity.senderName.ifBlank { supaMsg.senderName }
+                            var senderAvatarBitmap: android.graphics.Bitmap? = null
+                            try {
+                                val profile = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
+                                    ?: SupabaseService.getProfileByUsername(supaMsg.senderId).getOrNull()
+                                val avatarUrl = profile?.avatarUrl
+                                if (!avatarUrl.isNullOrBlank()) {
+                                    val connection = java.net.URL(avatarUrl).openConnection() as java.net.HttpURLConnection
+                                    connection.connectTimeout = 2500
+                                    connection.readTimeout = 2500
+                                    connection.connect()
+                                    senderAvatarBitmap = android.graphics.BitmapFactory.decodeStream(connection.inputStream)
+                                }
+                            } catch (_: Throwable) { }
                             com.example.util.NotificationHelper.showIncomingMessageNotification(
                                 context = application,
-                                senderName = handledEntity.senderName.ifBlank { supaMsg.senderName },
+                                senderName = senderDisplayName,
                                 text = handledEntity.text,
                                 chatId = supaMsg.chatId,
-                                avatarBitmap = null,
+                                avatarBitmap = senderAvatarBitmap,
                                 serverMessageId = supaMsg.id
                             )
                         } catch (e: Throwable) {
@@ -381,6 +395,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             try {
                 SupabaseRealtimeManager.callSessionUpdates.collect { update ->
                     val currentSession = _incomingCallSession.value
+                    val isCurrentActiveSession = activeCallSessionId == null || update.id == activeCallSessionId
+                    if (!isCurrentActiveSession && _activeCall.value.isActive) return@collect
                     if (update.status == "DECLINED") {
                         handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = true)
                     } else if (update.status == "ENDED" || update.status == "CANCELLED") {
@@ -1903,31 +1919,34 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private fun startActiveCallStatusSync(callId: String) {
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = viewModelScope.launch {
-            while (_activeCall.value.isActive) {
-                // If call is already connected, WebRTC and WebSockets handle state. Stop polling!
-                if (_activeCall.value.isConnected) {
-                    break
-                }
+            // Realtime is primary. This low-frequency REST check is a safety net
+            // only while this specific call is active. It must continue after
+            // CONNECTED because a missed Realtime event otherwise leaves the
+            // remote hang-up stuck on this device.
+            while (_activeCall.value.isActive && activeCallSessionId == callId) {
                 try {
                     val sessionRes = SupabaseService.getCallSession(callId)
                     if (sessionRes.isSuccess) {
                         val session = sessionRes.getOrNull()
-                        if (session != null) {
-                            val status = session.status.uppercase()
-                            if (status == "CONNECTED") {
-                                val connTime = session.connectedAt ?: (if (callConnectTimestamp > 0) callConnectTimestamp else System.currentTimeMillis())
-                                if (!_activeCall.value.isConnected) {
-                                    startCallTimer(connTime)
-                                } else if (callConnectTimestamp != connTime && connTime > 0) {
-                                    callConnectTimestamp = connTime
+                        if (session != null && session.id == callId) {
+                            when (session.status.uppercase()) {
+                                "CONNECTED" -> {
+                                    val connTime = session.connectedAt
+                                        ?: (if (callConnectTimestamp > 0) callConnectTimestamp else System.currentTimeMillis())
+                                    if (!_activeCall.value.isConnected) {
+                                        startCallTimer(connTime)
+                                    } else if (callConnectTimestamp != connTime && connTime > 0) {
+                                        callConnectTimestamp = connTime
+                                    }
                                 }
-                                break
-                            } else if (status == "DECLINED") {
-                                handleRemoteCallEnded(session.callerName, isDeclined = true)
-                                break
-                            } else if (status == "ENDED" || status == "CANCELLED") {
-                                handleRemoteCallEnded(session.callerName, isDeclined = false)
-                                break
+                                "DECLINED" -> {
+                                    handleRemoteCallEnded(session.callerName, isDeclined = true)
+                                    break
+                                }
+                                "ENDED", "CANCELLED" -> {
+                                    handleRemoteCallEnded(session.callerName, isDeclined = false)
+                                    break
+                                }
                             }
                         }
                     }
