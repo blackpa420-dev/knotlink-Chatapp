@@ -795,13 +795,6 @@ object SupabaseService {
 
     suspend fun fetchAllProfiles(): Result<List<SupabaseProfile>> = withContext(Dispatchers.IO) {
         try {
-            val now = System.currentTimeMillis()
-            val cached = profileCache.values
-                .filter { now - it.cachedAt <= PROFILE_CACHE_TTL_MS }
-                .mapNotNull { it.profile }
-                .distinctBy { it.id }
-            if (cached.isNotEmpty()) return@withContext Result.success(cached)
-
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?select=*&limit=300"
             val request = Request.Builder()
                 .url(url)
