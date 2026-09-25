@@ -631,7 +631,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
 
     private fun processSessionUpdate(session: com.example.data.supabase.SupabaseCallSession, callId: String, isCaller: Boolean) {
         // 1. Check if call was ended or declined
-        if (session.status == "ENDED" || session.status == "DECLINED") {
+        if (session.status == "ENDED" || session.status == "DECLINED" || session.status == "CANCELLED") {
             Log.d(TAG, "Remote party ended or declined the call")
             endCall(notifyRemote = false)
             return
