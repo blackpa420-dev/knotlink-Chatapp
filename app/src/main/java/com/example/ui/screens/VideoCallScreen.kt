@@ -133,6 +133,8 @@ fun VideoCallScreen(
         }
     }
 
+    val secondsElapsed = activeCall.secondsElapsed
+
     // Auto-exit if call terminates remotely
     LaunchedEffect(activeCall.isActive, callEngineState.isCallActive) {
         if ((!activeCall.isActive || !callEngineState.isCallActive) && secondsElapsed > 1) {
@@ -140,7 +142,6 @@ fun VideoCallScreen(
         }
     }
 
-    val secondsElapsed = activeCall.secondsElapsed
     val minutes = secondsElapsed / 60
     val seconds = secondsElapsed % 60
     val timeFormatted = String.format("%02d:%02d", minutes, seconds)
