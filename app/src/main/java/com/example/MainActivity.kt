@@ -181,10 +181,10 @@ class MainActivity : FragmentActivity() {
 
     val vm = bitChatViewModel ?: return
     if (actionAcceptCall) {
-      val currentSession = vm.incomingCallSession.value
-      if (currentSession != null) {
-        vm.acceptIncomingCall(currentSession)
-      } else {
+      vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = true)
+    } else if (actionIncomingCallScreen) {
+      vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = false)
+    } else {
         val finalCallId = callId.ifBlank { "call_${callerName.hashCode()}" }
         val finalCallerId = callerId.ifBlank { "caller_${callerName.hashCode()}" }
         val session = com.example.data.supabase.SupabaseCallSession(
