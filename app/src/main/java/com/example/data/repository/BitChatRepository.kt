@@ -99,7 +99,7 @@ class BitChatRepository(val dao: BitChatDao) {
 
     private val historySyncMutex = kotlinx.coroutines.sync.Mutex()
     private val lastHistorySyncAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private const val HISTORY_SYNC_TTL_MS = 30_000L
+    private val HISTORY_SYNC_TTL_MS = 30_000L
 
     val userIdentity: Flow<UserIdentityEntity?> = dao.getUserIdentity()
     val allChats: Flow<List<ChatEntity>> = dao.getAllChats()
