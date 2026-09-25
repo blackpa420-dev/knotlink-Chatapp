@@ -5,6 +5,8 @@ import android.net.Uri
 import android.util.Log
 import com.example.data.local.BitChatDao
 import com.example.data.local.BlockedUserEntity
+import com.example.data.local.CachedProfileEntity
+import com.example.data.local.SyncStateEntity
 import com.example.data.local.ChatEntity
 import com.example.data.local.ContactEntity
 import com.example.data.local.GroupMemberEntity
@@ -237,6 +239,47 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.clearMessagesForChat(chatId)
     }
 
+    private suspend fun getLocalProfile(identifier: String): SupabaseProfile? {
+        val key = identifier.trim()
+        if (key.isBlank()) return null
+        val cached = when {
+            key.matches(Regex("^[0-9a-fA-F-]{36}$")) -> dao.getCachedProfile(key)
+            key.contains("@") -> dao.getCachedProfileByEmail(key.lowercase())
+            else -> dao.getCachedProfileByUsername(key.removePrefix("@")) ?: dao.getCachedProfile(key)
+        }
+        return cached?.let {
+            SupabaseProfile(
+                id = it.uid,
+                username = it.username,
+                fullName = it.fullName,
+                avatarUrl = it.avatarUrl,
+                bio = it.bio,
+                profession = it.profession,
+                email = it.email,
+                lastSeen = it.lastSeen,
+                isOnline = it.isOnline
+            )
+        }
+    }
+
+    private suspend fun cacheProfileLocally(profile: SupabaseProfile?) {
+        if (profile == null || profile.id.isBlank()) return
+        dao.upsertCachedProfile(
+            CachedProfileEntity(
+                uid = profile.id,
+                username = profile.username,
+                fullName = profile.fullName,
+                avatarUrl = profile.avatarUrl,
+                bio = profile.bio,
+                profession = profile.profession,
+                email = profile.email,
+                lastSeen = profile.lastSeen,
+                isOnline = profile.isOnline,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     suspend fun saveUserIdentity(identity: UserIdentityEntity) {
         val uid = if (identity.supabaseUid.isNotBlank() && isValidUuid(identity.supabaseUid)) {
             identity.supabaseUid
@@ -305,6 +348,8 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.clearAllMessages()
         dao.clearBlockedUsers()
         dao.clearUserSessions()
+        dao.clearCachedProfiles()
+        dao.clearSyncStates()
     }
 
     suspend fun savePhoneNumber(phoneNumber: String) {
@@ -460,20 +505,24 @@ class BitChatRepository(val dao: BitChatDao) {
             !it.equals(myEmail, ignoreCase = true)
         }
 
-        // 3. For each candidate, check UUID regex or query Supabase Profile
+        // 3. Prefer local profile cache; hit Supabase only when cache misses
         for (cand in distinctCandidates) {
             if (cand.matches(uuidRegex)) {
+                val cached = getLocalProfile(cand)
+                if (cached?.id?.matches(uuidRegex) == true) return cached.id
                 return cand
             }
-            if (cand.contains("@") && cand.contains(".")) {
-                val prof = SupabaseService.getProfileByEmail(cand).getOrNull()
-                if (prof != null && prof.id.isNotBlank() && prof.id.matches(uuidRegex)) {
-                    return prof.id
-                }
+            val cached = getLocalProfile(cand)
+            if (cached?.id?.matches(uuidRegex) == true) return cached.id
+
+            val prof = if (cand.contains("@") && cand.contains(".")) {
+                SupabaseService.getProfileByEmail(cand).getOrNull()
+            } else {
+                SupabaseService.getProfile(cand).getOrNull()
+                    ?: SupabaseService.getProfileByUsername(cand).getOrNull()
             }
-            val prof = SupabaseService.getProfile(cand).getOrNull()
-                ?: SupabaseService.getProfileByUsername(cand).getOrNull()
             if (prof != null && prof.id.isNotBlank() && prof.id.matches(uuidRegex)) {
+                cacheProfileLocally(prof)
                 return prof.id
             }
         }
@@ -1429,39 +1478,51 @@ class BitChatRepository(val dao: BitChatDao) {
             val myEmail = currentIdentity?.email?.trim()?.lowercase() ?: ""
             val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
             val fetchedMessages = mutableListOf<SupabaseMessage>()
+            val syncKey = "user_history:$myUid"
+            val previousSync = dao.getSyncState(syncKey)?.lastSyncedAt ?: 0L
 
-            val historyRes = SupabaseService.fetchUserMessages(
-                userId = myUid,
-                username = myUsername.takeIf { it.isNotBlank() && it != myUid },
-                email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
-                limit = 200
-            )
-            if (historyRes.isSuccess) {
-                historyRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+            val historyRes = if (previousSync > 0L) {
+                SupabaseService.fetchUserMessagesSince(
+                    userId = myUid,
+                    username = myUsername.takeIf { it.isNotBlank() && it != myUid },
+                    email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
+                    sinceTimestamp = previousSync,
+                    limit = 200
+                )
+            } else {
+                SupabaseService.fetchUserMessages(
+                    userId = myUid,
+                    username = myUsername.takeIf { it.isNotBlank() && it != myUid },
+                    email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
+                    limit = 200
+                )
             }
+            if (historyRes.isSuccess) historyRes.getOrNull()?.let { fetchedMessages.addAll(it) }
 
             val uniqueMessages = fetchedMessages.distinctBy { it.id }.sortedBy { it.timestamp }
             val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
 
-            // Pre-fetch all profiles from Supabase to resolve names and avatars in one fast operation
+            // Build the profile map from Room first. Remote lookup is only used for cache misses.
             val profilesMap = mutableMapOf<String, SupabaseProfile>()
-            try {
-                val allProfRes = SupabaseService.fetchAllProfiles()
-                if (allProfRes.isSuccess) {
-                    allProfRes.getOrNull()?.forEach { prof ->
-                        if (prof.id.isNotBlank()) profilesMap[prof.id.lowercase()] = prof
-                        if (prof.username.isNotBlank()) {
-                            val u = prof.username.lowercase()
-                            profilesMap[u] = prof
-                            profilesMap[u.removePrefix("@")] = prof
-                            profilesMap[u.removePrefix("@").removeSuffix(".link")] = prof
-                        }
-                        if (prof.email.isNotBlank()) {
-                            profilesMap[prof.email.lowercase()] = prof
-                        }
-                    }
+            dao.getAllCachedProfiles().forEach { cached ->
+                val p = SupabaseProfile(
+                    id = cached.uid,
+                    username = cached.username,
+                    fullName = cached.fullName,
+                    avatarUrl = cached.avatarUrl,
+                    bio = cached.bio,
+                    profession = cached.profession,
+                    email = cached.email,
+                    lastSeen = cached.lastSeen,
+                    isOnline = cached.isOnline
+                )
+                profilesMap[cached.uid.lowercase()] = p
+                if (cached.username.isNotBlank()) {
+                    profilesMap[cached.username.lowercase()] = p
+                    profilesMap[cached.username.lowercase().removePrefix("@").removeSuffix(".link")] = p
                 }
-            } catch (_: Exception) {}
+                if (cached.email.isNotBlank()) profilesMap[cached.email.lowercase()] = p
+            }
 
             val localContacts = dao.getAllContactsList()
             val chatsToUpdate = mutableMapOf<String, ChatEntity>()
@@ -1619,6 +1680,7 @@ class BitChatRepository(val dao: BitChatDao) {
                         val singleProf = SupabaseService.getProfile(opponentUid).getOrNull()
                             ?: SupabaseService.getProfileByUsername(opponentUid).getOrNull()
                         if (singleProf != null) {
+                            cacheProfileLocally(singleProf)
                             profilesMap[singleProf.id.lowercase()] = singleProf
                             if (singleProf.username.isNotBlank()) profilesMap[singleProf.username.lowercase()] = singleProf
                             if (singleProf.fullName.isNotBlank()) resolvedOpponentName = singleProf.fullName
@@ -1696,6 +1758,11 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.insertChats(chatsToUpdate.values.toList())
             }
 
+            val latestRemoteTimestamp = uniqueMessages.maxOfOrNull { it.timestamp } ?: previousSync
+            if (latestRemoteTimestamp > previousSync) {
+                dao.upsertSyncState(SyncStateEntity(syncKey, latestRemoteTimestamp))
+            }
+
             // Run deduplication again after history sync
             deduplicateCopyChats()
             } catch (e: Exception) {
@@ -1707,20 +1774,26 @@ class BitChatRepository(val dao: BitChatDao) {
     suspend fun syncMessagesForChat(chatId: String) = withContext(Dispatchers.IO) {
         if (chatId.isBlank()) return@withContext
         try {
-            val currentIdentity = dao.getUserIdentity().firstOrNull() ?: return@withContext
-            val myUid = currentIdentity.supabaseUid.ifBlank { currentIdentity.email }
-            val myUsername = currentIdentity.username
+            dao.getUserIdentity().firstOrNull() ?: return@withContext
+            val latestLocal = dao.getLatestLocalMessageTimestamp(chatId) ?: 0L
 
-            val res = SupabaseService.fetchMessages(chatId, limit = 100)
+            // Room is the first source. Network only fetches messages newer than the local cache.
+            val res = if (latestLocal > 0L) {
+                SupabaseService.fetchMessagesSince(chatId, latestLocal, limit = 100)
+            } else {
+                SupabaseService.fetchMessages(chatId, limit = 100)
+            }
+
             if (res.isSuccess) {
-                val messages = res.getOrNull() ?: emptyList()
-                for (supaMsg in messages) {
-                    handleIncomingMessage(supaMsg, chatId)
+                val messages = res.getOrNull().orEmpty()
+                for (supaMsg in messages) handleIncomingMessage(supaMsg, chatId)
+                val newest = messages.maxOfOrNull { it.timestamp } ?: latestLocal
+                if (newest > latestLocal) {
+                    dao.upsertSyncState(SyncStateEntity("chat:$chatId", newest))
                 }
             }
-            // Live updates are delivered by Realtime; do not start another full-history sync here.
-        } catch (e: Exception) {
-            Log.w("BitChatRepo", "syncMessagesForChat error: ${e.message}")
+        } catch (ex: Exception) {
+            Log.w("BitChatRepo", "syncMessagesForChat error: " + ex.message)
         }
     }
 
