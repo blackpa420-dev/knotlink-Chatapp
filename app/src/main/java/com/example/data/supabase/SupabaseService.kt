@@ -24,6 +24,30 @@ object SupabaseService {
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val callCandidateMutexes = ConcurrentHashMap<String, Mutex>()
     private val localCallCandidates = ConcurrentHashMap<String, JSONArray>()
+    private data class ProfileCacheEntry(val profile: SupabaseProfile?, val cachedAt: Long)
+    private const val PROFILE_CACHE_TTL_MS = 60_000L
+    private val profileCache = ConcurrentHashMap<String, ProfileCacheEntry>()
+
+    private fun getCachedProfile(key: String): SupabaseProfile? {
+        val normalized = key.trim().lowercase()
+        if (normalized.isBlank()) return null
+        val entry = profileCache[normalized] ?: return null
+        if (System.currentTimeMillis() - entry.cachedAt > PROFILE_CACHE_TTL_MS) {
+            profileCache.remove(normalized)
+            return null
+        }
+        return entry.profile
+    }
+
+    private fun cacheProfile(profile: SupabaseProfile?) {
+        if (profile == null) return
+        val now = System.currentTimeMillis()
+        val keys = listOf(profile.id, profile.username, profile.email)
+        for (key in keys) {
+            val normalized = key.trim().lowercase()
+            if (normalized.isNotBlank()) profileCache[normalized] = ProfileCacheEntry(profile, now)
+        }
+    }
 
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -383,7 +407,9 @@ object SupabaseService {
 
             val jsonArray = JSONArray(resStr)
             if (jsonArray.length() > 0) {
-                Result.success(SupabaseProfile.fromJson(jsonArray.getJSONObject(0)))
+                val profile = SupabaseProfile.fromJson(jsonArray.getJSONObject(0))
+                cacheProfile(profile)
+                Result.success(profile)
             } else {
                 Result.success(profile)
             }
@@ -397,6 +423,8 @@ object SupabaseService {
         try {
             val raw = userId.trim()
             if (raw.isBlank()) return@withContext Result.success(null)
+
+            getCachedProfile(raw)?.let { return@withContext Result.success(it) }
 
             val isUuid = raw.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
             if (!isUuid) {
@@ -512,22 +540,13 @@ object SupabaseService {
             val withSuffix = "$base.link"
             if (genericPlaceholders.contains(base)) return@withContext Result.success(null)
 
-            // 1. Check in all profiles cache first for instant reliable exact match
-            val allRes = fetchAllProfiles()
-            if (allRes.isSuccess) {
-                val list = allRes.getOrNull() ?: emptyList()
-                val match = list.firstOrNull { p ->
-                    val pId = p.id.trim().lowercase()
-                    val u = p.username.trim().removePrefix("@").lowercase().removeSuffix(".link")
-                    val e = p.email.trim().lowercase()
-                    pId == raw || u == base || u == raw || e == raw || p.username.equals(raw, ignoreCase = true) || p.username.equals(withSuffix, ignoreCase = true)
-                }
-                if (match != null) {
-                    return@withContext Result.success(match)
-                }
-            }
+            // Never download the entire profiles table for a single-user lookup.
+            // Use the indexed/specific REST query first; cache only avoids repeated identical lookups.
+            getCachedProfile(raw)?.let { return@withContext Result.success(it) }
+            getCachedProfile(base)?.let { return@withContext Result.success(it) }
+            getCachedProfile(withSuffix)?.let { return@withContext Result.success(it) }
 
-            // 2. Query by username or email
+            // Query by username or email
             val queryTerms = listOf(base, withSuffix, raw).distinct()
             for (term in queryTerms) {
                 val enc = java.net.URLEncoder.encode(term, "UTF-8")
@@ -544,7 +563,9 @@ object SupabaseService {
                 if (response.isSuccessful && resStr.isNotBlank()) {
                     val arr = JSONArray(resStr)
                     if (arr.length() > 0) {
-                        return@withContext Result.success(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                        cacheProfile(profile)
+                        return@withContext Result.success(profile)
                     }
                 }
             }
@@ -564,7 +585,9 @@ object SupabaseService {
                 if (idResp.isSuccessful && idBody.isNotBlank()) {
                     val arr = JSONArray(idBody)
                     if (arr.length() > 0) {
-                        return@withContext Result.success(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                        cacheProfile(profile)
+                        return@withContext Result.success(profile)
                     }
                 }
             }
@@ -770,6 +793,13 @@ object SupabaseService {
 
     suspend fun fetchAllProfiles(): Result<List<SupabaseProfile>> = withContext(Dispatchers.IO) {
         try {
+            val now = System.currentTimeMillis()
+            val cached = profileCache.values
+                .filter { now - it.cachedAt <= PROFILE_CACHE_TTL_MS }
+                .mapNotNull { it.profile }
+                .distinctBy { it.id }
+            if (cached.isNotEmpty()) return@withContext Result.success(cached)
+
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?select=*&limit=300"
             val request = Request.Builder()
                 .url(url)
@@ -783,7 +813,9 @@ object SupabaseService {
                 val arr = JSONArray(resStr)
                 val list = mutableListOf<SupabaseProfile>()
                 for (i in 0 until arr.length()) {
-                    list.add(SupabaseProfile.fromJson(arr.getJSONObject(i)))
+                    val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
+                    list.add(profile)
+                    cacheProfile(profile)
                 }
                 Result.success(list)
             } else {
@@ -1182,54 +1214,18 @@ object SupabaseService {
     // TYPING INDICATOR API
     // ==========================================
 
+    /**
+     * Typing is transported through Supabase Realtime broadcast.
+     * Keep this method for source compatibility, but never persist high-frequency
+     * typing state in Postgres because that creates unnecessary REST traffic.
+     */
     suspend fun sendTypingStatus(
         chatId: String,
         userId: String,
         userName: String,
         isTyping: Boolean
     ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_TYPING_STATUS}"
-            val typing = SupabaseTyping(chatId, userId, userName, isTyping, System.currentTimeMillis())
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates")
-                .post(typing.toJson().toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                return@withContext Result.success(true)
-            }
-
-            // Fallback: Delete existing record then insert
-            val deleteUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_TYPING_STATUS}?chat_id=eq.$chatId&user_id=eq.$userId"
-            val delRequest = Request.Builder()
-                .url(deleteUrl)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .delete()
-                .build()
-            httpClient.newCall(delRequest).execute()
-
-            val postRequest = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .post(typing.toJson().toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val postResp = httpClient.newCall(postRequest).execute()
-            Result.success(postResp.isSuccessful)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in sendTypingStatus", e)
-            Result.failure(e)
-        }
+        Result.success(true)
     }
 
     suspend fun getTypingUsers(chatId: String): Result<List<SupabaseTyping>> = withContext(Dispatchers.IO) {
