@@ -368,63 +368,42 @@ object SupabaseRealtimeManager {
     private var loopCounter = 0L
 
     private fun startSyncLoop() {
-        syncJob?.cancel()
+        if (syncJob?.isActive == true) return
         syncJob = scope.launch {
             while (isActive) {
                 try {
                     val uid = currentUserId
                     val uname = currentUsername
-                    loopCounter++
-
-                    if (uid != null && uid.isNotBlank()) {
-                        // 1. Update current user presence heartbeat every 15 seconds (12s-15s throttled per AGENTS.md)
+                    if (!uid.isNullOrBlank()) {
                         SupabaseService.updatePresence(uid, true)
 
-                        // 2. Fetch full presence map only every 60 seconds (loopCounter % 4 == 0) to conserve egress
                         if (_userPresenceMap.value.isEmpty() || loopCounter % 4L == 0L) {
                             val presenceRes = SupabaseService.getAllUserPresence()
                             if (presenceRes.isSuccess) {
-                                val map = presenceRes.getOrNull()
-                                if (map != null && map.isNotEmpty()) {
-                                    _userPresenceMap.value = map
-                                }
+                                _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
                             }
                         }
 
-                        // 3. Fallback check for incoming calls ONLY if WebSocket is offline/null
                         if (webSocket == null) {
-                            val callRes = SupabaseService.getIncomingCalls(uid)
-                            if (callRes.isSuccess) {
-                                callRes.getOrNull()?.forEach { call ->
-                                    _incomingCalls.emit(call)
-                                }
-                            }
-                        }
-
-                        // 4. Fetch recent messages ONLY when WebSocket is offline OR every 60 seconds (throttled for zero egress)
-                        if (webSocket == null || loopCounter % 4L == 0L) {
-                            val userMsgRes = SupabaseService.fetchUserMessages(
+                            SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
+                            SupabaseService.fetchUserMessages(
                                 userId = uid,
                                 username = uname,
                                 email = currentUserEmail,
                                 limit = 15
-                            )
-                            if (userMsgRes.isSuccess) {
-                                userMsgRes.getOrNull()?.forEach { msg ->
-                                    handlePolledMessage(msg, uid, uname)
-                                }
+                            ).getOrNull()?.forEach { msg ->
+                                handlePolledMessage(msg, uid, uname)
                             }
                         }
                     }
+                    loopCounter++
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in sync loop: ${e.message}")
+                    Log.e(TAG, "Error in sync loop: " + e.message)
                 }
-                // Throttled to 15 seconds to strictly conserve Supabase egress and bandwidth
-                delay(15000L)
+                delay(60_000L)
             }
         }
     }
-
     private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
         val cleanText = msg.text.trim().take(40)
         val timeBucket = msg.timestamp / 10000L // 10-second window
