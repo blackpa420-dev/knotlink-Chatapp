@@ -498,7 +498,12 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         localAudioTrack?.let { pc?.addTrack(it, streamIds) }
         localVideoTrackInstance?.let { pc?.addTrack(it, streamIds) }
 
-        // addTrack() above creates Unified Plan transceivers/senders. Avoid duplicate transceivers; duplicate m-lines can cause blank remote video.\n        try {\n            configureVideoSenderBitrate(_engineState.value.currentQuality)\n        } catch (e: Throwable) {\n            Log.w(TAG, "Video sender configuration warning: ${e.message}")\n        }
+        // addTrack() above creates Unified Plan transceivers/senders. Avoid duplicate transceivers; duplicate m-lines can cause blank remote video.
+        try {
+            configureVideoSenderBitrate(_engineState.value.currentQuality)
+        } catch (e: Throwable) {
+            Log.w(TAG, "Video sender configuration warning: ${e.message}")
+        }
     }
 
     private fun handleRemoteVideo(vTrack: VideoTrack) {
