@@ -39,6 +39,10 @@ data class UserIdentityEntity(
 ) {
     val publicId: String
         get() = if (username.isNotBlank()) username.removePrefix("@") else "usr_8921"
+
+    val qrIdentifier: String
+        get() = supabaseUid.trim().takeIf { it.isNotBlank() && !it.equals("user_me", ignoreCase = true) }
+            ?: username.trim().removePrefix("@")
 }
 
 @Entity(tableName = "contacts")

@@ -20,10 +20,7 @@ class NotificationMuteReceiver : BroadcastReceiver() {
         val chatId = intent.getStringExtra("chat_id") ?: return
         val appContext = context.applicationContext
 
-        // 1. Persist mute state immediately in SharedPreferences for background/terminated checks
-        NotificationHelper.setChatMuted(appContext, chatId, true)
-
-        // 2. Dismiss active notification for this chat immediately
+        // 1. Dismiss active notification for this chat immediately
         try {
             val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             manager?.cancel(Math.abs(chatId.hashCode()))

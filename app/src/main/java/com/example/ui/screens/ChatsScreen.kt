@@ -1366,6 +1366,129 @@ fun ChatsScreen(
                     }
                 )
             }
+
+            if (showHistoryRestore || showHistoryRestoreError) {
+                val restorePulse = rememberInfiniteTransition(label = "history_restore")
+                val restoreScale by restorePulse.animateFloat(
+                    initialValue = 0.92f,
+                    targetValue = 1.06f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1100, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "history_restore_scale"
+                )
+                val restoreGlow by restorePulse.animateFloat(
+                    initialValue = 0.35f,
+                    targetValue = 0.85f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1100, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "history_restore_glow"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    if (isNightMode) Color(0xFF080B12) else Color(0xFFF8FAFC),
+                                    if (isNightMode) Color(0xFF0D1728) else Color(0xFFEFF6FF)
+                                )
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(horizontal = 32.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(96.dp)
+                                .scale(restoreScale)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.radialGradient(
+                                        listOf(
+                                            Color(0xFF38BDF8).copy(alpha = restoreGlow),
+                                            Color(0xFF2563EB).copy(alpha = restoreGlow * 0.35f),
+                                            Color.Transparent
+                                        )
+                                    )
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(62.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isNightMode) Color(0xFF111827) else Color.White)
+                                    .border(
+                                        1.5.dp,
+                                        Color(0xFF38BDF8).copy(alpha = 0.75f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (showHistoryRestore) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(28.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = Color(0xFF38BDF8)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = Color(0xFF38BDF8),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(26.dp))
+
+                        Text(
+                            text = if (showHistoryRestore) "Restoring your chats…" else "Couldn't restore chats",
+                            color = if (isNightMode) Color.White else Color(0xFF0F172A),
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = if (showHistoryRestore)
+                                "Syncing your conversations securely. This may take a moment."
+                            else
+                                "Check your connection and try again.",
+                            color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontSize = 14.sp,
+                            lineHeight = 21.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+
+                        if (showHistoryRestoreError) {
+                            Spacer(modifier = Modifier.height(18.dp))
+                            Button(
+                                onClick = { viewModel.retryInitialHistorySync() },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2563EB),
+                                    contentColor = Color.White
+                                )
+                            ) {
+                                Text("Try Again", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1865,129 +1988,6 @@ fun SwipeableChatItemRow(
                                 )
                             }
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showHistoryRestore || showHistoryRestoreError) {
-        val restorePulse = rememberInfiniteTransition(label = "history_restore")
-        val restoreScale by restorePulse.animateFloat(
-            initialValue = 0.92f,
-            targetValue = 1.06f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1100, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "history_restore_scale"
-        )
-        val restoreGlow by restorePulse.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 0.85f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1100, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "history_restore_glow"
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            if (isNightMode) Color(0xFF080B12) else Color(0xFFF8FAFC),
-                            if (isNightMode) Color(0xFF0D1728) else Color(0xFFEFF6FF)
-                        )
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier.padding(horizontal = 32.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .scale(restoreScale)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    Color(0xFF38BDF8).copy(alpha = restoreGlow),
-                                    Color(0xFF2563EB).copy(alpha = restoreGlow * 0.35f),
-                                    Color.Transparent
-                                )
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(62.dp)
-                            .clip(CircleShape)
-                            .background(if (isNightMode) Color(0xFF111827) else Color.White)
-                            .border(
-                                1.5.dp,
-                                Color(0xFF38BDF8).copy(alpha = 0.75f),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (showHistoryRestore) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(28.dp),
-                                strokeWidth = 2.5.dp,
-                                color = Color(0xFF38BDF8)
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(26.dp))
-
-                Text(
-                    text = if (showHistoryRestore) "Restoring your chats…" else "Couldn't restore chats",
-                    color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = if (showHistoryRestore)
-                        "Syncing your conversations securely. This may take a moment."
-                    else
-                        "Check your connection and try again.",
-                    color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
-                    fontSize = 14.sp,
-                    lineHeight = 21.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-
-                if (showHistoryRestoreError) {
-                    Spacer(modifier = Modifier.height(18.dp))
-                    Button(
-                        onClick = { viewModel.retryInitialHistorySync() },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2563EB),
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text("Try Again", fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
