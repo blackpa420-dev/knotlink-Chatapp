@@ -1843,6 +1843,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _incomingCallSession.value = session
     }
 
+    fun handleIncomingCallIntent(callId: String, callerId: String, callerName: String, callType: String, autoAccept: Boolean) {
+        viewModelScope.launch {
+            val remoteSession = if (callId.isNotBlank()) SupabaseService.getCallSession(callId).getOrNull() else null
+            val session = remoteSession?.takeIf { it.status.equals("RINGING", ignoreCase = true) }
+                ?: SupabaseCallSession(
+                    id = callId.ifBlank { "call_" + callerName.hashCode() },
+                    callId = callId.ifBlank { "call_" + callerName.hashCode() },
+                    callerId = callerId.ifBlank { "caller_" + callerName.hashCode() },
+                    receiverId = repository.userIdentity.firstOrNull()?.supabaseUid ?: "me",
+                    callerName = callerName,
+                    callType = callType.uppercase(),
+                    status = "RINGING"
+                )
+            if (autoAccept) acceptIncomingCall(session)
+            else if (!_activeCall.value.isActive) _incomingCallSession.value = session
+        }
+    }
+
     private var activeCallStatusSyncJob: Job? = null
 
     private fun startActiveCallStatusSync(callId: String) {
