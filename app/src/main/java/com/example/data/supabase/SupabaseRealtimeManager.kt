@@ -382,7 +382,7 @@ object SupabaseRealtimeManager {
                     if (!uid.isNullOrBlank()) {
                         SupabaseService.updatePresence(uid, true)
 
-                        if (_userPresenceMap.value.isEmpty() || loopCounter % 4L == 0L) {
+                        if (_userPresenceMap.value.isEmpty() || loopCounter % 1L == 0L) {
                             val presenceRes = SupabaseService.getAllUserPresence()
                             if (presenceRes.isSuccess) {
                                 _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
