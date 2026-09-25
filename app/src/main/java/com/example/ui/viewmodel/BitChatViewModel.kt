@@ -1886,7 +1886,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun acceptIncomingCall(call: SupabaseCallSession) {
         _incomingCallSession.value = null
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), call.callerName)
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), call.callerName, call.id)
         activeCallSessionId = call.id
         val isVideo = call.callType.equals("VIDEO", ignoreCase = true)
 
@@ -1980,7 +1980,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _incomingCallSession.value = null
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), callerName ?: "")
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), callerName ?: "", activeCallSessionId)
         if (_activeCall.value.isActive) {
             if (isDeclined) {
                 _activeCall.value = _activeCall.value.copy(isConnected = false, callStatus = "BUSY")
@@ -2176,7 +2176,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         activeCallStatusSyncJob = null
         callEngine.endCall()
         val lastState = _activeCall.value
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName)
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
         val sessId = activeCallSessionId
         val targetContactId = lastState.contactId
         if (sessId != null) {
