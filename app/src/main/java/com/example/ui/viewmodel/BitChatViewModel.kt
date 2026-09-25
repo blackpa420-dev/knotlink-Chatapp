@@ -350,7 +350,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     } else if (update.status == "ENDED" || update.status == "CANCELLED") {
                         handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = false)
                     }
-                    if (_activeCall.value.isActive && (update.status == "ACCEPTED" || update.status == "CONNECTED")) {
+                    if (_activeCall.value.isActive && update.status.equals("CONNECTED", ignoreCase = true)) {
                         startCallTimer(update.connectedAt)
                     }
                 }
