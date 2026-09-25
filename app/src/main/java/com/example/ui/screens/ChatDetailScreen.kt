@@ -527,14 +527,8 @@ fun ChatDetailScreen(
     var remoteFullName by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(chatId, partnerUid) {
         if (!isGroupChat && partnerUid.isNotBlank() && partnerUid != "uid_target") {
+            // ViewModel owns the cached/single profile lookup.
             viewModel.refreshPartnerProfile(chatId, partnerUid)
-            try {
-                val p = com.example.data.supabase.SupabaseService.getProfile(partnerUid).getOrNull()
-                    ?: com.example.data.supabase.SupabaseService.getProfileByUsername(partnerUid).getOrNull()
-                if (p != null && p.fullName.isNotBlank()) {
-                    remoteFullName = p.fullName
-                }
-            } catch (e: Exception) {}
         }
     }
 
