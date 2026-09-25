@@ -1719,9 +1719,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     handleIncomingMessage(supaMsg, chatId)
                 }
             }
-            if (myUid.isNotBlank()) {
-                syncAllChatHistory(myUid, myUsername)
-            }
+            // Live updates are delivered by Realtime; do not start another full-history sync here.
         } catch (e: Exception) {
             Log.w("BitChatRepo", "syncMessagesForChat error: ${e.message}")
         }
