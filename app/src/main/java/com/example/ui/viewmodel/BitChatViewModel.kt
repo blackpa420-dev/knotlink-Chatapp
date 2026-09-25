@@ -1846,6 +1846,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     fun handleIncomingCallIntent(callId: String, callerId: String, callerName: String, callType: String, autoAccept: Boolean) {
         viewModelScope.launch {
             val remoteSession = if (callId.isNotBlank()) SupabaseService.getCallSession(callId).getOrNull() else null
+            if (callId.isNotBlank() && remoteSession?.status?.equals("RINGING", ignoreCase = true) != true) return@launch
             val session = remoteSession?.takeIf { it.status.equals("RINGING", ignoreCase = true) }
                 ?: SupabaseCallSession(
                     id = callId.ifBlank { "call_" + callerName.hashCode() },
