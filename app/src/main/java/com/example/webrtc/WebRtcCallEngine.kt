@@ -655,7 +655,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         }
 
         // 3.5. Transition Caller & Callee engine state to CONNECTED when session is accepted
-        if (session.status.equals("ACCEPTED", ignoreCase = true) || session.status.equals("CONNECTED", ignoreCase = true) || session.sdpAnswer.isNotBlank()) {
+        if (session.status.equals("CONNECTED", ignoreCase = true)) {
             val connTime = session.connectedAt ?: _engineState.value.connectedAt ?: System.currentTimeMillis()
             _engineState.value = _engineState.value.copy(
                 isConnected = true,
