@@ -410,10 +410,19 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 when (state) {
                     PeerConnection.IceConnectionState.CONNECTED,
                     PeerConnection.IceConnectionState.COMPLETED -> {
+                        val connectedAt = _engineState.value.connectedAt ?: System.currentTimeMillis()
                         _engineState.value = _engineState.value.copy(
                             isConnected = true,
-                            isConnecting = false
+                            isConnecting = false,
+                            connectedAt = connectedAt
                         )
+                        scope.launch {
+                            try {
+                                com.example.data.supabase.SupabaseService.updateCallSessionStatus(callId, "CONNECTED", connectedAt = connectedAt)
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "Failed to publish CONNECTED state: ${e.message}")
+                            }
+                        }
                     }
                     PeerConnection.IceConnectionState.DISCONNECTED,
                     PeerConnection.IceConnectionState.FAILED -> {
@@ -489,16 +498,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         localAudioTrack?.let { pc?.addTrack(it, streamIds) }
         localVideoTrackInstance?.let { pc?.addTrack(it, streamIds) }
 
-        // Explicitly setup transceivers so SDP negotiation always contains both audio and video streams
-        try {
-            pc?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV))
-            if (isVideo) {
-                pc?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV))
-            }
-            configureVideoSenderBitrate(_engineState.value.currentQuality)
-        } catch (e: Throwable) {
-            Log.w(TAG, "Transceiver setup fallback: ${e.message}")
-        }
+        // addTrack() above creates Unified Plan transceivers/senders. Avoid duplicate transceivers; duplicate m-lines can cause blank remote video.\n        try {\n            configureVideoSenderBitrate(_engineState.value.currentQuality)\n        } catch (e: Throwable) {\n            Log.w(TAG, "Video sender configuration warning: ${e.message}")\n        }
     }
 
     private fun handleRemoteVideo(vTrack: VideoTrack) {
