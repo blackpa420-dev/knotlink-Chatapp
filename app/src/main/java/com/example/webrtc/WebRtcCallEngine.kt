@@ -25,13 +25,14 @@ enum class CallQuality(
     val targetWidth: Int,
     val targetHeight: Int,
     val targetBitrateKbps: Int,
-    val targetFps: Int
+    val targetFps: Int,
+    val scaleResolutionDownBy: Double
 ) {
-    ULTRA_2K("2K Ultra HD", "2560x1440", 2560, 1440, 4000, 30),
-    FHD_1080P("1080p Full HD", "1920x1080", 1920, 1080, 2500, 30),
-    HD_720P("720p HD", "1280x720", 1280, 720, 1200, 30),
-    SD_480P("480p SD", "640x480", 640, 480, 450, 24),
-    LOW_360P("360p Low Bandwidth", "480x360", 480, 360, 250, 20)
+    ULTRA_2K("2K Ultra HD", "2560x1440", 2560, 1440, 2200, 30, 1.0),
+    FHD_1080P("1080p Full HD", "1920x1080", 1920, 1080, 1500, 30, 1.333333),
+    HD_720P("720p HD", "1280x720", 1280, 720, 850, 30, 2.0),
+    SD_480P("480p SD", "640x480", 640, 480, 450, 24, 3.0),
+    LOW_360P("360p Low Bandwidth", "480x360", 480, 360, 300, 20, 4.0)
 }
 
 enum class NetworkStatus(val label: String, val colorHex: Long) {
@@ -151,6 +152,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     private var timerJob: Job? = null
     private var signalingJob: Job? = null
     private var realtimeObserverJob: Job? = null
+    private var lastQualityChangeAt: Long = 0L
 
     private fun initWebRtcInternal() {
         if (!isWebRtcInitialized) {
@@ -280,20 +282,23 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     videoSource = vSource
                     capturer.initialize(helper, context, vSource.capturerObserver)
                     
-                    // Request standard HD 1280x720 @ 30 FPS first for 100% Android camera & emulator compatibility
                     try {
-                        capturer.startCapture(1280, 720, 30)
-                        Log.d(TAG, "Camera started capture at 1280x720 HD @ 30 FPS")
+                        capturer.startCapture(2560, 1440, 30)
+                        Log.d(TAG, "Camera started capture at 2560x1440 @ 30 FPS")
                     } catch (e: Throwable) {
-                        Log.w(TAG, "1280x720 capture failed, trying 640x480 SD: ${e.message}")
+                        Log.w(TAG, "2K capture unavailable, trying 1920x1080")
                         try {
-                            capturer.startCapture(640, 480, 30)
-                            Log.d(TAG, "Camera started capture at 640x480 SD @ 30 FPS")
+                            capturer.startCapture(1920, 1080, 30)
                         } catch (e2: Throwable) {
+                            Log.w(TAG, "1080p capture unavailable, trying 1280x720")
                             try {
-                                capturer.startCapture(480, 360, 24)
+                                capturer.startCapture(1280, 720, 30)
                             } catch (e3: Throwable) {
-                                Log.e(TAG, "All camera startCapture attempts failed: ${e3.message}")
+                                try {
+                                    capturer.startCapture(640, 480, 24)
+                                } catch (e4: Throwable) {
+                                    Log.e(TAG, "All camera startCapture attempts failed")
+                                }
                             }
                         }
                     }
@@ -490,7 +495,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             if (isVideo) {
                 pc?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.SEND_RECV))
             }
-            configureVideoSenderBitrate(CallQuality.FHD_1080P)
+            configureVideoSenderBitrate(_engineState.value.currentQuality)
         } catch (e: Throwable) {
             Log.w(TAG, "Transceiver setup fallback: ${e.message}")
         }
@@ -766,7 +771,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     localVideoTrackInstance?.setEnabled(false)
                     videoCapturer?.stopCapture()
                 } else {
-                    videoCapturer?.startCapture(1280, 720, 30)
+                    videoCapturer?.startCapture(2560, 1440, 30)
                     localVideoTrackInstance?.setEnabled(true)
                 }
             } catch (e: Throwable) {
@@ -876,71 +881,99 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         try {
             val senders = peerConnection?.senders ?: return
             for (sender in senders) {
-                val track = sender.track()
-                if (track != null && track.kind() == "video") {
-                    val params = sender.parameters
-                    if (params != null && params.encodings.isNotEmpty()) {
-                        for (encoding in params.encodings) {
-                            val maxBitrate = (quality.targetBitrateKbps * 1000).coerceAtLeast(4_500_000)
-                            val minBitrate = (quality.targetBitrateKbps * 500).coerceAtLeast(2_000_000)
-                            encoding.minBitrateBps = minBitrate
-                            encoding.maxBitrateBps = maxBitrate
-                            encoding.maxFramerate = quality.targetFps
-                        }
-                        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
-                        sender.parameters = params
-                        Log.d(TAG, "Configured Video RtpSender high bitrate: ${quality.displayName}")
-                    }
+                if (sender.track()?.kind() != "video") continue
+                val params = sender.parameters ?: continue
+                if (params.encodings.isEmpty()) continue
+                for (encoding in params.encodings) {
+                    encoding.minBitrateBps = (quality.targetBitrateKbps * 0.45 * 1000).toInt().coerceAtLeast(120_000)
+                    encoding.maxBitrateBps = quality.targetBitrateKbps * 1000
+                    encoding.maxFramerate = quality.targetFps
+                    encoding.scaleResolutionDownBy = quality.scaleResolutionDownBy
                 }
+                params.degradationPreference = RtpParameters.DegradationPreference.BALANCED
+                sender.parameters = params
             }
+            peerConnection?.setBitrate(100_000, (quality.targetBitrateKbps * 1000).coerceAtLeast(250_000), (quality.targetBitrateKbps * 1000).coerceAtLeast(300_000))
         } catch (e: Throwable) {
-            Log.w(TAG, "configureVideoSenderBitrate warning: ${e.message}")
+            Log.w(TAG, "configureVideoSenderBitrate warning")
         }
     }
-
     private fun startNetworkAdaptationLoop() {
         networkMonitorJob?.cancel()
         networkMonitorJob = scope.launch {
             while (isActive && _engineState.value.isCallActive) {
-                delay(3000)
+                delay(2500)
                 try {
                     val cm = connectivityManager
                     val network = cm?.activeNetwork
                     val caps = if (network != null) cm.getNetworkCapabilities(network) else null
                     val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
                     val isCellular = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
+                    val transportCeiling = if (isWifi) CallQuality.ULTRA_2K else if (isCellular) CallQuality.FHD_1080P else CallQuality.HD_720P
+                    var rttMs = _engineState.value.roundTripTimeMs
+                    var packetLoss = _engineState.value.packetLossPercent
 
-                    val rtt = if (isWifi) 20L else 45L
-                    val packetLoss = 0.0f
-
-                    val targetQuality = when {
-                        isWifi -> CallQuality.ULTRA_2K
-                        isCellular -> CallQuality.FHD_1080P
-                        else -> CallQuality.HD_720P
+                    peerConnection?.getStats { report ->
+                        try {
+                            var received = 0L
+                            var lost = 0L
+                            var measuredRtt: Long? = null
+                            for (stat in report.statsMap.values) {
+                                when (stat.type) {
+                                    "inbound-rtp" -> {
+                                        val kind = stat.members["kind"] ?: stat.members["mediaType"]
+                                        if (kind == "video") {
+                                            received += (stat.members["packetsReceived"] as? Number)?.toLong() ?: 0L
+                                            lost += (stat.members["packetsLost"] as? Number)?.toLong() ?: 0L
+                                        }
+                                    }
+                                    "candidate-pair", "remote-inbound-rtp" -> {
+                                        (stat.members["currentRoundTripTime"] as? Number)?.let { measuredRtt = (it.toDouble() * 1000.0).toLong() }
+                                        (stat.members["roundTripTime"] as? Number)?.let { measuredRtt = (it.toDouble() * 1000.0).toLong() }
+                                    }
+                                }
+                            }
+                            val total = received + lost
+                            if (total > 0) packetLoss = lost * 100f / total
+                            if (measuredRtt != null) rttMs = measuredRtt!!
+                            _engineState.value = _engineState.value.copy(roundTripTimeMs = rttMs, packetLossPercent = packetLoss)
+                        } catch (_: Throwable) { }
                     }
 
-                    // Smoothly update encoder bitrate on RtpSender without hardware camera resets
-                    configureVideoSenderBitrate(targetQuality)
-
-                    _engineState.value = _engineState.value.copy(
-                        roundTripTimeMs = rtt,
-                        packetLossPercent = packetLoss,
-                        currentQuality = targetQuality,
-                        currentBitrateKbps = targetQuality.targetBitrateKbps,
-                        networkStatus = when (targetQuality) {
-                            CallQuality.ULTRA_2K, CallQuality.FHD_1080P -> NetworkStatus.EXCELLENT
-                            CallQuality.HD_720P -> NetworkStatus.GOOD
-                            CallQuality.SD_480P -> NetworkStatus.MODERATE
-                            CallQuality.LOW_360P -> NetworkStatus.POOR
-                        }
-                    )
-                } catch (e: Throwable) {
-                    Log.w(TAG, "networkMonitor error: ${e.message}")
-                }
+                    val current = _engineState.value.currentQuality
+                    val now = System.currentTimeMillis()
+                    val veryBad = packetLoss >= 15f || rttMs >= 500L
+                    val bad = packetLoss >= 8f || rttMs >= 280L
+                    val target = when {
+                        veryBad -> CallQuality.LOW_360P
+                        bad -> CallQuality.SD_480P
+                        isWifi -> CallQuality.ULTRA_2K
+                        isCellular -> if (packetLoss >= 4f || rttMs >= 180L) CallQuality.HD_720P else CallQuality.FHD_1080P
+                        else -> CallQuality.HD_720P
+                    }
+                    val capped = if (target.ordinal > transportCeiling.ordinal) transportCeiling else target
+                    val canUpgrade = now - lastQualityChangeAt >= 12_000L
+                    val canChange = now - lastQualityChangeAt >= 5_000L
+                    if (capped.ordinal > current.ordinal && !canUpgrade) {
+                        // Keep current quality until the connection is stable.
+                    } else if (capped != current && canChange) {
+                        configureVideoSenderBitrate(capped)
+                        lastQualityChangeAt = now
+                        _engineState.value = _engineState.value.copy(
+                            currentQuality = capped,
+                            currentBitrateKbps = capped.targetBitrateKbps,
+                            networkStatus = when {
+                                veryBad -> NetworkStatus.POOR
+                                bad -> NetworkStatus.MODERATE
+                                capped == CallQuality.ULTRA_2K || capped == CallQuality.FHD_1080P -> NetworkStatus.EXCELLENT
+                                else -> NetworkStatus.GOOD
+                            }
+                        )
+                    }
+                } catch (_: Throwable) { }
             }
         }
     }
-
     private fun startCallTimer() {
         timerJob?.cancel()
         timerJob = scope.launch {
