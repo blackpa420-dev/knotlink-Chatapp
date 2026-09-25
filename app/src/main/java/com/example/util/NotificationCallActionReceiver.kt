@@ -28,7 +28,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
 
         if (action == ACTION_DECLINE_CALL) {
             val pendingResult = goAsync()
-            NotificationHelper.cancelCallNotification(context, callerName)
+            NotificationHelper.cancelCallNotification(context, callerName, callId)
 
             CoroutineScope(Dispatchers.IO).launch {
                 try {
