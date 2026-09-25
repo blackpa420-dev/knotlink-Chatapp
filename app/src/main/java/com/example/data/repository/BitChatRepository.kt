@@ -1276,9 +1276,11 @@ class BitChatRepository(val dao: BitChatDao) {
                     resolvedOpponentName = existingTarget.name
                     resolvedOpponentAvatar = existingTarget.avatarType
                 } else {
-                    val p = SupabaseService.getProfile(supaMsg.receiverId).getOrNull()
+                    val p = getLocalProfile(supaMsg.receiverId)
+                        ?: SupabaseService.getProfile(supaMsg.receiverId).getOrNull()
                         ?: SupabaseService.getProfileByUsername(supaMsg.receiverId).getOrNull()
                     if (p != null) {
+                        cacheProfileLocally(p)
                         resolvedOpponentName = p.fullName.ifBlank { p.username }
                         if (!p.avatarUrl.isNullOrBlank()) resolvedOpponentAvatar = p.avatarUrl!!
                     }
@@ -1377,9 +1379,12 @@ class BitChatRepository(val dao: BitChatDao) {
         var resolvedSenderName = supaMsg.senderName
         var resolvedSenderAvatar = "default"
         try {
-            val prof = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
+            val prof = getLocalProfile(supaMsg.senderId)
+                ?: getLocalProfile(supaMsg.senderName)
+                ?: SupabaseService.getProfile(supaMsg.senderId).getOrNull()
                 ?: SupabaseService.getProfileByUsername(supaMsg.senderName).getOrNull()
             if (prof != null) {
+                cacheProfileLocally(prof)
                 if (prof.fullName.isNotBlank()) resolvedSenderName = prof.fullName
                 else if (prof.username.isNotBlank()) resolvedSenderName = prof.username
                 val av = prof.avatarUrl
@@ -1814,9 +1819,12 @@ class BitChatRepository(val dao: BitChatDao) {
         var finalName = targetName
         var finalAvatar = avatarType
         try {
-            val prof = SupabaseService.getProfile(targetUid).getOrNull()
+            val prof = getLocalProfile(targetUid)
+                ?: getLocalProfile(targetName)
+                ?: SupabaseService.getProfile(targetUid).getOrNull()
                 ?: SupabaseService.getProfileByUsername(targetUid).getOrNull()
                 ?: SupabaseService.getProfileByUsername(targetName).getOrNull()
+            cacheProfileLocally(prof)
             if (prof != null && prof.id.isNotBlank()) {
                 val myEmail = currentIdentity?.email?.lowercase()
                 val isSelf = prof.id.equals(myUid, ignoreCase = true) || (myEmail != null && prof.email.equals(myEmail, ignoreCase = true))
