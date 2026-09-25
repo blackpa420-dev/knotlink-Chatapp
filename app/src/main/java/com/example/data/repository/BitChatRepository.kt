@@ -96,6 +96,10 @@ data class PublicUserProfile(
 
 class BitChatRepository(val dao: BitChatDao) {
 
+    private val historySyncMutex = kotlinx.coroutines.sync.Mutex()
+    private val lastHistorySyncAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val HISTORY_SYNC_TTL_MS = 30_000L
+
     val userIdentity: Flow<UserIdentityEntity?> = dao.getUserIdentity()
     val allChats: Flow<List<ChatEntity>> = dao.getAllChats()
     val allContacts: Flow<List<ContactEntity>> = dao.getAllContacts()
@@ -1407,7 +1411,16 @@ class BitChatRepository(val dao: BitChatDao) {
 
     suspend fun syncAllChatHistory(myUid: String, myUsername: String = "") = withContext(Dispatchers.IO) {
         if (myUid.isBlank()) return@withContext
-        try {
+
+        val now = System.currentTimeMillis()
+        val last = lastHistorySyncAt[myUid] ?: 0L
+        if (now - last < HISTORY_SYNC_TTL_MS) return@withContext
+        historySyncMutex.withLock {
+            val lockedNow = System.currentTimeMillis()
+            val lockedLast = lastHistorySyncAt[myUid] ?: 0L
+            if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock
+            lastHistorySyncAt[myUid] = lockedNow
+            try {
             // First run deduplication on existing copy chats
             deduplicateCopyChats()
 
@@ -1684,8 +1697,9 @@ class BitChatRepository(val dao: BitChatDao) {
 
             // Run deduplication again after history sync
             deduplicateCopyChats()
-        } catch (e: Exception) {
-            Log.w("BitChatRepo", "syncAllChatHistory error: ${e.message}")
+            } catch (e: Exception) {
+                Log.w("BitChatRepo", "syncAllChatHistory error: " + e.message)
+            }
         }
     }
 
