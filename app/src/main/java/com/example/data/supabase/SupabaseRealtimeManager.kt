@@ -73,11 +73,16 @@ object SupabaseRealtimeManager {
     fun getCurrentUserId(): String? = currentUserId
 
     fun startRealtime(userId: String, username: String? = null, email: String? = null) {
+        val identityChanged = currentUserId != userId ||
+            (!username.isNullOrBlank() && currentUsername != username) ||
+            (!email.isNullOrBlank() && currentUserEmail != email)
         currentUserId = userId
         if (!username.isNullOrBlank()) currentUsername = username
         if (!email.isNullOrBlank()) currentUserEmail = email
         startSyncLoop()
-        connectWebSocket()
+        if (identityChanged || webSocket == null) {
+            connectWebSocket()
+        }
     }
 
     fun onAppForeground() {
