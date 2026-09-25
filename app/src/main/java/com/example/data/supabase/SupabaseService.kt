@@ -27,6 +27,8 @@ object SupabaseService {
     private data class ProfileCacheEntry(val profile: SupabaseProfile?, val cachedAt: Long)
     private const val PROFILE_CACHE_TTL_MS = 60_000L
     private val profileCache = ConcurrentHashMap<String, ProfileCacheEntry>()
+    private var allProfilesCache: List<SupabaseProfile>? = null
+    private var allProfilesCacheAt: Long = 0L
     private val presenceUpdateTimes = ConcurrentHashMap<String, Long>()
     private const val PRESENCE_HEARTBEAT_TTL_MS = 60_000L
 
@@ -782,6 +784,11 @@ object SupabaseService {
 
     suspend fun fetchAllProfiles(): Result<List<SupabaseProfile>> = withContext(Dispatchers.IO) {
         try {
+            val cached = allProfilesCache
+            if (cached != null && System.currentTimeMillis() - allProfilesCacheAt < PROFILE_CACHE_TTL_MS) {
+                return@withContext Result.success(cached)
+            }
+
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?select=*&limit=300"
             val request = Request.Builder()
                 .url(url)
@@ -799,6 +806,8 @@ object SupabaseService {
                     list.add(profile)
                     cacheProfile(profile)
                 }
+                allProfilesCache = list
+                allProfilesCacheAt = System.currentTimeMillis()
                 Result.success(list)
             } else {
                 Result.success(emptyList())
