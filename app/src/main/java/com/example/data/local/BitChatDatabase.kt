@@ -17,9 +17,11 @@ import androidx.room.RoomDatabase
         PinnedMessageEntity::class,
         BlockedUserEntity::class,
         UserSessionEntity::class,
-        CallLogEntity::class
+        CallLogEntity::class,
+        CachedProfileEntity::class,
+        SyncStateEntity::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = false
 )
 abstract class BitChatDatabase : RoomDatabase() {
@@ -39,7 +41,7 @@ abstract class BitChatDatabase : RoomDatabase() {
                         BitChatDatabase::class.java,
                         "bitchat_database"
                     )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_13_14)
                     .build()
                     INSTANCE = instance
                     Log.d("BitChat_Debug", "Room database instance built successfully")
