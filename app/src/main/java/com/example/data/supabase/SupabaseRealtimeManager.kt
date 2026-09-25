@@ -604,8 +604,7 @@ object SupabaseRealtimeManager {
                     webSocket?.send(rawMsg.toString())
                 }
 
-                // 2. Also update Supabase table if available
-                SupabaseService.sendTypingStatus(chatId, userId, userName, isTyping)
+                // Typing is Realtime broadcast-only; do not persist keystrokes in Postgres.
             } catch (e: Exception) {
                 Log.w(TAG, "Error sending typing broadcast: ${e.message}")
             }
