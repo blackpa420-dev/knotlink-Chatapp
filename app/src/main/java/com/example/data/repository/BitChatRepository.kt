@@ -1467,16 +1467,16 @@ class BitChatRepository(val dao: BitChatDao) {
         return savedEntity
     }
 
-    suspend fun syncAllChatHistory(myUid: String, myUsername: String = "") = withContext(Dispatchers.IO) {
-        if (myUid.isBlank()) return@withContext
+    suspend fun syncAllChatHistory(myUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
+        if (myUid.isBlank()) return@withContext false
 
         val now = System.currentTimeMillis()
         val last = lastHistorySyncAt[myUid] ?: 0L
-        if (now - last < HISTORY_SYNC_TTL_MS) return@withContext
+        if (now - last < HISTORY_SYNC_TTL_MS) return@withContext true
         historySyncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
             val lockedLast = lastHistorySyncAt[myUid] ?: 0L
-            if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock
+            if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock true
             lastHistorySyncAt[myUid] = lockedNow
             try {
             // First run deduplication on existing copy chats
@@ -1773,8 +1773,10 @@ class BitChatRepository(val dao: BitChatDao) {
 
             // Run deduplication again after history sync
             deduplicateCopyChats()
+            true
             } catch (e: Exception) {
-                Log.w("BitChatRepo", "syncAllChatHistory error: " + e.message)
+                Log.w("BitChatRepo", "syncAllChatHistory error: " + e.message, e)
+                false
             }
         }
     }
