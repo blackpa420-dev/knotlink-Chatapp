@@ -310,6 +310,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 privacySettings = safeIdentity.privacySettingsJson
             )
             val res = SupabaseService.upsertProfile(prof)
+            if (res.isSuccess) cacheProfileLocally(res.getOrNull() ?: prof)
             if (res.isFailure) {
                 Log.e("BitChatRepository", "saveUserIdentity upsertProfile failed: ${res.exceptionOrNull()?.message}")
             }
@@ -392,6 +393,7 @@ class BitChatRepository(val dao: BitChatDao) {
             isVerified = true
         )
         val res = SupabaseService.upsertProfile(prof)
+        if (res.isSuccess) cacheProfileLocally(res.getOrNull() ?: prof)
         if (res.isFailure) {
             Log.e("BitChatRepository", "saveUsernameAndVerify upsertProfile failed: ${res.exceptionOrNull()?.message}")
         }
@@ -436,6 +438,7 @@ class BitChatRepository(val dao: BitChatDao) {
             isVerified = updated.isVerified
         )
         val res = SupabaseService.upsertProfile(prof)
+        if (res.isSuccess) cacheProfileLocally(res.getOrNull() ?: prof)
         if (res.isFailure) {
             Log.e("BitChatRepository", "updateUserProfile upsertProfile failed: ${res.exceptionOrNull()?.message}")
         }
