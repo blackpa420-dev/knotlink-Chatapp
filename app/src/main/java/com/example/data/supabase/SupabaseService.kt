@@ -762,21 +762,8 @@ object SupabaseService {
                         ?: getProfileByEmail(cleanKey).getOrNull()
                 } else null)
 
-            if (prof == null || prof.fcmToken.isNullOrBlank()) {
-                val allProfs = fetchAllProfiles().getOrNull() ?: emptyList()
-                prof = allProfs.find { p ->
-                    (!p.fcmToken.isNullOrBlank()) && (
-                        p.id.equals(targetKey, ignoreCase = true) ||
-                        p.username.equals(targetKey, ignoreCase = true) ||
-                        p.email.equals(targetKey, ignoreCase = true) ||
-                        p.id.equals(cleanKey, ignoreCase = true) ||
-                        p.username.equals(cleanKey, ignoreCase = true) ||
-                        p.email.equals(cleanKey, ignoreCase = true) ||
-                        p.fullName.equals(targetKey, ignoreCase = true) ||
-                        p.fullName.equals(cleanKey, ignoreCase = true)
-                    )
-                }
-            }
+            // Do not scan the entire profiles table for an FCM token.
+            // If the targeted profile lookup has no token, return null and let the caller handle it.
 
             val token = prof?.fcmToken?.trim()
             if (!token.isNullOrBlank()) {
