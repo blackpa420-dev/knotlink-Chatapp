@@ -217,8 +217,13 @@ fun ChatsScreen(
 
     val initialHistorySyncing by viewModel.initialHistorySyncing.collectAsState()
     val initialHistorySyncError by viewModel.initialHistorySyncError.collectAsState()
-    val showHistoryRestore = initialHistorySyncing && chats.isEmpty()
-    val showHistoryRestoreError = !initialHistorySyncing && initialHistorySyncError != null && chats.isEmpty()
+    val hasRealLocalChats = chats.any { chat ->
+        chat.id != "bitassistant" &&
+        chat.id != "ai_assistant" &&
+        !chat.name.contains("Assistant", ignoreCase = true)
+    }
+    val showHistoryRestore = initialHistorySyncing && !hasRealLocalChats
+    val showHistoryRestoreError = !initialHistorySyncing && initialHistorySyncError != null && !hasRealLocalChats
 
     LaunchedEffect(chats) {
         viewModel.observeChatTyping(chats)
