@@ -296,10 +296,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         try {
                             val senderDisplayName = handledEntity.senderName.ifBlank { supaMsg.senderName }
                             var senderAvatarBitmap: android.graphics.Bitmap? = null
+                            // Prefer the already-synced Room chat/profile cache; do not add a
+                            // Supabase request just to decorate a notification.
                             try {
-                                val profile = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
-                                    ?: SupabaseService.getProfileByUsername(supaMsg.senderId).getOrNull()
-                                val avatarUrl = profile?.avatarUrl
+                                val localChat = repository.getChatById(supaMsg.chatId)
+                                val avatarUrl = localChat?.avatarType?.takeIf {
+                                    it.isNotBlank() && it != "default" && it.startsWith("http", ignoreCase = true)
+                                }
                                 if (!avatarUrl.isNullOrBlank()) {
                                     val connection = java.net.URL(avatarUrl).openConnection() as java.net.HttpURLConnection
                                     connection.connectTimeout = 2500
