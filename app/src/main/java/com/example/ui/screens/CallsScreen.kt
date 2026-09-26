@@ -139,6 +139,7 @@ fun CallsScreen(
     onStartAudioCallClick: (String) -> Unit,
     onNavigateToChat: (String, String) -> Unit,
     onTabSelected: (BitChatNavTab) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -400,6 +401,11 @@ fun CallsScreen(
                         }
                     }
                 }
+
+                com.example.ui.components.ActiveCallBulletinSlot(
+                    viewModel = viewModel,
+                    onExpandClick = onActiveCallBannerClick
+                )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
