@@ -151,3 +151,26 @@ fun DynamicIslandCallBanner(
         }
     }
 }
+
+
+@Composable
+fun ActiveCallBulletinSlot(
+    viewModel: BitChatViewModel,
+    onExpandClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val callState by viewModel.activeCall.collectAsState()
+
+    AnimatedVisibility(
+        visible = callState.isActive && callState.callType == "AUDIO",
+        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
+        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        DynamicIslandCallBanner(
+            callState = callState,
+            onExpandClick = onExpandClick,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
