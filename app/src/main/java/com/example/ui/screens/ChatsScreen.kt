@@ -614,22 +614,24 @@ fun ChatsScreen(
                                     color = if (isSelected) Color.Transparent else if (isNightMode) Color(0xFF27272A) else Color.Black.copy(alpha = 0.45f),
                                     shape = CircleShape
                                 )
-                                .pointerInput(filter) {
-                                    detectTapGestures(
-                                        onTap = {
-                                            if (filter == "Deleted") {
-                                                showDeletedChatsSheet = true
-                                            } else {
-                                                viewModel.setChatFilter(filter)
-                                            }
-                                        },
-                                        onLongPress = {
-                                            if (filter != "All Chats") {
-                                                categoryToManage = filter
-                                            }
-                                        }
-                                    )
-                                }
+                                .combinedClickable(
+                                     interactionSource = interactionSource,
+                                     indication = null,
+                                     onClick = {
+                                         haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                                         if (filter == "Deleted") {
+                                             showDeletedChatsSheet = true
+                                         } else {
+                                             viewModel.setChatFilter(filter)
+                                         }
+                                     },
+                                     onLongClick = {
+                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                         if (filter != "All Chats") {
+                                             categoryToManage = filter
+                                         }
+                                     }
+                                 )
                                 .padding(horizontal = 18.dp, vertical = 8.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
