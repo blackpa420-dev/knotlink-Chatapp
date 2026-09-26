@@ -726,7 +726,7 @@ fun CallsScreen(
                         // Otherwise group by contact
                         val displayLogs = if (isSelectiveDeleteMode) filteredCallLogs else filteredCallLogs.distinctBy { it.contactId.ifBlank { it.contactName } }
 
-                        items(displayLogs, key = { it.id }) { call ->
+                        items(displayLogs, key = { it.id }, contentType = { "call_log" }) { call ->
                             val isSelected = selectedLogIds.contains(call.id)
                             CallCardItem(
                                 callLog = call,
@@ -1155,7 +1155,7 @@ fun CallsScreen(
                             .height(240.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(activeHistoryLogs) { history ->
+                        items(activeHistoryLogs, key = { it.id }, contentType = { "call_history" }) { history ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1994,7 +1994,7 @@ fun CallsScreen(
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(chatPeopleList) { (personId, personName, handle) ->
+                        items(chatPeopleList, key = { it.first }, contentType = { "person" }) { (personId, personName, handle) ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -2230,7 +2230,7 @@ fun CallsScreen(
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(sharePeople) { (id, name) ->
+                        items(sharePeople, key = { it.first }, contentType = { "share_person" }) { (id, name) ->
                             val isChecked = selectedShareChatIds.contains(id)
                             Row(
                                 modifier = Modifier
