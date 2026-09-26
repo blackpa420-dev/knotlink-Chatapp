@@ -249,6 +249,7 @@ fun ChatDetailScreen(
     onBackClick: () -> Unit,
     onAudioCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     onVideoCallClick: (contactId: String, contactName: String) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -1016,6 +1017,11 @@ fun ChatDetailScreen(
                     }
                 }
             }
+
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
 
             // Chat Messages List with Floating New Message Indicator & Pagination
             Box(
