@@ -101,6 +101,7 @@ class CallActivity : FragmentActivity() {
             val incomingCall by viewModel.incomingCallSession.collectAsState()
             var accepting by remember { mutableStateOf(false) }
             var callWasActive by remember { mutableStateOf(false) }
+            var hadIncomingSession by remember { mutableStateOf(false) }
             var permissionPending by remember { mutableStateOf<SupabaseCallSession?>(null) }
 
             val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -124,9 +125,23 @@ class CallActivity : FragmentActivity() {
                     callType = callType,
                     autoAccept = false
                 )
+
+                // Match the notification's lifetime. If the remote caller
+                // cancels before the session reaches the UI, remove this task.
+                kotlinx.coroutines.delay(65_000L)
+                if (!callWasActive && !activeCall.isActive) {
+                    finishCallTask()
+                }
             }
 
             LaunchedEffect(incomingCall) {
+                if (incomingCall != null) {
+                    hadIncomingSession = true
+                } else if (hadIncomingSession && !activeCall.isActive && !callWasActive) {
+                    // Remote decline/cancel before answer: return directly to
+                    // the underlying lock/home screen, never to MainActivity.
+                    finishCallTask()
+                }
                 val session = incomingCall ?: return@LaunchedEffect
                 if (intent.getBooleanExtra("action_accept_call", false) && !accepting) {
                     if (PermissionUtils.hasCallPermissions(this@CallActivity, callType.equals("VIDEO", true))) {
