@@ -134,14 +134,22 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             if (type.equals("call", ignoreCase = true) || type.equals("incoming_call", ignoreCase = true)) {
                 Log.i("KnotLinkFCM", "Triggering High-Priority Call Notification for $callerName")
 
-                // 1. INSTANT CALL NOTIFICATION DISPLAY (Zero Delay)
+                // Resolve the caller avatar before the first render so the call
+                // notification never flashes an avatar-less version and then gets replaced.
+                val callAvatarBitmap = if (senderAvatarUrl.isNotBlank()) {
+                    downloadBitmapFromUrl(senderAvatarUrl)
+                } else {
+                    null
+                }
+
+                // 1. INSTANT CALL NOTIFICATION DISPLAY with avatar and call type.
                 NotificationHelper.showIncomingCallNotification(
                     context = applicationContext,
                     callerName = callerName,
                     callType = callType,
                     callId = chatId,
                     callerId = senderId,
-                    callerAvatarBitmap = null
+                    callerAvatarBitmap = callAvatarBitmap
                 )
 
                 // 2. INSTANT ROOM DB CALL LOG INSERTION (so call history shows up even when app is closed)
@@ -166,19 +174,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                         )
                         dao.insertCallLog(callLog)
 
-                        if (senderAvatarUrl.isNotBlank()) {
-                            val avatarBitmap = downloadBitmapFromUrl(senderAvatarUrl)
-                            if (avatarBitmap != null) {
-                                NotificationHelper.showIncomingCallNotification(
-                                    context = applicationContext,
-                                    callerName = callerName,
-                                    callType = callType,
-                                    callId = chatId,
-                                    callerId = senderId,
-                                    callerAvatarBitmap = avatarBitmap
-                                )
-                            }
-                        }
+                        // Avatar was already resolved before the first notification render.
                     } catch (e: Throwable) {
                         Log.e("KnotLinkFCM", "Error inserting call log or avatar: ${e.message}")
                     }
