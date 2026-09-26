@@ -449,8 +449,8 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Answer goes directly to MainActivity so cold-start acceptance does not
-        // depend on a BroadcastReceiver -> Activity handoff.
+        // Answer goes directly to the dedicated CallActivity so cold-start acceptance
+        // does not depend on a BroadcastReceiver -> MainActivity handoff.
         val acceptIntent = Intent(context, com.example.CallActivity::class.java).apply {
             // Answer must enter the call-only task directly. This prevents the
             // normal KnotLink home/chat UI from being exposed while locked.
