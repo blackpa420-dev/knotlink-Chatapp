@@ -1923,22 +1923,39 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun handleIncomingCallIntent(callId: String, callerId: String, callerName: String, callType: String, autoAccept: Boolean) {
         viewModelScope.launch {
-            val remoteSession = if (callId.isNotBlank()) SupabaseService.getCallSession(callId).getOrNull() else null
-            // Notification actions can race with the caller's session update. Accept
-            // only a live RINGING/ACCEPTED session; never fabricate a new call session.
-            if (callId.isNotBlank() &&
-                remoteSession?.status?.uppercase() !in setOf("RINGING", "ACCEPTED")) return@launch
-            val session = remoteSession?.takeIf {
+            var remoteSession: SupabaseCallSession? = null
+            if (callId.isNotBlank()) {
+                // The app may be starting from a cold process after the notification
+                // tap. Give Supabase a few short retries instead of silently dropping
+                // the Accept action while the realtime/network stack initializes.
+                repeat(4) { attempt ->
+                    remoteSession = SupabaseService.getCallSession(callId).getOrNull()
+                    val status = remoteSession?.status?.uppercase()
+                    if (status == "RINGING" || status == "ACCEPTED") return@repeat
+                    if (attempt < 3) delay(300L * (attempt + 1))
+                }
+            }
+
+            val liveSession = remoteSession?.takeIf {
                 it.status.uppercase() == "RINGING" || it.status.uppercase() == "ACCEPTED"
-            } ?: SupabaseCallSession(
-                    id = callId.ifBlank { "call_" + callerName.hashCode() },
-                    callId = callId.ifBlank { "call_" + callerName.hashCode() },
-                    callerId = callerId.ifBlank { "caller_" + callerName.hashCode() },
-                    receiverId = repository.userIdentity.firstOrNull()?.supabaseUid ?: "me",
-                    callerName = callerName,
-                    callType = callType.uppercase(),
-                    status = "RINGING"
-                )
+            }
+
+            // Never fabricate a non-existent session when a real call id was supplied.
+            if (callId.isNotBlank() && liveSession == null) {
+                Log.w("BitChatViewModel", "Notification accept could not resolve live call session: $callId")
+                return@launch
+            }
+
+            val session = liveSession ?: SupabaseCallSession(
+                id = callId.ifBlank { "call_" + callerName.hashCode() },
+                callId = callId.ifBlank { "call_" + callerName.hashCode() },
+                callerId = callerId.ifBlank { "caller_" + callerName.hashCode() },
+                receiverId = repository.userIdentity.firstOrNull()?.supabaseUid ?: "me",
+                callerName = callerName,
+                callType = callType.uppercase(),
+                status = "RINGING"
+            )
+
             if (autoAccept) acceptIncomingCall(session)
             else if (!_activeCall.value.isActive) _incomingCallSession.value = session
         }
