@@ -196,7 +196,7 @@ object FcmPushSender {
                         put("server_message_id", serverMessageId)
                     }
                     if (!messageType.isNullOrBlank()) {
-                        put("message_type", messageType)
+                        put("knotlink_message_type", messageType)
                     }
                 })
             }
