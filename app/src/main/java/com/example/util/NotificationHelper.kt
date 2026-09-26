@@ -21,7 +21,7 @@ import androidx.core.graphics.drawable.IconCompat
 object NotificationHelper {
 
     const val MSG_CHANNEL_ID = "knotlink_msg_channel_v4"
-    const val CALL_CHANNEL_ID = "knotlink_calls_channel_v2"
+    const val CALL_CHANNEL_ID = "knotlink_calls_channel_v3"
     const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel"
 
     @Volatile
@@ -414,6 +414,18 @@ object NotificationHelper {
         }
 
         createNotificationChannels(context)
+
+        // Android 14+ can revoke/disable full-screen intent access. Log the
+        // actual system state so a device-side restriction is diagnosable.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                android.util.Log.i(
+                    "NotificationHelper",
+                    "Call full-screen intent allowed=" + nm?.canUseFullScreenIntent
+                )
+            } catch (_: Throwable) {}
+        }
 
         val normalizedCallType = if (callType.contains("video", ignoreCase = true)) "VIDEO" else "AUDIO"
         val isVideoCall = normalizedCallType == "VIDEO"
