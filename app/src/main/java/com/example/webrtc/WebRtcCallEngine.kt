@@ -799,7 +799,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         )
     }
 
-    fun endCall(notifyRemote: Boolean = true) {
+    fun endCall(notifyRemote: Boolean = false) {
         val callId = _engineState.value.activeCallId
         if (notifyRemote && callId != null) {
             scope.launch {
