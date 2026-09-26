@@ -98,6 +98,8 @@ data class PublicUserProfile(
 )
 
 class BitChatRepository(val dao: BitChatDao) {
+    private val messagePushScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
 
     private val historySyncMutex = kotlinx.coroutines.sync.Mutex()
     private val lastHistorySyncAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -761,18 +763,20 @@ class BitChatRepository(val dao: BitChatDao) {
                 }
 
                 if (finalRecipient.isNotBlank()) {
-                    @Suppress("OPT_IN_USAGE")
-                    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    // Repository-owned scope keeps the FCM request alive instead of using GlobalScope.
+                    messagePushScope.launch {
                         try {
-                            Log.d("BitChatRepository", "Sending message FCM push to recipient: $finalRecipient (chatId: $chatId)")
+                            Log.d("BitChatRepository", "Sending message FCM push to recipient: $finalRecipient (chatId: $targetChatId)")
                             com.example.util.FcmPushSender.sendPushToUser(
                                 targetUserIdOrName = finalRecipient,
                                 type = "message",
                                 title = "New Message from $mySenderName",
                                 body = com.example.util.NotificationHelper.formatCleanPreviewText(text),
                                 senderName = mySenderName,
-                                chatId = chatId,
-                                senderAvatar = currentIdentity?.avatarPath,
+                                chatId = targetChatId,
+                                senderAvatar = currentIdentity?.avatarPath
+                                    ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                                    ?: dao.getCachedProfile(currentUid)?.avatarUrl,
                                 senderId = currentUid,
                                 serverMessageId = finalServerId,
                                 messageType = fcmMsgType
