@@ -507,7 +507,6 @@ fun VideoCallScreen(
                                 isActive = true,
                                 isEndCall = true,
                                 onClick = {
-                                    viewModel?.endCall()
                                     onEndCallClick()
                                 }
                             )
