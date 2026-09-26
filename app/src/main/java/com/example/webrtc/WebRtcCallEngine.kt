@@ -181,6 +181,22 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     /**
      * Start a WebRTC call session as Caller or Receiver.
      */
+    /**
+     * Warm up WebRTC native/audio resources while the incoming call is still ringing.
+     * This keeps the expensive first-time factory initialization off the Answer path.
+     */
+    fun prewarmForCall() {
+        scope.launch(Dispatchers.Default) {
+            try {
+                eglBaseContext
+                peerConnectionFactory
+                Log.d(TAG, "WebRTC call resources pre-warmed")
+            } catch (e: Throwable) {
+                Log.w(TAG, "WebRTC prewarm failed: ${e.message}")
+            }
+        }
+    }
+
     fun startCall(
         callId: String = "session_${System.currentTimeMillis()}",
         isCaller: Boolean = true,
