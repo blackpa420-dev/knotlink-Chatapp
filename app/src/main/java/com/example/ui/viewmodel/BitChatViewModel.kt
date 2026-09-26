@@ -405,7 +405,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     } else if (update.status == "ENDED" || update.status == "CANCELLED") {
                         handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = false, callId = update.id)
                     }
-                    if (_activeCall.value.isActive && update.status.equals("CONNECTED", ignoreCase = true)) {
+                    // A remote DB CONNECTED status is not proof that this device's
+                    // WebRTC ICE connection is connected. The engine state is authoritative.
+                    if (_activeCall.value.isActive &&
+                        update.status.equals("CONNECTED", ignoreCase = true) &&
+                        callEngine.engineState.value.isConnected) {
                         startCallTimer(update.connectedAt)
                     }
                 }
