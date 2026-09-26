@@ -47,7 +47,9 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                     }
                     val endIntent = Intent("com.knotlink.CALL_ENDED").apply {
                         putExtra("caller_name", callerName)
+                        putExtra("call_id", callId)
                         putExtra("chat_id", callId)
+                        putExtra("caller_id", callerId)
                         setPackage(context.packageName)
                     }
                     context.sendBroadcast(endIntent)
