@@ -152,6 +152,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     private var timerJob: Job? = null
     private var signalingJob: Job? = null
     private var realtimeObserverJob: Job? = null
+    private var videoCaptureControlJob: Job? = null
     private var lastQualityChangeAt: Long = 0L
     private var videoCapturePausedByScreen = false
 
@@ -287,23 +288,14 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     capturer.initialize(helper, context, vSource.capturerObserver)
                     
                     try {
-                        capturer.startCapture(2560, 1440, 30)
-                        Log.d(TAG, "Camera started capture at 2560x1440 @ 30 FPS")
+                        capturer.startCapture(1280, 720, 30)
+                        Log.d(TAG, "Camera started capture at 1280x720 @ 30 FPS")
                     } catch (e: Throwable) {
-                        Log.w(TAG, "2K capture unavailable, trying 1920x1080")
+                        Log.w(TAG, "720p capture unavailable, trying 640x480")
                         try {
-                            capturer.startCapture(1920, 1080, 30)
+                            capturer.startCapture(640, 480, 24)
                         } catch (e2: Throwable) {
-                            Log.w(TAG, "1080p capture unavailable, trying 1280x720")
-                            try {
-                                capturer.startCapture(1280, 720, 30)
-                            } catch (e3: Throwable) {
-                                try {
-                                    capturer.startCapture(640, 480, 24)
-                                } catch (e4: Throwable) {
-                                    Log.e(TAG, "All camera startCapture attempts failed")
-                                }
-                            }
+                            Log.e(TAG, "All camera startCapture attempts failed", e2)
                         }
                     }
 
@@ -784,21 +776,27 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         if (!_engineState.value.isCallActive || !_engineState.value.isCameraOn) return
         if (paused == videoCapturePausedByScreen) return
 
-        try {
-            if (paused) {
-                localVideoTrackInstance?.setEnabled(false)
-                videoCapturer?.stopCapture()
-                videoCapturePausedByScreen = true
-            } else {
-                videoCapturer?.startCapture(1280, 720, 30)
-                localVideoTrackInstance?.setEnabled(true)
-                videoCapturePausedByScreen = false
+        // Camera stop/start can block while the camera session transitions.
+        // Keep that work off MainActivity's BroadcastReceiver/main thread.
+        videoCaptureControlJob?.cancel()
+        videoCaptureControlJob = scope.launch(Dispatchers.Default) {
+            try {
+                if (!_engineState.value.isCallActive || !_engineState.value.isCameraOn) return@launch
+                if (paused) {
+                    localVideoTrackInstance?.setEnabled(false)
+                    videoCapturer?.stopCapture()
+                    videoCapturePausedByScreen = true
+                } else {
+                    if (!videoCapturePausedByScreen || !_engineState.value.isCallActive) return@launch
+                    videoCapturer?.startCapture(1280, 720, 30)
+                    localVideoTrackInstance?.setEnabled(true)
+                    videoCapturePausedByScreen = false
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "setVideoPausedByScreen error: " + e.message)
             }
-        } catch (e: Throwable) {
-            Log.w(TAG, "setVideoPausedByScreen error: ${e.message}")
         }
     }
-
     fun switchCamera(): Boolean {
         val newFront = !_engineState.value.isFrontCamera
         videoCapturer?.switchCamera(null)
@@ -829,6 +827,8 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             }
         }
 
+        videoCaptureControlJob?.cancel()
+        videoCaptureControlJob = null
         signalingJob?.cancel()
         signalingJob = null
         realtimeObserverJob?.cancel()
