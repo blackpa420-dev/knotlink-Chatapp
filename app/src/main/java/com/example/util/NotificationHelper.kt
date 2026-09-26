@@ -548,6 +548,45 @@ object NotificationHelper {
         }
     }
 
+    private fun persistFcmTokenWithRetry(context: Context, userId: String, token: String) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val identityIds = try {
+                val db = com.example.data.local.BitChatDatabase.getDatabase(context)
+                val iden = db.bitChatDao().getUserIdentitySync()
+                listOfNotNull(
+                    userId.takeIf { it.isNotBlank() },
+                    iden?.supabaseUid?.takeIf { it.isNotBlank() },
+                    iden?.username?.takeIf { it.isNotBlank() },
+                    iden?.email?.takeIf { it.isNotBlank() }
+                ).distinct()
+            } catch (_: Throwable) {
+                listOf(userId)
+            }
+
+            val delays = longArrayOf(0L, 1000L, 2500L, 5000L, 8000L)
+            for ((attempt, waitMs) in delays.withIndex()) {
+                if (waitMs > 0) delay(waitMs)
+
+                var anySuccess = false
+                for (identityId in identityIds) {
+                    try {
+                        val result = com.example.data.supabase.SupabaseService.updateFcmToken(identityId, token)
+                        if (result.getOrNull() == true) anySuccess = true
+                    } catch (e: Throwable) {
+                        android.util.Log.w("KnotLinkFCM", "Token upload attempt ${attempt + 1} failed for $identityId: ${e.message}")
+                    }
+                }
+
+                if (anySuccess) {
+                    android.util.Log.i("KnotLinkFCM", "FCM token persisted to Supabase after attempt ${attempt + 1}")
+                    return@launch
+                }
+            }
+
+            android.util.Log.w("KnotLinkFCM", "FCM token could not be persisted after bounded retries")
+        }
+    }
+
     fun registerFcmToken(context: Context, userId: String) {
         if (userId.isBlank()) return
         try {
@@ -601,39 +640,15 @@ object NotificationHelper {
                             val prefs = context.getSharedPreferences("knotlink_fcm_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putString("fcm_token", token).apply()
 
-                            CoroutineScope(Dispatchers.IO).launch {
-                                // 1. Update directly by passed userId
-                                com.example.data.supabase.SupabaseService.updateFcmToken(userId, token)
-
-                                // 2. Query Room DB UserIdentity to also register for UID, username, and email
-                                try {
-                                    val db = com.example.data.local.BitChatDatabase.getDatabase(context)
-                                    val iden = db.bitChatDao().getUserIdentitySync()
-                                    if (iden != null) {
-                                        if (iden.supabaseUid.isNotBlank() && iden.supabaseUid != userId) {
-                                            com.example.data.supabase.SupabaseService.updateFcmToken(iden.supabaseUid, token)
-                                        }
-                                        if (iden.username.isNotBlank() && iden.username != userId) {
-                                            com.example.data.supabase.SupabaseService.updateFcmToken(iden.username, token)
-                                        }
-                                        if (iden.email.isNotBlank() && iden.email != userId) {
-                                            com.example.data.supabase.SupabaseService.updateFcmToken(iden.email, token)
-                                        }
-                                    }
-                                } catch (e: Throwable) {
-                                    android.util.Log.w("KnotLinkFCM", "Error registering identity tokens: ${e.message}")
-                                }
-                            }
+                            persistFcmTokenWithRetry(context, userId, token)
                         }
                     } else {
                         android.util.Log.w("KnotLinkFCM", "FCM token registration failed: ${task.exception?.message}")
-                        // Fallback: If a token was previously cached, use it to register with Supabase
-                        val prefs = context.getSharedPreferences("knotlink_fcm_prefs", Context.MODE_PRIVATE)
-                        val cached = prefs.getString("fcm_token", null)
-                        if (!cached.isNullOrBlank()) {
-                            CoroutineScope(Dispatchers.IO).launch {
-                                com.example.data.supabase.SupabaseService.updateFcmToken(userId, cached)
-                            }
+                        // Fresh installs can briefly fail token generation. Retry a few times
+                        // with bounded exponential backoff instead of losing the first pushes.
+                        CoroutineScope(Dispatchers.IO).launch {
+                            delay(1500L)
+                            registerFcmToken(context, userId)
                         }
                     }
                 } catch (e: Throwable) {
