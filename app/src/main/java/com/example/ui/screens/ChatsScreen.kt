@@ -883,7 +883,11 @@ fun ChatsScreen(
                                 }
                             }
                         } else {
-                            items(finalSortedChats, key = { it.id }) { chat ->
+                            items(
+                                finalSortedChats,
+                                key = { it.id },
+                                contentType = { "chat_row" }
+                            ) { chat ->
                                 val isArchivedTab = selectedFilter == "Archive"
                                 val isBlockedTab = selectedFilter == "Blocked"
                                 val isRestrictedTab = selectedFilter == "Restricted"
@@ -905,13 +909,6 @@ fun ChatsScreen(
                                     ?: userPresenceMap["$cleanName.link"]
                                     ?: userPresenceMap["@$cleanName"]
                                     ?: userPresenceMap["@$cleanName.link"]
-                                    ?: userPresenceMap.entries.firstOrNull {
-                                        it.key.equals(chat.name, true) ||
-                                        it.key.equals(cleanName, true) ||
-                                        it.key.equals("$cleanName.link", true) ||
-                                        (unChatId != null && it.key.equals(unChatId, true)) ||
-                                        (!otherUid.isNullOrBlank() && it.key.equals(otherUid, true))
-                                    }?.value
                                 val isUserOnline = presence?.first ?: false
                                 val isUserTyping = chatTypingStatus[chat.id] == true ||
                                     (unChatId != null && chatTypingStatus[unChatId] == true) ||
@@ -920,15 +917,7 @@ fun ChatsScreen(
                                     chatTypingStatus[chat.name.lowercase()] == true ||
                                     chatTypingStatus[cleanName] == true ||
                                     chatTypingStatus["$cleanName.link"] == true ||
-                                    chatTypingStatus["@$cleanName"] == true ||
-                                    chatTypingStatus.entries.any {
-                                        it.value == true && (
-                                            it.key.equals(chat.name, true) ||
-                                            it.key.equals(cleanName, true) ||
-                                            (!otherUid.isNullOrBlank() && it.key.equals(otherUid, true)) ||
-                                            (unChatId != null && it.key.equals(unChatId, true))
-                                        )
-                                    }
+                                    chatTypingStatus["@$cleanName"] == true
 
                                 SwipeableChatItemRow(
                                     chat = chat,
@@ -1515,6 +1504,7 @@ fun SwipeableChatItemRow(
     isTyping: Boolean = false
 ) {
     val isAssistant = chat.id == "bitassistant" || chat.id == "ai_assistant" || chat.name.contains("Assistant", ignoreCase = true) || chat.avatarType == "assistant"
+    val haptic = LocalHapticFeedback.current
     var offsetX by remember { mutableFloatStateOf(0f) }
 
     val animatedOffset by animateFloatAsState(
@@ -1698,13 +1688,16 @@ fun SwipeableChatItemRow(
                         detectTapGestures(
                             onTap = {
                                 if (offsetX != 0f) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     offsetX = 0f
                                 } else {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                     onClick()
                                 }
                             },
                             onLongPress = {
                                 if (!isAssistant && !isArchivedTab && !isBlockedTab && !isRestrictedTab) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onLongClick()
                                 }
                             }
