@@ -23,6 +23,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -1684,25 +1685,23 @@ fun SwipeableChatItemRow(
             GlassPanel(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = {
-                                if (offsetX != 0f) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    offsetX = 0f
-                                } else {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    onClick()
-                                }
-                            },
-                            onLongPress = {
-                                if (!isAssistant && !isArchivedTab && !isBlockedTab && !isRestrictedTab) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onLongClick()
-                                }
+                    .combinedClickable(
+                        onClick = {
+                            if (offsetX != 0f) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                offsetX = 0f
+                            } else {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onClick()
                             }
-                        )
-                    },
+                        },
+                        onLongClick = {
+                            if (!isAssistant && !isArchivedTab && !isBlockedTab && !isRestrictedTab) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongClick()
+                            }
+                        }
+                    ),
                 cornerRadius = 18.dp,
                 backgroundColor = itemBg,
                 borderColor = itemBorder,
