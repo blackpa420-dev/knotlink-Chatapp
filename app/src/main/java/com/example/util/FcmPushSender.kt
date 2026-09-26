@@ -158,7 +158,6 @@ object FcmPushSender {
                     if (type == "message") {
                         put("notification", JSONObject().apply {
                             put("channel_id", "knotlink_msg_channel_v4")
-                            put("click_action", "OPEN_CHAT")
                             if (!senderAvatar.isNullOrBlank() &&
                                 (senderAvatar.startsWith("http://") || senderAvatar.startsWith("https://"))) {
                                 put("image", senderAvatar)
