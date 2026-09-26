@@ -60,7 +60,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                 }
             }
         } else if (action == ACTION_ACCEPT_CALL) {
-            NotificationHelper.cancelCallNotification(context, callerName)
+            NotificationHelper.cancelCallNotification(context, callerName, callId)
 
             val mainIntent = Intent(context, com.example.MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
