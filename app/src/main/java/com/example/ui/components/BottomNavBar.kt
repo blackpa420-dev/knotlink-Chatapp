@@ -36,6 +36,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -60,6 +62,8 @@ fun BitChatBottomNavBar(
     isNightMode: Boolean = true,
     unreadChatsCount: Int = 0
 ) {
+    val haptic = LocalHapticFeedback.current
+
     // Dynamic container and chip styling for Night and Day modes
     val containerBg = if (isNightMode) Color(0xFF0F0F12) else Color(0xFFFFFFFF)
     val containerBorder = if (isNightMode) Color(0xFF26262E) else Color(0xFFE2E8F0)
@@ -140,7 +144,10 @@ fun BitChatBottomNavBar(
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null
-                            ) { onTabSelected(tab) }
+                            ) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onTabSelected(tab)
+                            }
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
@@ -201,7 +208,10 @@ fun BitChatBottomNavBar(
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null
-                            ) { onTabSelected(tab) },
+                            ) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onTabSelected(tab)
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         if (tab == BitChatNavTab.CHATS && unreadChatsCount > 0) {
