@@ -583,6 +583,7 @@ fun BitChatNavHost(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
+                    .padding(top = 68.dp)
                     .fillMaxWidth()
                     .zIndex(150f)
             ) {
