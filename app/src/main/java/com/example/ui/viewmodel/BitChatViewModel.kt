@@ -1928,10 +1928,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 // The app may be starting from a cold process after the notification
                 // tap. Give Supabase a few short retries instead of silently dropping
                 // the Accept action while the realtime/network stack initializes.
-                repeat(4) { attempt ->
+                for (attempt in 0 until 4) {
                     remoteSession = SupabaseService.getCallSession(callId).getOrNull()
                     val status = remoteSession?.status?.uppercase()
-                    if (status == "RINGING" || status == "ACCEPTED") return@repeat
+                    if (status == "RINGING" || status == "ACCEPTED") break
                     if (attempt < 3) delay(300L * (attempt + 1))
                 }
             }
