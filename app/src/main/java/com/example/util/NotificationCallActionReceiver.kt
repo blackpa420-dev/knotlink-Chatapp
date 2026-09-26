@@ -62,7 +62,9 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
         } else if (action == ACTION_ACCEPT_CALL) {
             NotificationHelper.cancelCallNotification(context, callerName, callId)
 
-            val mainIntent = Intent(context, com.example.MainActivity::class.java).apply {
+            val mainIntent = Intent(context, com.example.CallActivity::class.java).apply {
+                // Keep notification answer inside the dedicated call task.
+                // MainActivity must never be opened from the lock screen.
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("action_accept_call", true)
                 putExtra("call_id", callId)
