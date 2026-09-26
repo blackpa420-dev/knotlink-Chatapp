@@ -38,6 +38,18 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Dedicated lock-screen call task. Never opens the normal app navigation stack. -->
+        <activity
+            android:name=".CallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="${applicationId}.call"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.MyApplication" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
