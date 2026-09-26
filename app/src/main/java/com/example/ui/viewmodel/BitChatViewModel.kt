@@ -2160,13 +2160,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
 
+            // Persist a public avatar URL in the call session. A local file path
+            // from avatarPath cannot be rendered on the other device.
+            val callerPublicAvatar = resolvedAvatar
+                .takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                ?: repository.getCachedProfile(myUid)?.avatarUrl.orEmpty()
+
             // Create initial Call Session row in Supabase database FIRST
             SupabaseService.createCallSession(
                 SupabaseCallSession(
                     callId = callId,
                     callerId = myUid,
                     callerName = myName,
-                    callerAvatar = currentIdentity?.avatarPath,
+                    callerAvatar = callerPublicAvatar,
                     receiverId = resolvedReceiverId,
                     callType = callType,
                     status = "RINGING"
