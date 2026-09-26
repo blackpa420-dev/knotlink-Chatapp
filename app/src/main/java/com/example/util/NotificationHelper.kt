@@ -419,14 +419,16 @@ object NotificationHelper {
         val isVideoCall = normalizedCallType == "VIDEO"
         val callLabel = if (isVideoCall) "Incoming video call" else "Incoming audio call"
 
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(context, com.example.CallActivity::class.java).apply {
+            // Dedicated call task: safe to display above the lock screen without
+            // constructing/revealing MainActivity.
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("action_incoming_call_screen", true)
             putExtra("is_incoming_call", true)
             putExtra("call_id", callId)
             putExtra("caller_id", callerId)
             putExtra("caller_name", callerName)
-            putExtra("call_type", callType)
+            putExtra("call_type", normalizedCallType)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -437,13 +439,15 @@ object NotificationHelper {
 
         // Answer goes directly to MainActivity so cold-start acceptance does not
         // depend on a BroadcastReceiver -> Activity handoff.
-        val acceptIntent = Intent(context, MainActivity::class.java).apply {
+        val acceptIntent = Intent(context, com.example.CallActivity::class.java).apply {
+            // Answer must enter the call-only task directly. This prevents the
+            // normal KnotLink home/chat UI from being exposed while locked.
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("action_accept_call", true)
             putExtra("call_id", callId)
             putExtra("caller_id", callerId)
             putExtra("caller_name", callerName)
-            putExtra("call_type", callType)
+            putExtra("call_type", normalizedCallType)
         }
         val acceptPendingIntent = PendingIntent.getActivity(
             context,
