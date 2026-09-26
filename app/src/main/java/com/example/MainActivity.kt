@@ -62,7 +62,8 @@ class MainActivity : FragmentActivity() {
   private val callEndedReceiver = object : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
       val callerName = intent?.getStringExtra("caller_name")
-      bitChatViewModel?.handleRemoteCallEnded(callerName)
+      val callId = intent?.getStringExtra("call_id") ?: intent?.getStringExtra("chat_id")
+      bitChatViewModel?.handleRemoteCallEnded(callerName = callerName, callId = callId)
     }
   }
 
