@@ -135,11 +135,6 @@ fun ScannedUserProfileSheet(
                         contentDescription = scannedUser.name,
                         modifier = Modifier.fillMaxWidth().clip(CircleShape)
                     )
-                    scannedUser.avatarType == "alex" -> Image(
-                        painter = painterResource(R.drawable.img_alex_rivera_1784912510699),
-                        contentDescription = scannedUser.name,
-                        modifier = Modifier.fillMaxWidth().clip(CircleShape)
-                    )
                     else -> Text(
                         text = scannedUser.name.take(1).uppercase(),
                         color = Color.White,

@@ -199,6 +199,7 @@ import com.example.ui.viewmodel.BitChatViewModel
 
 val AladinFontFamily = AppFontFamily
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ChatsScreen(
     viewModel: BitChatViewModel,
@@ -272,7 +273,7 @@ fun ChatsScreen(
                         val step = (accumulatedPullY / 35f).toInt()
                         if (step > lastVibrateStep) {
                             lastVibrateStep = step
-                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
                         if (accumulatedPullY >= 350f) {
                             viewModel.setAssistantRevealed(true)
@@ -298,7 +299,7 @@ fun ChatsScreen(
                         val step = (accumulatedPullY / 35f).toInt()
                         if (step > lastVibrateStep) {
                             lastVibrateStep = step
-                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         }
                         if (accumulatedPullY >= 350f) {
                             viewModel.setAssistantRevealed(true)
@@ -620,7 +621,7 @@ fun ChatsScreen(
                                      interactionSource = interactionSource,
                                      indication = null,
                                      onClick = {
-                                         haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                          if (filter == "Deleted") {
                                              showDeletedChatsSheet = true
                                          } else {
@@ -1656,10 +1657,10 @@ fun SwipeableChatItemRow(
                     .combinedClickable(
                         onClick = {
                             if (offsetX != 0f) {
-                                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 offsetX = 0f
                             } else {
-                                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 onClick()
                             }
                         },

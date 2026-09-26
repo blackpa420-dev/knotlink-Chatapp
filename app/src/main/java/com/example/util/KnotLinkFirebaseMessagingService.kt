@@ -53,6 +53,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
+        var wakeLock: PowerManager.WakeLock? = null
         try {
             Log.d("KnotLinkFCM", "Incoming FCM Push Data: ${remoteMessage.data}")
 
@@ -66,7 +67,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
             // Acquire temporary WakeLock to wake screen for incoming call or urgent message
             val powerManager = applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            val wakeLock = powerManager?.newWakeLock(
+            wakeLock = powerManager?.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "KnotLink:FCMPushWakeLock"
             )
