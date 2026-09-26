@@ -53,13 +53,12 @@ fun DynamicIslandCallBanner(
     onExpandClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    androidx.compose.runtime.key(callState.isActive, callState.callType, callState.secondsElapsed) {
-        val minutes = callState.secondsElapsed / 60
-        val seconds = callState.secondsElapsed % 60
-        val timeFormatted = String.format("%02d:%02d", minutes, seconds)
+    val minutes = callState.secondsElapsed / 60
+    val seconds = callState.secondsElapsed % 60
+    val timeFormatted = String.format("%02d:%02d", minutes, seconds)
 
-        val infiniteTransition = rememberInfiniteTransition(label = "bannerGradient")
-        val animatedProgress by infiniteTransition.animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "bannerGradient")
+    val animatedProgress by infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -69,7 +68,7 @@ fun DynamicIslandCallBanner(
             label = "bannerGradientProgress"
         )
 
-        val darkGradientBrush = Brush.horizontalGradient(
+    val darkGradientBrush = Brush.horizontalGradient(
             colors = listOf(
                 Color(0xFF06101E), // Ultra dark Navy
                 Color(0xFF022C22), // Deep Dark Emerald
@@ -81,11 +80,11 @@ fun DynamicIslandCallBanner(
             tileMode = TileMode.Mirror
         )
 
-        val interactionSource = remember { MutableInteractionSource() }
-        val isPressed by interactionSource.collectIsPressedAsState()
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
 
-        androidx.compose.material3.Surface(
-            modifier = Modifier
+    androidx.compose.material3.Surface(
+            modifier = modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 4.dp)
                 .scale(if (isPressed) 0.985f else 1f),
@@ -149,7 +148,6 @@ fun DynamicIslandCallBanner(
                 }
             }
         }
-    }
 }
 
 
