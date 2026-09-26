@@ -105,13 +105,13 @@ fun GroupInfoScreen(
                 .fillMaxSize()
                 .padding(paddingVals)
                 .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
             com.example.ui.components.ActiveCallBulletinSlot(
                 viewModel = viewModel,
                 onExpandClick = onActiveCallBannerClick
             )
 
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
             Box(
                 modifier = Modifier
                     .size(96.dp)
