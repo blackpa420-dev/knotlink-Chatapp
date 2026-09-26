@@ -410,14 +410,17 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val acceptIntent = Intent(context, NotificationCallActionReceiver::class.java).apply {
-            action = NotificationCallActionReceiver.ACTION_ACCEPT_CALL
+        // Answer goes directly to MainActivity so cold-start acceptance does not
+        // depend on a BroadcastReceiver -> Activity handoff.
+        val acceptIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("action_accept_call", true)
             putExtra("call_id", callId)
             putExtra("caller_id", callerId)
             putExtra("caller_name", callerName)
             putExtra("call_type", callType)
         }
-        val acceptPendingIntent = PendingIntent.getBroadcast(
+        val acceptPendingIntent = PendingIntent.getActivity(
             context,
             callNotificationId(callId, callerName) + 1,
             acceptIntent,
