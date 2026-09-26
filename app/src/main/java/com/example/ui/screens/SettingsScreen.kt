@@ -154,6 +154,7 @@ import com.example.ui.viewmodel.BitChatViewModel
 fun SettingsScreen(
     viewModel: BitChatViewModel,
     onTabSelected: (BitChatNavTab) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     onLogoutClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -273,6 +274,11 @@ fun SettingsScreen(
                     fontFamily = FontFamily.Monospace
                 )
             }
+
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
