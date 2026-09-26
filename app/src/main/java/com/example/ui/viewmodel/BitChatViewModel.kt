@@ -297,48 +297,50 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         try {
                             val senderDisplayName = handledEntity.senderName.ifBlank { supaMsg.senderName }
                             var senderAvatarBitmap: android.graphics.Bitmap? = null
-                            // Resolve the sender avatar from every local/remote source available.
-                            // Foreground Realtime can arrive before Room has the sender profile.
+                            // Resolve notification artwork off the main thread. Foreground
+                            // Realtime delivery must not block Compose/UI rendering.
                             try {
-                                val localChat = repository.getChatById(supaMsg.chatId)
-                                val localAvatar = localChat?.avatarType.orEmpty()
+                                senderAvatarBitmap = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    val localChat = repository.getChatById(supaMsg.chatId)
+                                    val localAvatar = localChat?.avatarType.orEmpty()
 
-                                fun loadAvatar(source: String): android.graphics.Bitmap? {
-                                    if (source.isBlank() || source == "default") return null
-                                    return try {
-                                        when {
-                                            source.startsWith("http://", ignoreCase = true) ||
-                                                source.startsWith("https://", ignoreCase = true) -> {
-                                                val connection = java.net.URL(source).openConnection() as java.net.HttpURLConnection
-                                                connection.connectTimeout = 2500
-                                                connection.readTimeout = 2500
-                                                connection.connect()
-                                                connection.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                    fun loadAvatar(source: String): android.graphics.Bitmap? {
+                                        if (source.isBlank() || source == "default") return null
+                                        return try {
+                                            when {
+                                                source.startsWith("http://", ignoreCase = true) ||
+                                                    source.startsWith("https://", ignoreCase = true) -> {
+                                                    val connection = java.net.URL(source).openConnection() as java.net.HttpURLConnection
+                                                    connection.connectTimeout = 2500
+                                                    connection.readTimeout = 2500
+                                                    connection.connect()
+                                                    connection.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                                }
+                                                source.startsWith("content://", ignoreCase = true) -> {
+                                                    application.contentResolver.openInputStream(android.net.Uri.parse(source))
+                                                        ?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                                }
+                                                else -> {
+                                                    val file = java.io.File(source)
+                                                    if (file.isFile) android.graphics.BitmapFactory.decodeFile(file.absolutePath) else null
+                                                }
                                             }
-                                            source.startsWith("content://", ignoreCase = true) -> {
-                                                application.contentResolver.openInputStream(android.net.Uri.parse(source))
-                                                    ?.use { android.graphics.BitmapFactory.decodeStream(it) }
-                                            }
-                                            else -> {
-                                                val file = java.io.File(source)
-                                                if (file.isFile) android.graphics.BitmapFactory.decodeFile(file.absolutePath) else null
-                                            }
-                                        }
-                                    } catch (_: Throwable) { null }
-                                }
+                                        } catch (_: Throwable) { null }
+                                    }
 
-                                senderAvatarBitmap = loadAvatar(localAvatar)
-
-                                if (senderAvatarBitmap == null && supaMsg.senderId.isNotBlank()) {
-                                    val profile = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
-                                    senderAvatarBitmap = loadAvatar(profile?.avatarUrl.orEmpty())
+                                    loadAvatar(localAvatar)
+                                        ?: if (supaMsg.senderId.isNotBlank()) {
+                                            val profile = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
+                                            loadAvatar(profile?.avatarUrl.orEmpty())
+                                        } else null
+                                        ?: if (senderDisplayName.isNotBlank()) {
+                                            val profile = SupabaseService.getProfileByUsername(senderDisplayName).getOrNull()
+                                            loadAvatar(profile?.avatarUrl.orEmpty())
+                                        } else null
                                 }
-
-                                if (senderAvatarBitmap == null && senderDisplayName.isNotBlank()) {
-                                    val profile = SupabaseService.getProfileByUsername(senderDisplayName).getOrNull()
-                                    senderAvatarBitmap = loadAvatar(profile?.avatarUrl.orEmpty())
-                                }
-                            } catch (_: Throwable) { }
+                            } catch (_: Throwable) {
+                                senderAvatarBitmap = null
+                            }
                             com.example.util.NotificationHelper.showIncomingMessageNotification(
                                 context = application,
                                 senderName = senderDisplayName,
