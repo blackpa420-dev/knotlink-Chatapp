@@ -91,9 +91,9 @@ object SupabaseRealtimeManager {
         if (!uid.isNullOrBlank()) {
             scope.launch(Dispatchers.IO) {
                 try {
-                    SupabaseService.updatePresence(uid, true)
+                    SupabaseService.updatePresence(uid, true, force = true)
                     if (!uname.isNullOrBlank() && uname != uid) {
-                        SupabaseService.updatePresence(uname, true)
+                        SupabaseService.updatePresence(uname, true, force = true)
                     }
                     val presenceRes = SupabaseService.getAllUserPresence()
                     if (presenceRes.isSuccess) {
@@ -405,7 +405,7 @@ object SupabaseRealtimeManager {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in sync loop: " + e.message)
                 }
-                delay(60_000L)
+                delay(20_000L)
             }
         }
     }
