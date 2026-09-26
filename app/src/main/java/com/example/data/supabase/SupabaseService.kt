@@ -30,7 +30,7 @@ object SupabaseService {
     private var allProfilesCache: List<SupabaseProfile>? = null
     private var allProfilesCacheAt: Long = 0L
     private val presenceUpdateTimes = ConcurrentHashMap<String, Long>()
-    private const val PRESENCE_HEARTBEAT_TTL_MS = 60_000L
+    private const val PRESENCE_HEARTBEAT_TTL_MS = 15_000L
 
     private fun getCachedProfile(key: String): SupabaseProfile? {
         val normalized = key.trim().lowercase()
@@ -1337,7 +1337,7 @@ object SupabaseService {
         }
     }
 
-    suspend fun updatePresence(userId: String, isOnline: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun updatePresence(userId: String, isOnline: Boolean, force: Boolean = false): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             if (userId.isBlank()) return@withContext Result.success(false)
             val now = System.currentTimeMillis()
@@ -1346,7 +1346,7 @@ object SupabaseService {
             // Online heartbeats are sent at most once per minute; offline transitions are immediate.
             if (isOnline) {
                 val last = presenceUpdateTimes[userId] ?: 0L
-                if (now - last < PRESENCE_HEARTBEAT_TTL_MS) {
+                if (!force && now - last < PRESENCE_HEARTBEAT_TTL_MS) {
                     return@withContext Result.success(true)
                 }
                 presenceUpdateTimes[userId] = now
