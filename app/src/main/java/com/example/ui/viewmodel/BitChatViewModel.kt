@@ -401,9 +401,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val isCurrentActiveSession = activeCallSessionId == null || update.id == activeCallSessionId
                     if (!isCurrentActiveSession && _activeCall.value.isActive) return@collect
                     if (update.status == "DECLINED") {
-                        handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = true)
+                        handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = true, callId = update.id)
                     } else if (update.status == "ENDED" || update.status == "CANCELLED") {
-                        handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = false)
+                        handleRemoteCallEnded(update.callerName.ifBlank { currentSession?.callerName }, isDeclined = false, callId = update.id)
                     }
                     if (_activeCall.value.isActive && update.status.equals("CONNECTED", ignoreCase = true)) {
                         startCallTimer(update.connectedAt)
@@ -1943,11 +1943,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                     }
                                 }
                                 "DECLINED" -> {
-                                    handleRemoteCallEnded(session.callerName, isDeclined = true)
+                                    handleRemoteCallEnded(session.callerName, isDeclined = true, callId = session.id)
                                     break
                                 }
                                 "ENDED", "CANCELLED" -> {
-                                    handleRemoteCallEnded(session.callerName, isDeclined = false)
+                                    handleRemoteCallEnded(session.callerName, isDeclined = false, callId = session.id)
                                     break
                                 }
                             }
@@ -2049,18 +2049,28 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun handleRemoteCallEnded(callerName: String? = null, isDeclined: Boolean = false) {
+    fun handleRemoteCallEnded(
+        callerName: String? = null,
+        isDeclined: Boolean = false,
+        callId: String? = null
+    ) {
+        val expectedCallId = activeCallSessionId
+        if (!callId.isNullOrBlank() && !expectedCallId.isNullOrBlank() && callId != expectedCallId) {
+            Log.d("BitChatViewModel", "Ignoring stale CALL_ENDED for $callId; active=$expectedCallId")
+            return
+        }
+
         _incomingCallSession.value = null
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), callerName ?: "", activeCallSessionId)
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), callerName ?: "", expectedCallId)
         if (_activeCall.value.isActive) {
             if (isDeclined) {
                 _activeCall.value = _activeCall.value.copy(isConnected = false, callStatus = "BUSY")
                 triggerDeclineVibration()
                 viewModelScope.launch {
                     delay(2500)
-                    callEngine.endCall()
+                    callEngine.endCall(notifyRemote = false)
                     callTimerJob?.cancel()
                     callTimerJob = null
                     callConnectTimestamp = 0L
@@ -2069,7 +2079,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     currentCallLogId = null
                 }
             } else {
-                callEngine.endCall()
+                callEngine.endCall(notifyRemote = false)
                 callTimerJob?.cancel()
                 callTimerJob = null
                 callConnectTimestamp = 0L
@@ -2249,7 +2259,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     fun endCall() {
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
-        callEngine.endCall()
+        callEngine.endCall(notifyRemote = false)
         val lastState = _activeCall.value
         val sessId = activeCallSessionId
         NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
@@ -2276,7 +2286,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
             }
-            activeCallSessionId = null
         }
         if (lastState.isActive) {
             val elapsed = lastState.secondsElapsed
@@ -2289,6 +2298,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         callTimerJob?.cancel()
         callTimerJob = null
         _activeCall.value = ActiveCallState(isActive = false)
+        activeCallSessionId = null
     }
 
     private val _isPartnerTyping = MutableStateFlow(false)
