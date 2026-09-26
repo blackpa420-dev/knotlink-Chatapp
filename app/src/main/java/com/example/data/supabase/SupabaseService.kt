@@ -1343,7 +1343,7 @@ object SupabaseService {
             val now = System.currentTimeMillis()
 
             // Avoid repeated identical presence PATCHes from multiple lifecycle/realtime paths.
-            // Online heartbeats are sent at most once per minute; offline transitions are immediate.
+            // Online heartbeats are sent at most once every 15 seconds; offline transitions are immediate.
             if (isOnline) {
                 val last = presenceUpdateTimes[userId] ?: 0L
                 if (!force && now - last < PRESENCE_HEARTBEAT_TTL_MS) {
