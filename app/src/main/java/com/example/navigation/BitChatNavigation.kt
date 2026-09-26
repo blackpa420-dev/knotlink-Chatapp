@@ -280,11 +280,13 @@ fun BitChatNavHost(
         }
     }
 
-    val showGlobalCallBanner =
-        !isInPipMode &&
-        !isCallScreenVisible &&
-        activeCallState.isActive &&
-        activeCallState.callType == "AUDIO"
+    val openActiveAudioCall = {
+        val route = BitChatRoutes.audioCall(
+            activeCallState.contactId,
+            activeCallState.contactName
+        )
+        navController.navigate(route)
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
@@ -383,6 +385,7 @@ fun BitChatNavHost(
                 onOpenQrScanner = {
                     navController.navigate(BitChatRoutes.QR_SCANNER)
                 },
+                onActiveCallBannerClick = openActiveAudioCall,
                 onTabSelected = { tab ->
                     handleTabNavigation(navController, tab)
                 }
@@ -427,7 +430,8 @@ fun BitChatNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onLeaveGroup = {
                     navController.popBackStack(BitChatRoutes.CHATS, false)
-                }
+                },
+                onActiveCallBannerClick = openActiveAudioCall
             )
         }
 
@@ -443,7 +447,8 @@ fun BitChatNavHost(
                 },
                 onTabSelected = { tab ->
                     handleTabNavigation(navController, tab)
-                }
+                },
+                onActiveCallBannerClick = openActiveAudioCall
             )
         }
 
@@ -465,7 +470,8 @@ fun BitChatNavHost(
                 },
                 onTabSelected = { tab ->
                     handleTabNavigation(navController, tab)
-                }
+                },
+                onActiveCallBannerClick = openActiveAudioCall
             )
         }
 
@@ -474,7 +480,8 @@ fun BitChatNavHost(
                 viewModel = bitChatViewModel,
                 onTabSelected = { tab ->
                     handleTabNavigation(navController, tab)
-                }
+                },
+                onActiveCallBannerClick = openActiveAudioCall
             )
         }
 
@@ -484,6 +491,7 @@ fun BitChatNavHost(
                 onTabSelected = { tab ->
                     handleTabNavigation(navController, tab)
                 },
+                onActiveCallBannerClick = openActiveAudioCall,
                 onLogoutClick = {
                     navController.navigate(BitChatRoutes.WELCOME) {
                         popUpTo(0) { inclusive = true }
@@ -508,7 +516,8 @@ fun BitChatNavHost(
                 viewModel = bitChatViewModel,
                 onBackClick = { navController.popBackStack() },
                 onAudioCallClick = { id, name -> launchCallWithPermission(id, name, false) },
-                onVideoCallClick = { id, name -> launchCallWithPermission(id, name, true) }
+                onVideoCallClick = { id, name -> launchCallWithPermission(id, name, true) },
+                onActiveCallBannerClick = openActiveAudioCall
             )
         }
 
@@ -599,31 +608,6 @@ fun BitChatNavHost(
         }
         } // NavHost
     } // Column
-
-        // The active-call bulletin floats above the page instead of reserving a
-        // fixed-height layout slot. This keeps the original screen content compact
-        // while the banner remains above the top app content and never pushes a
-        // large blank region into the UI.
-        if (showGlobalCallBanner) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .align(Alignment.TopCenter)
-                    .zIndex(150f)
-            ) {
-                DynamicIslandCallBanner(
-                    callState = activeCallState,
-                    onExpandClick = {
-                        val route = BitChatRoutes.audioCall(
-                            activeCallState.contactId,
-                            activeCallState.contactName
-                        )
-                        navController.navigate(route)
-                    }
-                )
-            }
-        }
 
         if (!isInPipMode && !isCallScreenVisible && activeCallState.isActive && activeCallState.callType == "VIDEO") {
             com.example.ui.components.FloatingVideoCallPip(
