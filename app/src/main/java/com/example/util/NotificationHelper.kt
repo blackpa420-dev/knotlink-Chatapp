@@ -21,7 +21,7 @@ import androidx.core.graphics.drawable.IconCompat
 object NotificationHelper {
 
     const val MSG_CHANNEL_ID = "knotlink_msg_channel_v4"
-    const val CALL_CHANNEL_ID = "knotlink_calls_channel"
+    const val CALL_CHANNEL_ID = "knotlink_calls_channel_v2"
     const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel"
 
     @Volatile
