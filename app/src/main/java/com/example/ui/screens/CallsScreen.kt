@@ -270,13 +270,6 @@ fun CallsScreen(
                             modifier = Modifier
                                 .size(42.dp)
                                 .clip(CircleShape)
-                                .border(
-                                    1.5.dp,
-                                    Brush.linearGradient(
-                                        listOf(Color(0xFF2563EB), Color(0xFF8B5CF6))
-                                    ),
-                                    CircleShape
-                                )
                                 .clickable { onTabSelected(BitChatNavTab.SETTINGS) },
                             contentAlignment = Alignment.Center
                         ) {
@@ -2429,16 +2422,39 @@ fun CallCardItem(
                         Brush.linearGradient(
                             listOf(Color(0xFF2563EB), Color(0xFF8B5CF6))
                         )
-                    )
-                    .border(1.5.dp, Color.White.copy(0.3f), CircleShape),
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = callLog.contactName.take(1).uppercase(),
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
+                val avatarPath = callLog.avatarType
+                val hasAvatar = avatarPath.isNotBlank() && !avatarPath.equals("default", ignoreCase = true)
+                if (hasAvatar) {
+                    val model: Any = if (
+                        avatarPath.startsWith("http://") ||
+                        avatarPath.startsWith("https://") ||
+                        avatarPath.startsWith("content://")
+                    ) {
+                        avatarPath
+                    } else {
+                        val clean = avatarPath.removePrefix("file://")
+                        val file = File(clean)
+                        if (file.exists()) file else avatarPath
+                    }
+                    AsyncImage(
+                        model = model,
+                        contentDescription = "Contact avatar",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Text(
+                        text = callLog.contactName.take(1).uppercase(),
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
