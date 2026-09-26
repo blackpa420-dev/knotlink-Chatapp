@@ -309,9 +309,16 @@ object NotificationHelper {
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setStyle(
-                    NotificationCompat.BigTextStyle()
-                        .setBigContentTitle(senderName)
-                        .bigText(cleanPreview)
+                    NotificationCompat.MessagingStyle(
+                        Person.Builder()
+                            .setName(senderName)
+                            .setIcon(
+                                profileBitmap?.let { IconCompat.createWithBitmap(it) }
+                                    ?: IconCompat.createWithBitmap(createLetterAvatarBitmap(context, senderName))
+                            )
+                            .setImportant(true)
+                            .build()
+                    ).addMessage(cleanPreview, System.currentTimeMillis(), senderName)
                 )
 
             if (profileBitmap != null) {
