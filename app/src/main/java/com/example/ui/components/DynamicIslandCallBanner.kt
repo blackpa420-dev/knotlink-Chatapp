@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,10 +82,14 @@ fun DynamicIslandCallBanner(
             tileMode = TileMode.Mirror
         )
 
+        val interactionSource = remember { MutableInteractionSource() }
+        val isPressed by interactionSource.collectIsPressedAsState()
+
         androidx.compose.material3.Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .scale(if (isPressed) 0.985f else 1f),
             shape = RoundedCornerShape(24.dp),
             shadowElevation = 8.dp,
             border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
@@ -93,7 +99,7 @@ fun DynamicIslandCallBanner(
                     .fillMaxWidth()
                     .background(darkGradientBrush)
                     .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
+                        interactionSource = interactionSource,
                         indication = null,
                         onClick = onExpandClick
                     )
