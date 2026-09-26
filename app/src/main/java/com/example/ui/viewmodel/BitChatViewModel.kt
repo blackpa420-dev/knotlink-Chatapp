@@ -1938,11 +1938,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         if (session != null && session.id == callId) {
                             when (session.status.uppercase()) {
                                 "CONNECTED" -> {
-                                    val connTime = session.connectedAt
-                                        ?: (if (callConnectTimestamp > 0) callConnectTimestamp else System.currentTimeMillis())
-                                    if (!_activeCall.value.isConnected) {
-                                        startCallTimer(connTime)
-                                    } else if (callConnectTimestamp != connTime && connTime > 0) {
+                                    // DB CONNECTED is only remote signaling state.
+                                    // The local timer starts from the WebRTC engine's
+                                    // actual ICE CONNECTED/COMPLETED callback.
+                                    val connTime = session.connectedAt ?: 0L
+                                    if (_activeCall.value.isConnected && connTime > 0L && callConnectTimestamp != connTime) {
                                         callConnectTimestamp = connTime
                                     }
                                 }
