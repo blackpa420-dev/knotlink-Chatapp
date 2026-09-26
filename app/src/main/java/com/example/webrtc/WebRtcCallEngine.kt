@@ -210,7 +210,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 startSignalingLoop(callId, isCaller)
                 startRealtimeObserver(callId, isCaller)
                 startNetworkAdaptationLoop()
-                startCallTimer()
+                // The UI/ViewModel timer starts only after local ICE CONNECTED/COMPLETED.
             } catch (e: Throwable) {
                 Log.e(TAG, "Error starting WebRTC call: ${e.message}", e)
             }
@@ -526,9 +526,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             Log.d(TAG, "Remote video track received! Attaching to sinks...")
             _remoteVideoTrack.value = vTrack
             _engineState.value = _engineState.value.copy(
-                hasRemoteVideo = true,
-                isConnected = true,
-                isConnecting = false
+                hasRemoteVideo = true
             )
             synchronized(remoteSinks) {
                 remoteSinks.forEach { vTrack.addSink(it) }
