@@ -44,7 +44,8 @@ import com.example.ui.viewmodel.BitChatViewModel
 
 @Composable
 fun BiometricLockOverlay(
-    viewModel: BitChatViewModel
+    viewModel: BitChatViewModel,
+    bypassForCallUi: Boolean = false
 ) {
     val isAppLocked by viewModel.isAppLocked.collectAsState()
     val isNightMode by viewModel.isNightMode.collectAsState()
@@ -67,14 +68,14 @@ fun BiometricLockOverlay(
         }
     }
 
-    LaunchedEffect(isAppLocked) {
-        if (isAppLocked) {
+    LaunchedEffect(isAppLocked, bypassForCallUi) {
+        if (isAppLocked && !bypassForCallUi) {
             triggerUnlockPrompt()
         }
     }
 
     AnimatedVisibility(
-        visible = isAppLocked,
+        visible = isAppLocked && !bypassForCallUi,
         enter = fadeIn(),
         exit = fadeOut()
     ) {
