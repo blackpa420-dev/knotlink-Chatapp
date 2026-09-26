@@ -734,33 +734,35 @@ fun IncomingCallOverlay(
     onAccept: () -> Unit,
     onDecline: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "ring_pulse")
-    val pulseScale1 by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.18f,
+    val infiniteTransition = rememberInfiniteTransition(label = "incoming_call_pulse")
+    val ringScale by infiniteTransition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.12f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1100, easing = FastOutSlowInEasing),
+            animation = tween(1250, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulse1"
+        label = "ring_scale"
     )
-    val pulseScale2 by infiniteTransition.animateFloat(
-        initialValue = 1.04f,
-        targetValue = 1.30f,
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.12f,
+        targetValue = 0.26f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
+            animation = tween(1250, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulse2"
+        label = "ring_alpha"
     )
 
     val isVideo = call.callType.equals("VIDEO", ignoreCase = true)
     val haptic = LocalHapticFeedback.current
+    val surface = Color(0xFF111827)
+    val border = Color.White.copy(alpha = 0.10f)
 
     AnimatedVisibility(
         visible = true,
-        enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(320)),
-        exit = fadeOut(tween(160)),
+        enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.97f, animationSpec = tween(320)),
+        exit = fadeOut(tween(180)),
         modifier = Modifier.fillMaxSize().zIndex(250f)
     ) {
         Box(
@@ -768,79 +770,78 @@ fun IncomingCallOverlay(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        listOf(Color(0xFF07111F), Color(0xFF0A1626), Color(0xFF02050A))
+                        listOf(Color(0xFF050B16), Color(0xFF0B1324), Color(0xFF111827))
                     )
-                ),
-            contentAlignment = Alignment.Center
+                )
         ) {
             Box(
                 modifier = Modifier
-                    .size(280.dp)
-                    .scale(pulseScale2)
-                    .clip(CircleShape)
-                    .background(Color(0xFF2563EB).copy(alpha = 0.07f))
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color(0xFF2563EB).copy(alpha = 0.18f), Color.Transparent),
+                            radius = 720f
+                        )
+                    )
             )
 
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 28.dp, vertical = 42.dp)
+                    .statusBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.statusBarsPadding()
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color.White.copy(alpha = 0.055f))
+                        .border(1.dp, border, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    Icon(
+                        imageVector = if (isVideo) Icons.Default.Videocam else Icons.Default.Call,
+                        contentDescription = null,
+                        tint = Color(0xFF60A5FA),
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (isVideo) "Incoming video call" else "Incoming audio call",
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(0.82f))
+
+                Box(
+                    modifier = Modifier.size(224.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(Color.White.copy(alpha = 0.07f))
-                            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(18.dp))
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                            .size(214.dp)
+                            .scale(ringScale)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2563EB).copy(alpha = glowAlpha))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(176.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.045f))
+                            .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF34D399))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isVideo) "Incoming video call" else "Incoming voice call",
-                            color = Color.White.copy(alpha = 0.88f),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(bottom = 24.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(210.dp)) {
-                        Box(
-                            modifier = Modifier
-                                .size(184.dp)
-                                .scale(pulseScale2)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2563EB).copy(alpha = 0.10f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(154.dp)
-                                .scale(pulseScale1)
-                                .clip(CircleShape)
-                                .background(Color(0xFF3B82F6).copy(alpha = 0.16f))
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(128.dp)
+                                .size(150.dp)
                                 .clip(CircleShape)
                                 .background(Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF4F46E5))))
-                                .border(2.dp, Color.White.copy(alpha = 0.22f), CircleShape),
+                                .border(2.dp, Color.White.copy(alpha = 0.18f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             val avatarUrl = call.callerAvatar
@@ -851,43 +852,54 @@ fun IncomingCallOverlay(
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                                     loading = {
-                                        Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                                        Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Bold)
                                     },
                                     error = {
-                                        Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                                        Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Bold)
                                     }
                                 )
                             } else {
-                                Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+                                Text(call.callerName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 46.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-                    Text(
-                        text = call.callerName.ifBlank { "Unknown Caller" },
-                        color = Color.White,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(7.dp))
-                    Text(
-                        text = "KnotLink • End-to-end encrypted",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 13.sp
-                    )
                 }
 
+                Spacer(modifier = Modifier.height(22.dp))
+
+                Text(
+                    text = call.callerName.ifBlank { "Unknown Caller" },
+                    color = Color.White,
+                    fontSize = 29.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = if (isVideo) "Wants to start a video call" else "Wants to start an audio call",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 14.sp
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(28.dp))
+                        .background(surface.copy(alpha = 0.88f))
+                        .border(1.dp, border, RoundedCornerShape(28.dp))
+                        .padding(horizontal = 18.dp, vertical = 18.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IncomingCallActionButton(
                         icon = Icons.Default.CallEnd,
                         label = "Decline",
-                        background = Color(0xFFDC2626),
-                        pressedBackground = Color(0xFFB91C1C),
+                        background = Color(0xFFE11D48),
+                        pressedBackground = Color(0xFFBE123C),
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onDecline()
@@ -905,10 +917,13 @@ fun IncomingCallOverlay(
                         }
                     )
                 }
+
+                Spacer(modifier = Modifier.height(18.dp))
             }
         }
     }
 }
+
 
 @Composable
 private fun IncomingCallActionButton(
