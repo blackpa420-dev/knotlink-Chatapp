@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import org.webrtc.*
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.ConcurrentHashMap
 
 enum class CallQuality(
@@ -107,7 +108,13 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     private val peerConnectionFactory: PeerConnectionFactory? by lazy {
         try {
             initWebRtcInternal()
+            val audioDeviceModule = JavaAudioDeviceModule.builder(context)
+                .setUseHardwareAcousticEchoCanceler(true)
+                .setUseHardwareNoiseSuppressor(true)
+                .createAudioDeviceModule()
+
             val builder = PeerConnectionFactory.builder()
+                .setAudioDeviceModule(audioDeviceModule)
             eglBaseContext?.let { ctx ->
                 try {
                     builder.setVideoEncoderFactory(DefaultVideoEncoderFactory(ctx, true, true))
