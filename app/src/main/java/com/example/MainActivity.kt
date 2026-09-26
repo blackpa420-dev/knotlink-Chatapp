@@ -238,9 +238,14 @@ class MainActivity : FragmentActivity() {
 
   override fun onStop() {
     super.onStop()
-    try {
-      com.example.data.supabase.SupabaseRealtimeManager.onAppBackground()
-    } catch (_: Throwable) {}
+    // Keep realtime alive for an active call, including system PiP.
+    // Otherwise remote hang-up/signaling can be delayed until the activity returns.
+    val activeCall = bitChatViewModel?.activeCall?.value
+    if (activeCall?.isActive != true) {
+      try {
+        com.example.data.supabase.SupabaseRealtimeManager.onAppBackground()
+      } catch (_: Throwable) {}
+    }
   }
 
   override fun onDestroy() {
