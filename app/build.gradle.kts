@@ -133,34 +133,3 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
-
-class KspAwtExceptionHandler(
-  private val delegate: Thread.UncaughtExceptionHandler?
-) : Thread.UncaughtExceptionHandler {
-  override fun uncaughtException(t: Thread, e: Throwable) {
-    val isKspAwtNpe = t.name.startsWith("AWT-EventQueue") &&
-      e is NullPointerException &&
-      e.stackTrace.any { it.className.startsWith("ksp.com.intellij.") }
-    if (isKspAwtNpe) return
-    if (delegate != null) {
-      delegate.uncaughtException(t, e)
-    } else {
-      System.err.print("Exception in thread \"${t.name}\" ")
-      e.printStackTrace(System.err)
-    }
-  }
-}
-
-class SuppressKspAwtNpeAction : org.gradle.api.Action<org.gradle.api.Task> {
-  override fun execute(task: org.gradle.api.Task) {
-    val current = Thread.getDefaultUncaughtExceptionHandler()
-    if (current == null || current.javaClass.name != KspAwtExceptionHandler::class.java.name) {
-      Thread.setDefaultUncaughtExceptionHandler(KspAwtExceptionHandler(current))
-    }
-  }
-}
-
-tasks.matching { it.name.startsWith("ksp") }.configureEach {
-  doFirst(SuppressKspAwtNpeAction())
-}
-
