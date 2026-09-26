@@ -207,6 +207,7 @@ fun ChatsScreen(
     onVideoCallClick: (String) -> Unit,
     onOpenQrScanner: () -> Unit = {},
     onTabSelected: (BitChatNavTab) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val chats by viewModel.filteredChats.collectAsState()
@@ -533,6 +534,11 @@ fun ChatsScreen(
                         )
                     )
                 }
+
+                com.example.ui.components.ActiveCallBulletinSlot(
+                    viewModel = viewModel,
+                    onExpandClick = onActiveCallBannerClick
+                )
 
                 // Full Width Search Bar pill
                 Box(
