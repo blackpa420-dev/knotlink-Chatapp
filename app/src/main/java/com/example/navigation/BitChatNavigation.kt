@@ -201,11 +201,16 @@ fun BitChatNavHost(
 
     // Auto-navigate to Full Screen Call (Video/Audio) when call accepted from notification or overlay
     val pendingCallRoute by bitChatViewModel.pendingCallNavigationRoute.collectAsState()
-    androidx.compose.runtime.LaunchedEffect(pendingCallRoute) {
+    androidx.compose.runtime.LaunchedEffect(pendingCallRoute, currentRoute) {
         val route = pendingCallRoute
         if (!route.isNullOrBlank()) {
-            navController.navigate(route) {
-                popUpTo(BitChatRoutes.CHATS)
+            val isAlreadyOnRequestedCallScreen =
+                (route.startsWith("video_call") && currentRoute.startsWith("video_call")) ||
+                (route.startsWith("audio_call") && currentRoute.startsWith("audio_call"))
+            if (!isAlreadyOnRequestedCallScreen) {
+                navController.navigate(route) {
+                    popUpTo(BitChatRoutes.CHATS)
+                }
             }
             bitChatViewModel.clearPendingCallNavigationRoute()
         }
