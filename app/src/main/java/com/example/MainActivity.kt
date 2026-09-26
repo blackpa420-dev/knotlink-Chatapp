@@ -35,12 +35,37 @@ class MainActivity : FragmentActivity() {
   private var bitChatViewModel: BitChatViewModel? = null
   private var wasCallActiveInSession = false
   private var currentIntentState = mutableStateOf<Intent?>(null)
+  private var pendingAcceptedCall: PendingAcceptedCall? = null
+
+  private data class PendingAcceptedCall(
+    val callId: String,
+    val callerId: String,
+    val callerName: String,
+    val callType: String
+  )
 
   private val requestPermissionLauncher = registerForActivityResult(
     ActivityResultContracts.RequestMultiplePermissions()
   ) { permissions ->
     permissions.forEach { (permission, isGranted) ->
       Log.d("BitChat_Debug", "Permission $permission granted: $isGranted")
+    }
+
+    val pending = pendingAcceptedCall
+    if (pending != null) {
+      pendingAcceptedCall = null
+      val isVideo = pending.callType.equals("VIDEO", ignoreCase = true)
+      if (com.example.util.PermissionUtils.hasCallPermissions(this, isVideo)) {
+        bitChatViewModel?.handleIncomingCallIntent(
+          pending.callId,
+          pending.callerId,
+          pending.callerName,
+          pending.callType,
+          autoAccept = true
+        )
+      } else {
+        Log.w("BitChat_Debug", "Incoming call answer cancelled because required permissions were denied")
+      }
     }
   }
 
@@ -182,7 +207,15 @@ class MainActivity : FragmentActivity() {
 
     val vm = bitChatViewModel ?: return
     when {
-      actionAcceptCall -> vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = true)
+      actionAcceptCall -> {
+        val isVideo = callType.equals("VIDEO", ignoreCase = true)
+        if (com.example.util.PermissionUtils.hasCallPermissions(this, isVideo)) {
+          vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = true)
+        } else {
+          pendingAcceptedCall = PendingAcceptedCall(callId, callerId, callerName, callType)
+          requestPermissionLauncher.launch(com.example.util.PermissionUtils.getCallPermissions(isVideo))
+        }
+      }
       actionIncomingCallScreen -> vm.handleIncomingCallIntent(callId, callerId, callerName, callType, autoAccept = false)
       else -> {
         val openChatId = intent.getStringExtra("open_chat_id") ?: intent.getStringExtra("chat_id")
