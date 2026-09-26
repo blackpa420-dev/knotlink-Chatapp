@@ -193,9 +193,7 @@ fun BitChatNavHost(
     androidx.compose.runtime.LaunchedEffect(isInPipMode, activeCallState.isActive, activeCallState.callType) {
         if (isInPipMode && activeCallState.isActive && activeCallState.callType == "VIDEO" && !currentRoute.startsWith("video_call")) {
             val route = BitChatRoutes.videoCall(activeCallState.contactId, activeCallState.contactName)
-            navController.navigate(route) {
-                popUpTo(BitChatRoutes.CHATS)
-            }
+            navController.navigate(route)
         }
     }
 
@@ -208,9 +206,7 @@ fun BitChatNavHost(
                 (route.startsWith("video_call") && currentRoute.startsWith("video_call")) ||
                 (route.startsWith("audio_call") && currentRoute.startsWith("audio_call"))
             if (!isAlreadyOnRequestedCallScreen) {
-                navController.navigate(route) {
-                    popUpTo(BitChatRoutes.CHATS)
-                }
+                navController.navigate(route)
             }
             bitChatViewModel.clearPendingCallNavigationRoute()
         }
@@ -525,13 +521,13 @@ fun BitChatNavHost(
                 viewModel = bitChatViewModel,
                 isInPipMode = isInPipMode,
                 onBackClick = {
-                    navController.navigate(BitChatRoutes.chatDetail(contactId, resolvedName)) {
-                        popUpTo(BitChatRoutes.CHATS)
+                    navController.popBackStack()
+                },
                     }
                 },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
-                    navController.popBackStack(BitChatRoutes.CHATS, false)
+                    navController.popBackStack()
                 }
             )
         }
@@ -567,13 +563,13 @@ fun BitChatNavHost(
                 contactName = resolvedName,
                 viewModel = bitChatViewModel,
                 onBackClick = {
-                    navController.navigate(BitChatRoutes.chatDetail(contactId, resolvedName)) {
-                        popUpTo(BitChatRoutes.CHATS)
+                    navController.popBackStack()
+                },
                     }
                 },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
-                    navController.popBackStack(BitChatRoutes.CHATS, false)
+                    navController.popBackStack()
                 },
                 onChatClick = {
                     navController.navigate(BitChatRoutes.chatDetail(contactId, resolvedName)) {
