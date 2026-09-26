@@ -306,7 +306,7 @@ object NotificationHelper {
             }
 
             val senderPerson = Person.Builder()
-                .setName(senderName)
+                .setName(visibleSenderName)
                 .setIcon(
                     profileBitmap?.let { IconCompat.createWithBitmap(it) }
                         ?: IconCompat.createWithBitmap(createLetterAvatarBitmap(context, senderName))
