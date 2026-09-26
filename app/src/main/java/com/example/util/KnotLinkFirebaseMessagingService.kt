@@ -188,13 +188,21 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
                 val msgId = data["server_message_id"]?.ifBlank { null } ?: ("msg_" + java.util.UUID.randomUUID().toString().take(8))
 
-                // 1. INSTANT MESSAGE NOTIFICATION DISPLAY with deduplication
+                // 1. Resolve the avatar BEFORE the first notification render.
+                // This prevents a silent second notify() from replacing the initial
+                // avatar-less notification a moment later.
+                val messageAvatarBitmap = if (senderAvatarUrl.isNotBlank()) {
+                    downloadBitmapFromUrl(senderAvatarUrl)
+                } else {
+                    null
+                }
+
                 NotificationHelper.showIncomingMessageNotification(
                     context = applicationContext,
                     senderName = callerName,
                     text = body,
                     chatId = chatId,
-                    avatarBitmap = null,
+                    avatarBitmap = messageAvatarBitmap,
                     senderId = senderId,
                     serverMessageId = msgId
                 )
@@ -283,23 +291,8 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     }
                 }
 
-                // 3. Download profile image asynchronously to refresh notification avatar if available
-                if (senderAvatarUrl.isNotBlank()) {
-                    scope.launch {
-                        val avatarBitmap = downloadBitmapFromUrl(senderAvatarUrl)
-                        if (avatarBitmap != null) {
-                            NotificationHelper.showIncomingMessageNotification(
-                                context = applicationContext,
-                                senderName = callerName,
-                                text = body,
-                                chatId = chatId,
-                                avatarBitmap = avatarBitmap,
-                                serverMessageId = msgId,
-                                isAvatarUpdate = true
-                            )
-                        }
-                    }
-                }
+                // Avatar was resolved before the first notification render.
+                // Do not issue a second notify() update for the same message.
             }
         } catch (e: Throwable) {
             Log.w("KnotLinkFCM", "Error processing incoming FCM message: ${e.message}")
