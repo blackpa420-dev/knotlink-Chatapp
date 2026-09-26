@@ -612,7 +612,8 @@ fun BitChatNavHost(
                 }
             )
         }
-    }
+        } // NavHost
+    } // Column
 
         if (!isInPipMode && !isCallScreenVisible && activeCallState.isActive && activeCallState.callType == "VIDEO") {
             com.example.ui.components.FloatingVideoCallPip(
