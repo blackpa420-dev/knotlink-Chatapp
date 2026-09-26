@@ -485,6 +485,7 @@ object NotificationHelper {
             .setVibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000))
             .setOngoing(true)
             .setAutoCancel(true)
+            .setTimeoutAfter(60_000L)
             .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
 
