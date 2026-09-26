@@ -563,8 +563,6 @@ fun BitChatNavHost(
                 onBackClick = {
                     navController.popBackStack()
                 },
-                    }
-                },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
                     navController.popBackStack()
