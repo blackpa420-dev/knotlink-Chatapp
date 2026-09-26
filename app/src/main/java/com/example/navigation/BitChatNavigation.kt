@@ -274,11 +274,41 @@ fun BitChatNavHost(
         }
     }
 
+    val showGlobalCallBanner =
+        !isInPipMode &&
+        !isCallScreenVisible &&
+        activeCallState.isActive &&
+        activeCallState.callType == "AUDIO"
+
     Box(modifier = modifier.fillMaxSize()) {
-        NavHost(
-            navController = navController,
-            startDestination = BitChatRoutes.SPLASH,
-            modifier = Modifier.fillMaxSize(),
+        androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+            if (showGlobalCallBanner) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .height(56.dp)
+                        .zIndex(150f)
+                ) {
+                    DynamicIslandCallBanner(
+                        callState = activeCallState,
+                        onExpandClick = {
+                            val route = BitChatRoutes.audioCall(
+                                activeCallState.contactId,
+                                activeCallState.contactName
+                            )
+                            navController.navigate(route)
+                        }
+                    )
+                }
+            }
+
+            NavHost(
+                navController = navController,
+                startDestination = BitChatRoutes.SPLASH,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             enterTransition = {
                 fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.97f, animationSpec = tween(260))
             },
@@ -583,25 +613,6 @@ fun BitChatNavHost(
             )
         }
     }
-
-        if (!isInPipMode && !isCallScreenVisible && activeCallState.isActive && activeCallState.callType == "AUDIO") {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 68.dp)
-                    .fillMaxWidth()
-                    .zIndex(150f)
-            ) {
-                DynamicIslandCallBanner(
-                    callState = activeCallState,
-                    onExpandClick = {
-                        val route = BitChatRoutes.audioCall(activeCallState.contactId, activeCallState.contactName)
-                        navController.navigate(route)
-                    }
-                )
-            }
-        }
 
         if (!isInPipMode && !isCallScreenVisible && activeCallState.isActive && activeCallState.callType == "VIDEO") {
             com.example.ui.components.FloatingVideoCallPip(
