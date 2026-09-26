@@ -2162,9 +2162,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             // Persist a public avatar URL in the call session. A local file path
             // from avatarPath cannot be rendered on the other device.
-            val callerPublicAvatar = resolvedAvatar
-                .takeIf { it.startsWith("http://") || it.startsWith("https://") }
-                ?: repository.getCachedProfile(myUid)?.avatarUrl.orEmpty()
+            val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: SupabaseService.getProfile(myUid).getOrNull()?.avatarUrl.orEmpty())
 
             // Create initial Call Session row in Supabase database FIRST
             SupabaseService.createCallSession(
