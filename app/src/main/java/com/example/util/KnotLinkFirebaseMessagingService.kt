@@ -85,7 +85,17 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             val callType = data["call_type"] ?: "Voice"
             val senderId = data["sender_id"] ?: ""
             val chatId = data["chat_id"] ?: data["room_id"] ?: senderId
-            val senderAvatarUrl = data["sender_avatar"] ?: ""
+            val rawSenderAvatarUrl = data["sender_avatar"] ?: ""
+            val senderAvatarUrl = if (rawSenderAvatarUrl.startsWith("http://") || rawSenderAvatarUrl.startsWith("https://")) {
+                rawSenderAvatarUrl
+            } else {
+                try {
+                    val localDao = com.example.data.local.BitChatDatabase.getDatabase(applicationContext).bitChatDao()
+                    if (senderId.isNotBlank()) localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty() else ""
+                } catch (_: Throwable) {
+                    ""
+                }
+            }
 
             // Handle Call Cancelled / Ended / Declined Signal
             if (type.equals("call_ended", ignoreCase = true) ||
@@ -97,7 +107,9 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
                 val endIntent = Intent("com.knotlink.CALL_ENDED").apply {
                     putExtra("caller_name", callerName)
+                    putExtra("call_id", chatId)
                     putExtra("chat_id", chatId)
+                    putExtra("caller_id", senderId)
                     setPackage(packageName)
                 }
                 applicationContext.sendBroadcast(endIntent)
