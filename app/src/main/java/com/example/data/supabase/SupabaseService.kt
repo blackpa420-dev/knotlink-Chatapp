@@ -1553,32 +1553,72 @@ object SupabaseService {
 
     suspend fun updateCallSessionStatus(callId: String, status: String, endedAt: Long? = null, connectedAt: Long? = null): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId"
-            val bodyObj = JSONObject().apply {
-                put("status", status)
-                if (connectedAt != null) {
-                    put("connected_at", connectedAt)
-                }
-                if (endedAt != null) {
-                    put("ended_at", endedAt)
-                }
+            if (callId.isBlank() || status.isBlank()) return@withContext Result.success(false)
+
+            // Terminal call states must never be overwritten by a late WebRTC callback.
+            val normalizedStatus = status.uppercase()
+            val allowedPreviousStates = when (normalizedStatus) {
+                "ACCEPTED" -> "RINGING"
+                "CONNECTED" -> "RINGING,ACCEPTED"
+                "ENDED", "DECLINED", "CANCELLED" -> "RINGING,ACCEPTED,CONNECTED"
+                else -> "RINGING,ACCEPTED,CONNECTED"
             }
 
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
+            val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
+                "?id=eq.$encodedCallId&status=in.($allowedPreviousStates)&select=id,status,ended_at,connected_at"
 
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
+            val bodyObj = JSONObject().apply {
+                put("status", normalizedStatus)
+                if (connectedAt != null) put("connected_at", connectedAt)
+                if (endedAt != null) put("ended_at", endedAt)
+            }
+
+            for (attempt in 1..3) {
+                try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                        .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                        .addHeader("Content-Type", "application/json")
+                        .addHeader("Prefer", "return=representation")
+                        .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                        .build()
+
+                    val response = httpClient.newCall(request).execute()
+                    val responseBody = response.body?.string().orEmpty()
+
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "updateCallSessionStatus($callId,$normalizedStatus) HTTP ${response.code}: $responseBody")
+                    } else {
+                        val rows = try { JSONArray(responseBody).length() } catch (_: Throwable) { 0 }
+                        if (rows > 0) {
+                            Log.d(TAG, "Call session $callId transitioned to $normalizedStatus")
+                            return@withContext Result.success(true)
+                        }
+
+                        // Zero rows means the session is already terminal or not eligible for this transition.
+                        val current = getCallSession(callId).getOrNull()
+                        if (current != null && current.status.equals(normalizedStatus, ignoreCase = true)) {
+                            return@withContext Result.success(true)
+                        }
+                        if (current != null && current.status.uppercase() in setOf("ENDED", "DECLINED", "CANCELLED")) {
+                            Log.d(TAG, "Ignoring stale $normalizedStatus transition; session is already ${current.status}")
+                            return@withContext Result.success(false)
+                        }
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "updateCallSessionStatus attempt $attempt failed: ${e.message}")
+                }
+                if (attempt < 3) delay(250L * attempt)
+            }
+
+            Result.success(false)
         } catch (e: Exception) {
+            Log.e(TAG, "Error in updateCallSessionStatus", e)
             Result.failure(e)
         }
     }
-
     suspend fun getIncomingCalls(userId: String, username: String? = null, email: String? = null): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
         try {
             val thirtySecondsAgo = System.currentTimeMillis() - 45000
