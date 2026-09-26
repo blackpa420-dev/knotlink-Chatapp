@@ -296,6 +296,10 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             }
         } catch (e: Throwable) {
             Log.w("KnotLinkFCM", "Error processing incoming FCM message: ${e.message}")
+        } finally {
+            try {
+                wakeLock?.let { if (it.isHeld) it.release() }
+            } catch (_: Throwable) {}
         }
     }
 
