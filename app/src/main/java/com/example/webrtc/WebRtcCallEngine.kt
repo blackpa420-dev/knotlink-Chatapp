@@ -153,6 +153,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     private var signalingJob: Job? = null
     private var realtimeObserverJob: Job? = null
     private var lastQualityChangeAt: Long = 0L
+    private var videoCapturePausedByScreen = false
 
     private fun initWebRtcInternal() {
         if (!isWebRtcInitialized) {
@@ -777,18 +778,21 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     }
 
     fun setVideoPausedByScreen(paused: Boolean) {
-        if (_engineState.value.isCameraOn) {
-            try {
-                if (paused) {
-                    localVideoTrackInstance?.setEnabled(false)
-                    videoCapturer?.stopCapture()
-                } else {
-                    videoCapturer?.startCapture(2560, 1440, 30)
-                    localVideoTrackInstance?.setEnabled(true)
-                }
-            } catch (e: Throwable) {
-                Log.w(TAG, "setVideoPausedByScreen error: ${e.message}")
+        if (!_engineState.value.isCallActive || !_engineState.value.isCameraOn) return
+        if (paused == videoCapturePausedByScreen) return
+
+        try {
+            if (paused) {
+                localVideoTrackInstance?.setEnabled(false)
+                videoCapturer?.stopCapture()
+                videoCapturePausedByScreen = true
+            } else {
+                videoCapturer?.startCapture(1280, 720, 30)
+                localVideoTrackInstance?.setEnabled(true)
+                videoCapturePausedByScreen = false
             }
+        } catch (e: Throwable) {
+            Log.w(TAG, "setVideoPausedByScreen error: ${e.message}")
         }
     }
 
@@ -875,6 +879,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         _localVideoTrack.value = null
         _remoteVideoTrack.value = null
         processedCandidates.clear()
+        videoCapturePausedByScreen = false
 
         try {
             audioManager?.mode = AudioManager.MODE_NORMAL
