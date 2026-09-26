@@ -214,6 +214,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 // The UI/ViewModel timer starts only after local ICE CONNECTED/COMPLETED.
             } catch (e: Throwable) {
                 Log.e(TAG, "Error starting WebRTC call: ${e.message}", e)
+                // Do not leave the UI in an active-call state when WebRTC setup
+                // fails. Clean up partially-created media/PeerConnection resources.
+                endCall(notifyRemote = false)
             }
         }
     }
