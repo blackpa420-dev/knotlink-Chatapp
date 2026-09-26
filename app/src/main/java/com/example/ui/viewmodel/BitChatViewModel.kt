@@ -2146,6 +2146,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         )
         addCallLog(contactId = contactId, contactName = contactName, callType = callType, direction = "OUTGOING", durationSeconds = 0)
 
+        // Make the call screen the authoritative destination as soon as an outgoing
+        // video call becomes active, so the global floating PiP cannot steal the
+        // initial presentation while the signaling session is being created.
+        _pendingCallNavigationRoute.value = if (isVideo) {
+            com.example.navigation.BitChatRoutes.videoCall(contactId, contactName)
+        } else {
+            com.example.navigation.BitChatRoutes.audioCall(contactId, contactName)
+        }
+
         viewModelScope.launch {
             val currentIdentity = repository.userIdentity.firstOrNull()
             val myUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
