@@ -1956,8 +1956,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 status = "RINGING"
             )
 
-            if (autoAccept) acceptIncomingCall(session)
-            else if (!_activeCall.value.isActive) _incomingCallSession.value = session
+            if (autoAccept) {
+                val isVideo = session.callType.equals("VIDEO", ignoreCase = true)
+                if (com.example.util.PermissionUtils.hasCallPermissions(getApplication<Application>(), isVideo)) {
+                    acceptIncomingCall(session)
+                } else {
+                    // A notification tap cannot launch a runtime permission dialog from
+                    // the BroadcastReceiver. Hand the live session to the UI so the
+                    // normal permission launcher can complete the accept flow.
+                    _incomingCallSession.value = session
+                }
+            } else if (!_activeCall.value.isActive) {
+                _incomingCallSession.value = session
+            }
         }
     }
 
