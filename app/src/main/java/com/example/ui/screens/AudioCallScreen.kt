@@ -351,7 +351,6 @@ fun AudioCallScreen(
                         buttonSize = 64,
                         activeBgColor = Color(0xFF881337), // Soft Deep Dark Red
                         onClick = {
-                            viewModel?.endCall()
                             onEndCallClick()
                         }
                     )
