@@ -163,7 +163,9 @@ fun BitChatNavHost(
         } else if (activeCallState.isActive) {
             callRouteObservedActive = true
         } else if (callRouteObservedActive) {
-            navController.popBackStack(BitChatRoutes.CHATS, false)
+            // Return to whatever screen launched the call (usually ChatDetail),
+            // not the root Chats tab.
+            navController.popBackStack()
         }
     }
 
@@ -216,11 +218,17 @@ fun BitChatNavHost(
     var pendingIncomingCallSession by remember { mutableStateOf<com.example.data.supabase.SupabaseCallSession?>(null) }
     val incomingCallPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
+    ) { permissions ->
         val call = pendingIncomingCallSession
+        pendingIncomingCallSession = null
         if (call != null) {
-            pendingIncomingCallSession = null
-            bitChatViewModel.acceptIncomingCall(call)
+            val isVideo = call.callType.equals("VIDEO", ignoreCase = true)
+            val granted = PermissionUtils.hasCallPermissions(context, isVideo)
+            if (granted) {
+                bitChatViewModel.acceptIncomingCall(call)
+            } else {
+                Toast.makeText(context, "Camera/microphone permission is required to answer the call.", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
