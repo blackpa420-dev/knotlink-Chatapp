@@ -331,6 +331,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                 text = handledEntity.text,
                                 chatId = supaMsg.chatId,
                                 avatarBitmap = senderAvatarBitmap,
+                                senderId = supaMsg.senderId,
                                 serverMessageId = supaMsg.id
                             )
                         } catch (e: Throwable) {
