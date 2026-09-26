@@ -164,6 +164,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private var currentCallLogId: String? = null
     private var callTimerJob: Job? = null
     private var callTimeoutJob: Job? = null
+    private var outgoingCallStartJob: Job? = null
 
     private var activeChatSyncJob: Job? = null
 
@@ -2071,6 +2072,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         Log.i("BitChatViewModel", "Remote termination received: callId=${callId ?: expectedCallId}, declined=$isDeclined")
 
         _incomingCallSession.value = null
+        outgoingCallStartJob?.cancel()
+        outgoingCallStartJob = null
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
         callTimeoutJob?.cancel()
@@ -2128,6 +2131,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startCall(contactId: String, contactName: String, callType: String = "AUDIO") {
+        outgoingCallStartJob?.cancel()
         callTimerJob?.cancel()
         callConnectTimestamp = 0L
         val isVideo = callType.equals("VIDEO", ignoreCase = true)
@@ -2155,52 +2159,65 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             com.example.navigation.BitChatRoutes.audioCall(contactId, contactName)
         }
 
-        viewModelScope.launch {
-            val currentIdentity = repository.userIdentity.firstOrNull()
-            val myUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
-            val myName = currentIdentity?.fullName?.ifBlank { currentIdentity.username } ?: "BitChat User"
+        outgoingCallStartJob?.cancel()
+        outgoingCallStartJob = viewModelScope.launch {
+            try {
+                val currentIdentity = repository.userIdentity.firstOrNull()
+                val myUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
+                val myName = currentIdentity?.fullName?.ifBlank { currentIdentity.username } ?: "BitChat User"
 
-            var resolvedAvatar = currentIdentity?.avatarPath ?: ""
-            val resolvedReceiverId = if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
-                val chat = repository.getChatById(contactId)
-                val uids = chat?.participantUids?.split(",")?.map { it.trim() }?.filter { it != myUid && it.isNotBlank() }
-                uids?.firstOrNull() ?: contactId
-            } else {
-                val prof = SupabaseService.getProfile(contactId).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
-                if (prof != null) resolvedAvatar = prof.avatarUrl ?: resolvedAvatar
-                prof?.id?.ifBlank { contactId } ?: contactId
-            }
+                if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
 
-            _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
+                var resolvedAvatar = currentIdentity?.avatarPath ?: ""
+                val resolvedReceiverId = if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
+                    val chat = repository.getChatById(contactId)
+                    val uids = chat?.participantUids?.split(",")?.map { it.trim() }?.filter { it != myUid && it.isNotBlank() }
+                    uids?.firstOrNull() ?: contactId
+                } else {
+                    val prof = SupabaseService.getProfile(contactId).getOrNull()
+                        ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
+                        ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
+                    if (prof != null) resolvedAvatar = prof.avatarUrl ?: resolvedAvatar
+                    prof?.id?.ifBlank { contactId } ?: contactId
+                }
 
-            // Persist a public avatar URL in the call session. A local file path
-            // from avatarPath cannot be rendered on the other device.
-            val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: SupabaseService.getProfile(myUid).getOrNull()?.avatarUrl.orEmpty()
+                if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
+                _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
 
-            // Create initial Call Session row in Supabase database FIRST
-            SupabaseService.createCallSession(
-                SupabaseCallSession(
-                    callId = callId,
-                    callerId = myUid,
-                    callerName = myName,
-                    callerAvatar = callerPublicAvatar,
-                    receiverId = resolvedReceiverId,
-                    callType = callType,
-                    status = "RINGING"
+                val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf {
+                    it.startsWith("http://") || it.startsWith("https://")
+                } ?: SupabaseService.getProfile(myUid).getOrNull()?.avatarUrl.orEmpty()
+
+                if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
+
+                SupabaseService.createCallSession(
+                    SupabaseCallSession(
+                        callId = callId, callerId = myUid, callerName = myName,
+                        callerAvatar = callerPublicAvatar, receiverId = resolvedReceiverId,
+                        callType = callType, status = "RINGING"
+                    )
                 )
-            )
 
-            // Start WebRTC Call Engine AFTER the database session row is initialized
-            callEngine.startCall(
-                callId = callId,
-                isCaller = true,
-                callType = callType,
-                isVideo = isVideo
-            )
+                if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) {
+                    try {
+                        SupabaseService.updateCallSessionStatus(callId, "CANCELLED", endedAt = System.currentTimeMillis())
+                    } catch (_: Throwable) {}
+                    return@launch
+                }
+
+                callEngine.startCall(callId = callId, isCaller = true, callType = callType, isVideo = isVideo)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.e("BitChatViewModel", "Outgoing call setup failed", e)
+                if (activeCallSessionId == callId) {
+                    try {
+                        SupabaseService.updateCallSessionStatus(callId, "CANCELLED", endedAt = System.currentTimeMillis())
+                    } catch (_: Throwable) {}
+                    handleRemoteCallEnded(callerName = contactName, isDeclined = false, callId = callId)
+                }
+            }
         }
-
         callTimerJob?.cancel()
         callTimerJob = null
         startActiveCallStatusSync(callId)
