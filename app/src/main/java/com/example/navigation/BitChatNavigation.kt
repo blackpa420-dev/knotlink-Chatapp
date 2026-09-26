@@ -150,6 +150,15 @@ fun BitChatNavHost(
 
     val isCallScreenVisible = currentRoute.startsWith("audio_call") || currentRoute.startsWith("video_call")
 
+    // A remote hang-up can terminate the WebRTC engine before the call route
+    // is removed. Keep navigation in sync with the authoritative call state.
+    androidx.compose.runtime.LaunchedEffect(activeCallState.isActive, currentRoute) {
+        if (!activeCallState.isActive &&
+            (currentRoute.startsWith("audio_call") || currentRoute.startsWith("video_call"))) {
+            navController.popBackStack(BitChatRoutes.CHATS, false)
+        }
+    }
+
     // Lazy Permission handling for Notifications
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
