@@ -4941,12 +4941,13 @@ fun FigmaMessageBubbleRow(
                     if (isUser) {
                         Spacer(modifier = Modifier.width(6.dp))
                         val isSeen = message.deliveryState == "READ" || message.isRead
-                        val isDelivered = message.deliveryState == "DELIVERED"
 
-                        val dotColor = when {
-                            isSeen -> Color(0xFF10B981)      // Green dot for seen / read
-                            isDelivered -> Color(0xFF94A3B8) // Soft slate gray dot for delivered
-                            else -> Color(0xFFCBD5E1)        // Light gray dot for sent
+                        // KnotLink message status:
+                        // red = sent/delivered, green = seen. No gray state.
+                        val dotColor = if (isSeen) {
+                            Color(0xFF10B981)
+                        } else {
+                            Color(0xFFEF4444)
                         }
                         val animatedDotColor by animateColorAsState(
                             targetValue = dotColor,
