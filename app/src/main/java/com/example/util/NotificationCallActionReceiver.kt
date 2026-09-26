@@ -22,7 +22,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
         val callId = intent.getStringExtra("call_id") ?: ""
         val callerId = intent.getStringExtra("caller_id") ?: ""
         val callerName = intent.getStringExtra("caller_name") ?: "Caller"
-        val callType = intent.getStringExtra("call_type") ?: "Voice"
+        val callType = if (intent.getStringExtra("call_type")?.equals("VIDEO", ignoreCase = true) == true) "VIDEO" else "AUDIO"
 
         Log.i(TAG, "Notification call action received: $action for callId=$callId, caller=$callerName")
 
@@ -63,7 +63,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
             NotificationHelper.cancelCallNotification(context, callerName, callId)
 
             val mainIntent = Intent(context, com.example.MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("action_accept_call", true)
                 putExtra("call_id", callId)
                 putExtra("caller_id", callerId)
