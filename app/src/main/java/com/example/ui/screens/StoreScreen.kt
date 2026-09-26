@@ -52,6 +52,7 @@ import com.example.ui.viewmodel.BitChatViewModel
 fun StoreScreen(
     viewModel: BitChatViewModel,
     onTabSelected: (BitChatNavTab) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isNightMode by viewModel.isNightMode.collectAsState()
@@ -121,6 +122,11 @@ fun StoreScreen(
                     fontWeight = FontWeight.Bold
                 )
             }
+
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
