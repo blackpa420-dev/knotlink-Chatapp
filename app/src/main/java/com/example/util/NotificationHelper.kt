@@ -240,6 +240,7 @@ object NotificationHelper {
         text: String,
         chatId: String,
         avatarBitmap: android.graphics.Bitmap? = null,
+        senderId: String = "",
         serverMessageId: String? = null,
         isAvatarUpdate: Boolean = false
     ) {
@@ -334,6 +335,7 @@ object NotificationHelper {
                 val replyIntent = Intent(context, NotificationReplyReceiver::class.java).apply {
                     putExtra("chat_id", chatId)
                     putExtra("sender_name", senderName)
+                    putExtra("sender_id", senderId)
                 }
                 val replyPendingIntent = PendingIntent.getBroadcast(
                     context,
