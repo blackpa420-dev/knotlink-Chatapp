@@ -311,6 +311,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                     connection.connect()
                                     senderAvatarBitmap = android.graphics.BitmapFactory.decodeStream(connection.inputStream)
                                 }
+                                // Foreground Realtime can arrive before Room has the sender
+                                // profile/avatar. Resolve the public profile as a fallback.
+                                if (senderAvatarBitmap == null && supaMsg.senderId.isNotBlank()) {
+                                    val profileAvatar = SupabaseService.getProfile(supaMsg.senderId)
+                                        .getOrNull()?.avatarUrl.orEmpty()
+                                    if (profileAvatar.isNotBlank()) {
+                                        val connection = java.net.URL(profileAvatar).openConnection() as java.net.HttpURLConnection
+                                        connection.connectTimeout = 2500
+                                        connection.readTimeout = 2500
+                                        connection.connect()
+                                        senderAvatarBitmap = android.graphics.BitmapFactory.decodeStream(connection.inputStream)
+                                    }
+                                }
                             } catch (_: Throwable) { }
                             com.example.util.NotificationHelper.showIncomingMessageNotification(
                                 context = application,
