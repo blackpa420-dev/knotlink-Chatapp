@@ -282,27 +282,6 @@ fun BitChatNavHost(
 
     Box(modifier = modifier.fillMaxSize()) {
         androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
-            if (showGlobalCallBanner) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(bottom = 2.dp)
-                        .zIndex(150f)
-                ) {
-                    DynamicIslandCallBanner(
-                        callState = activeCallState,
-                        onExpandClick = {
-                            val route = BitChatRoutes.audioCall(
-                                activeCallState.contactId,
-                                activeCallState.contactName
-                            )
-                            navController.navigate(route)
-                        }
-                    )
-                }
-            }
-
             NavHost(
                 navController = navController,
                 startDestination = BitChatRoutes.SPLASH,
@@ -615,6 +594,31 @@ fun BitChatNavHost(
         } // NavHost
     } // Column
 
+        // The active-call bulletin floats above the page instead of reserving a
+        // fixed-height layout slot. This keeps the original screen content compact
+        // while the banner remains above the top app content and never pushes a
+        // large blank region into the UI.
+        if (showGlobalCallBanner) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .align(Alignment.TopCenter)
+                    .zIndex(150f)
+            ) {
+                DynamicIslandCallBanner(
+                    callState = activeCallState,
+                    onExpandClick = {
+                        val route = BitChatRoutes.audioCall(
+                            activeCallState.contactId,
+                            activeCallState.contactName
+                        )
+                        navController.navigate(route)
+                    }
+                )
+            }
+        }
+
         if (!isInPipMode && !isCallScreenVisible && activeCallState.isActive && activeCallState.callType == "VIDEO") {
             com.example.ui.components.FloatingVideoCallPip(
                 callState = activeCallState,
@@ -646,7 +650,10 @@ fun BitChatNavHost(
         }
 
         // Top-Level App Unlock Protection Biometric Overlay
-        BiometricLockOverlay(viewModel = bitChatViewModel)
+        BiometricLockOverlay(
+            viewModel = bitChatViewModel,
+            bypassForCallUi = incomingCallSession != null || activeCallState.isActive
+        )
 
         // Global Modern Premium Toast Banner Overlay
         GlobalModernToastOverlay(viewModel = bitChatViewModel)
