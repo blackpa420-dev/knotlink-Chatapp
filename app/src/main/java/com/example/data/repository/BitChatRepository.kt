@@ -1234,7 +1234,11 @@ class BitChatRepository(val dao: BitChatDao) {
                 existingLocal.copy(
                     serverMessageId = supaMsg.id,
                     syncStatus = "SYNCED",
-                    deliveryState = if (supaMsg.isRead) "READ" else "SENT",
+                    deliveryState = when {
+                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                        else -> "SENT"
+                    },
                     isFromUser = true,
                     text = msgText,
                     isEdited = supaMsg.isEdited,
@@ -1249,7 +1253,11 @@ class BitChatRepository(val dao: BitChatDao) {
                     pendingRecent.copy(
                         serverMessageId = supaMsg.id,
                         syncStatus = "SYNCED",
-                        deliveryState = if (supaMsg.isRead) "READ" else "SENT"
+                        deliveryState = when {
+                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                        else -> "SENT"
+                    }
                     )
                 } else {
                     MessageEntity(
