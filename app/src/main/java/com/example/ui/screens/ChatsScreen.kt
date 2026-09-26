@@ -260,57 +260,51 @@ fun ChatsScreen(
     val lazyListState = rememberLazyListState()
     var isFabVisible by remember { mutableStateOf(false) }
 
-    // Compose haptics keep pull-to-reveal feedback lightweight and non-blocking.
-    // NestedScrollConnection to detect deliberate hard pull-down at top of chat list with haptic & sound feedback
-    var accumulatedPullY by remember { mutableStateOf(0f) }
-    var lastVibrateStep by remember { mutableStateOf(0) }
-    val nestedScrollConnection = remember {
+    // Keep gesture accumulators outside Compose state. They change on every scroll delta,
+    // but the pull distance itself is not rendered, so recomposing the whole screen here
+    // only adds frame-time work.
+    val accumulatedPullY = remember { floatArrayOf(0f) }
+    val lastVibrateStep = remember { intArrayOf(0) }
+    val nestedScrollConnection = remember(isAssistantRevealed) {
         object : NestedScrollConnection {
+            private fun resetPull() {
+                accumulatedPullY[0] = 0f
+                lastVibrateStep[0] = 0
+            }
+
+            private fun handlePull(deltaY: Float) {
+                if (deltaY <= 0f || isAssistantRevealed) return
+                accumulatedPullY[0] += deltaY
+                val step = (accumulatedPullY[0] / 35f).toInt()
+                if (step > lastVibrateStep[0]) {
+                    lastVibrateStep[0] = step
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                if (accumulatedPullY[0] >= 350f) {
+                    viewModel.setAssistantRevealed(true)
+                    resetPull()
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                }
+            }
+
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0) {
-                    if (available.y > 0f && !isAssistantRevealed) {
-                        accumulatedPullY += available.y
-                        val step = (accumulatedPullY / 35f).toInt()
-                        if (step > lastVibrateStep) {
-                            lastVibrateStep = step
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                        if (accumulatedPullY >= 350f) {
-                            viewModel.setAssistantRevealed(true)
-                            accumulatedPullY = 0f
-                            lastVibrateStep = 0
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
+                    if (available.y > 0f) {
+                        handlePull(available.y)
                     } else if (available.y < 0f) {
-                        accumulatedPullY = 0f
-                        lastVibrateStep = 0
+                        resetPull()
                     }
                 } else {
-                    accumulatedPullY = 0f
-                    lastVibrateStep = 0
+                    resetPull()
                 }
                 return Offset.Zero
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
                 if (lazyListState.firstVisibleItemIndex == 0 && lazyListState.firstVisibleItemScrollOffset == 0) {
-                    if (available.y > 0f && !isAssistantRevealed) {
-                        accumulatedPullY += available.y
-                        val step = (accumulatedPullY / 35f).toInt()
-                        if (step > lastVibrateStep) {
-                            lastVibrateStep = step
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        }
-                        if (accumulatedPullY >= 350f) {
-                            viewModel.setAssistantRevealed(true)
-                            accumulatedPullY = 0f
-                            lastVibrateStep = 0
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        }
-                    }
+                    handlePull(available.y)
                 } else {
-                    accumulatedPullY = 0f
-                    lastVibrateStep = 0
+                    resetPull()
                 }
                 return Offset.Zero
             }
@@ -388,7 +382,7 @@ fun ChatsScreen(
                 (chat.chatType == "GROUP" || chatFolderAssignments[chat.id] == "Groups" || chat.id.startsWith("group_") || chat.name.contains("[Group]", ignoreCase = true) || chat.name.startsWith("GC "))
             }
             "Work", "Personal" -> chats.filter { chat ->
-                !archivedChats.any { a -> a.id == chat.id } && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
+                !archivedChatIds.contains(chat.id) && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
                 (chatFolderAssignments[chat.id] == selectedFilter || (selectedFilter == "Work" && (chat.name.contains("Work", ignoreCase = true) || chat.name.contains("Team", ignoreCase = true))) || (selectedFilter == "Personal" && !chat.name.contains("Work", ignoreCase = true)))
             }
             "All Chats" -> chats.filter { chat -> !archivedChatIds.contains(chat.id) && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) }
