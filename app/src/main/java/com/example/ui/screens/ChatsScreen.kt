@@ -371,6 +371,7 @@ fun ChatsScreen(
     var locationPermissionChat by remember { mutableStateOf<ChatEntity?>(null) }
 
     val archivedChatIds = remember(archivedChats) { archivedChats.mapTo(hashSetOf()) { it.id } }
+    val hasUnreadChats = remember(chats) { chats.any { it.unreadCount > 0 } }
 
     val visibleChats = remember(chats, archivedChats, selectedFilter, blockedChatIds, restrictedChatIds, chatFolderAssignments) {
         when (selectedFilter) {
@@ -644,7 +645,7 @@ fun ChatsScreen(
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )
-                                if (filter == "Unread") {
+                                if (filter == "Unread" && hasUnreadChats) {
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Box(
                                         modifier = Modifier
