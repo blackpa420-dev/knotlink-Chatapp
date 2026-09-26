@@ -44,3 +44,7 @@
 -keep class com.example.data.local.** { *; }
 -keep class com.example.data.remote.** { *; }
 -keep class com.example.data.model.** { *; }
+
+# WebRTC uses native bindings and runtime-discovered classes.
+-keep class org.webrtc.** { *; }
+-keep class com.example.webrtc.** { *; }
