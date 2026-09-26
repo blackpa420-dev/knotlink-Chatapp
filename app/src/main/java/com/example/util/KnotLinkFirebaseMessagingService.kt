@@ -212,7 +212,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                 return@launch
                             }
 
-                            val msgType = data["message_type"] ?: "TEXT"
+                            val msgType = data["knotlink_message_type"] ?: "TEXT"
                             val isRichMedia = msgType != "TEXT" || 
                                               body.startsWith("🎙️") || 
                                               body.startsWith("🖼️") || 
