@@ -477,15 +477,23 @@ class WebRtcCallEngine private constructor(private val context: Context) {
 
             override fun onAddTrack(receiver: RtpReceiver?, mediaStreams: Array<out MediaStream>?) {
                 val track = receiver?.track()
-                if (track is VideoTrack) {
-                    handleRemoteVideo(track)
+                when (track) {
+                    is VideoTrack -> handleRemoteVideo(track)
+                    is AudioTrack -> {
+                        track.setEnabled(true)
+                        Log.d(TAG, "Remote audio track received and enabled")
+                    }
                 }
             }
 
             override fun onTrack(transceiver: RtpTransceiver?) {
                 val track = transceiver?.receiver?.track()
-                if (track is VideoTrack) {
-                    handleRemoteVideo(track)
+                when (track) {
+                    is VideoTrack -> handleRemoteVideo(track)
+                    is AudioTrack -> {
+                        track.setEnabled(true)
+                        Log.d(TAG, "Remote audio transceiver track received and enabled")
+                    }
                 }
             }
         }
@@ -493,10 +501,17 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         val pc = peerConnectionFactory?.createPeerConnection(rtcConfig, observer)
         peerConnection = pc
 
-        // Add local tracks to PeerConnection
+        // Add local tracks to PeerConnection.
+        // Explicitly enable WebRTC audio capture/playout for both audio and video calls.
         val streamIds = listOf("ARDAMS")
-        localAudioTrack?.let { pc?.addTrack(it, streamIds) }
+        localAudioTrack?.let { it.setEnabled(true); pc?.addTrack(it, streamIds) }
         localVideoTrackInstance?.let { pc?.addTrack(it, streamIds) }
+        try {
+            pc?.setAudioRecording(true)
+            pc?.setAudioPlayout(true)
+        } catch (_: Throwable) {
+            Log.w(TAG, "Could not explicitly enable WebRTC audio I/O")
+        }
 
         // addTrack() above creates Unified Plan transceivers/senders. Avoid duplicate transceivers; duplicate m-lines can cause blank remote video.
         try {
@@ -654,15 +669,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             }
         }
 
-        // 3.5. Transition Caller & Callee engine state to CONNECTED when session is accepted
-        if (session.status.equals("CONNECTED", ignoreCase = true)) {
-            val connTime = session.connectedAt ?: _engineState.value.connectedAt ?: System.currentTimeMillis()
-            _engineState.value = _engineState.value.copy(
-                isConnected = true,
-                isConnecting = false,
-                connectedAt = connTime
-            )
-        }
+        // Do not mark local WebRTC CONNECTED merely because the remote DB row
+        // says CONNECTED. The authoritative local signal is ICE CONNECTED/COMPLETED.
+        // The DB status remains useful for signaling and termination.
 
         // 4. Ingest new ICE Candidates from opposite party
         val targetRole = if (isCaller) "receiver" else "caller"
