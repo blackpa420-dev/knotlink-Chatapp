@@ -259,29 +259,7 @@ fun ChatsScreen(
     val lazyListState = rememberLazyListState()
     var isFabVisible by remember { mutableStateOf(false) }
 
-    // Direct system Vibrator for guaranteed physical tactile motor feedback on pull-down
-    val systemVibrator = remember(context) {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                (context.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager)?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-            }
-        } catch (_: Exception) { null }
-    }
-
-    fun triggerVibration(durationMs: Long) {
-        try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                systemVibrator?.vibrate(android.os.VibrationEffect.createOneShot(durationMs, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-            } else {
-                @Suppress("DEPRECATION")
-                systemVibrator?.vibrate(durationMs)
-            }
-        } catch (_: Exception) {}
-    }
-
+    // Compose haptics keep pull-to-reveal feedback lightweight and non-blocking.
     // NestedScrollConnection to detect deliberate hard pull-down at top of chat list with haptic & sound feedback
     var accumulatedPullY by remember { mutableStateOf(0f) }
     var lastVibrateStep by remember { mutableStateOf(0) }
@@ -294,21 +272,13 @@ fun ChatsScreen(
                         val step = (accumulatedPullY / 35f).toInt()
                         if (step > lastVibrateStep) {
                             lastVibrateStep = step
-                            triggerVibration(25L)
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            } catch (_: Throwable) {}
+                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                         }
                         if (accumulatedPullY >= 350f) {
                             viewModel.setAssistantRevealed(true)
                             accumulatedPullY = 0f
                             lastVibrateStep = 0
-                            triggerVibration(80L)
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val toneGenerator = android.media.ToneGenerator(android.media.AudioManager.STREAM_SYSTEM, 90)
-                                toneGenerator.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120)
-                            } catch (_: Throwable) {}
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
                     } else if (available.y < 0f) {
                         accumulatedPullY = 0f
@@ -328,21 +298,13 @@ fun ChatsScreen(
                         val step = (accumulatedPullY / 35f).toInt()
                         if (step > lastVibrateStep) {
                             lastVibrateStep = step
-                            triggerVibration(25L)
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            } catch (_: Throwable) {}
+                            haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                         }
                         if (accumulatedPullY >= 350f) {
                             viewModel.setAssistantRevealed(true)
                             accumulatedPullY = 0f
                             lastVibrateStep = 0
-                            triggerVibration(80L)
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val toneGenerator = android.media.ToneGenerator(android.media.AudioManager.STREAM_SYSTEM, 90)
-                                toneGenerator.startTone(android.media.ToneGenerator.TONE_PROP_BEEP, 120)
-                            } catch (_: Throwable) {}
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
                     }
                 } else {
@@ -1690,10 +1652,10 @@ fun SwipeableChatItemRow(
                     .combinedClickable(
                         onClick = {
                             if (offsetX != 0f) {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                                 offsetX = 0f
                             } else {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                haptic.performHapticFeedback(HapticFeedbackType.VirtualKey)
                                 onClick()
                             }
                         },
