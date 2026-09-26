@@ -216,8 +216,10 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 }
 
                 // 4. Start monitoring loops
-                startSignalingLoop(callId, isCaller)
+                // Subscribe to Realtime before the REST fallback so an answer/offer
+                // can be consumed immediately instead of waiting for a polling tick.
                 startRealtimeObserver(callId, isCaller)
+                startSignalingLoop(callId, isCaller)
                 startNetworkAdaptationLoop()
                 // The UI/ViewModel timer starts only after local ICE CONNECTED/COMPLETED.
             } catch (e: Throwable) {
@@ -645,7 +647,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 } catch (e: Throwable) {
                     Log.w(TAG, "Signaling loop error: ${e.message}")
                 }
-                delay(3000)
+                // REST is only a safety net; keep the fallback short so a missed
+                // Realtime event cannot add several seconds to call connection time.
+                delay(750)
             }
         }
     }
