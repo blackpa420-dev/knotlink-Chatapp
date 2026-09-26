@@ -1862,22 +1862,40 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         direction: String = "OUTGOING",
         durationSeconds: Int = 0
     ) {
-        viewModelScope.launch {
-            val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
-            val timeStr = sdf.format(java.util.Date())
-            val logId = java.util.UUID.randomUUID().toString()
-            currentCallLogId = logId
-            val entity = com.example.data.local.CallLogEntity(
-                id = logId,
-                contactId = contactId,
-                contactName = contactName,
-                callType = callType,
-                direction = direction,
-                timestampMillis = System.currentTimeMillis(),
-                timeString = timeStr,
-                durationSeconds = durationSeconds
+        // Generate the id synchronously so a very fast End/Decline can still
+        // update the exact log row that was just created.
+        val logId = java.util.UUID.randomUUID().toString()
+        currentCallLogId = logId
+        val timestamp = System.currentTimeMillis()
+        val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+        val timeStr = sdf.format(java.util.Date(timestamp))
+
+        viewModelScope.launch(Dispatchers.IO) {
+            var avatar = ""
+            try {
+                val profile = SupabaseService.getProfile(contactId).getOrNull()
+                    ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
+                avatar = profile?.avatarUrl.orEmpty()
+            } catch (_: Throwable) {}
+            if (avatar.isBlank()) {
+                try {
+                    avatar = repository.getChatById(contactId)?.avatarType.orEmpty()
+                } catch (_: Throwable) {}
+            }
+
+            repository.insertCallLog(
+                com.example.data.local.CallLogEntity(
+                    id = logId,
+                    contactId = contactId,
+                    contactName = contactName,
+                    callType = callType,
+                    direction = direction,
+                    timestampMillis = timestamp,
+                    timeString = timeStr,
+                    durationSeconds = durationSeconds,
+                    avatarType = avatar.ifBlank { "default" }
+                )
             )
-            repository.insertCallLog(entity)
         }
     }
 
@@ -2094,6 +2112,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         callTimerJob = null
         callConnectTimestamp = 0L
         if (isDeclined) triggerDeclineVibration()
+
+        val elapsed = _activeCall.value.secondsElapsed
+        val logId = currentCallLogId
+        if (logId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    repository.updateCallLogDuration(logId, elapsed)
+                } catch (e: Throwable) {
+                    Log.w("BitChatViewModel", "Failed to finalize remote call log: ${e.message}")
+                }
+            }
+        }
 
         _activeCall.value = ActiveCallState(isActive = false)
         activeCallSessionId = null
