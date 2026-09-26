@@ -374,21 +374,23 @@ fun ChatsScreen(
     var targetUserForCreateGroup by remember { mutableStateOf<ChatEntity?>(null) }
     var locationPermissionChat by remember { mutableStateOf<ChatEntity?>(null) }
 
+    val archivedChatIds = remember(archivedChats) { archivedChats.mapTo(hashSetOf()) { it.id } }
+
     val visibleChats = remember(chats, archivedChats, selectedFilter, blockedChatIds, restrictedChatIds, chatFolderAssignments) {
         when (selectedFilter) {
             "Archive" -> archivedChats
             "Blocked" -> chats.filter { blockedChatIds.contains(it.id) }
             "Restricted" -> chats.filter { restrictedChatIds.contains(it.id) }
-            "Unread" -> chats.filter { !archivedChats.any { a -> a.id == it.id } && !blockedChatIds.contains(it.id) && !restrictedChatIds.contains(it.id) && it.unreadCount > 0 }
+            "Unread" -> chats.filter { !archivedChatIds.contains(it.id) && !blockedChatIds.contains(it.id) && !restrictedChatIds.contains(it.id) && it.unreadCount > 0 }
             "Groups" -> chats.filter { chat ->
-                !archivedChats.any { a -> a.id == chat.id } && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
+                !archivedChatIds.contains(chat.id) && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
                 (chat.chatType == "GROUP" || chatFolderAssignments[chat.id] == "Groups" || chat.id.startsWith("group_") || chat.name.contains("[Group]", ignoreCase = true) || chat.name.startsWith("GC "))
             }
             "Work", "Personal" -> chats.filter { chat ->
                 !archivedChats.any { a -> a.id == chat.id } && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
                 (chatFolderAssignments[chat.id] == selectedFilter || (selectedFilter == "Work" && (chat.name.contains("Work", ignoreCase = true) || chat.name.contains("Team", ignoreCase = true))) || (selectedFilter == "Personal" && !chat.name.contains("Work", ignoreCase = true)))
             }
-            "All Chats" -> chats.filter { chat -> !archivedChats.any { it.id == chat.id } && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) }
+            "All Chats" -> chats.filter { chat -> !archivedChatIds.contains(chat.id) && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) }
             else -> chats.filter { chat ->
                 !archivedChats.any { a -> a.id == chat.id } && !blockedChatIds.contains(chat.id) && !restrictedChatIds.contains(chat.id) &&
                 chatFolderAssignments[chat.id] == selectedFilter
