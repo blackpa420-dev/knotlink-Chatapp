@@ -33,7 +33,8 @@ fun GroupInfoScreen(
     chatId: String,
     viewModel: BitChatViewModel,
     onNavigateBack: () -> Unit,
-    onLeaveGroup: () -> Unit
+    onLeaveGroup: () -> Unit,
+    onActiveCallBannerClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -104,6 +105,11 @@ fun GroupInfoScreen(
                 .fillMaxSize()
                 .padding(paddingVals)
                 .padding(16.dp),
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
+
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
