@@ -21,3 +21,14 @@ If the user requests a feature that naturally consumes significant Supabase Egre
 ### 3. Privacy & UI Safety
 - These guidelines are agent-only instructions located in root configuration files (`AGENTS.md` / `GEMINI.md`).
 - They MUST NOT affect or expose any UI or binary code in the user-facing Android application.
+
+
+## 2.5 UI PERFORMANCE & CALL-SAFETY GUARDRAILS
+- Prefer Room/memory data for UI rendering; do not add REST calls from Composables.
+- LazyColumn/LazyRow items MUST use stable keys and contentType where practical.
+- Do not perform full-map scans, sorting, date formatting, image decoding, or other O(n)/expensive work inside frequently recomposed list-item bodies when it can be precomputed.
+- Do not add continuous/infinite animations to screens or rows unless the element is visibly active; never animate hidden/off-screen content unnecessarily.
+- Interactive chat rows and navigation controls should provide lightweight Compose haptic feedback without blocking the main thread.
+- NEVER modify WebRTC call state machines, ICE/signaling, FCM call handling, notification actions, or call navigation as a side effect of a UI/performance task.
+- NEVER use an automatic "fix" to rewrite call logic merely to silence a compiler/build warning. For call-related errors, make the smallest compile-safe change and preserve existing runtime behavior.
+- Do not replace working call behavior with speculative refactors.
