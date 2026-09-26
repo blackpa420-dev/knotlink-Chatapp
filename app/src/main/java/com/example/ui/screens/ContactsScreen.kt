@@ -347,7 +347,7 @@ fun ContactsScreen(
                         )
                     }
 
-                    items(groupContacts) { contact ->
+                    items(groupContacts, key = { it.id }, contentType = { "contact" }) { contact ->
                         val clean = contact.name.trim().lowercase().removePrefix("@").removeSuffix(".link")
                         val isContactOnline = (userPresenceMap[contact.id]?.first ?: false) ||
                             (userPresenceMap[contact.name]?.first ?: false) ||
