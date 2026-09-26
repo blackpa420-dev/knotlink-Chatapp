@@ -295,6 +295,15 @@ object NotificationHelper {
                 null
             }
 
+            val senderPerson = Person.Builder()
+                .setName(senderName)
+                .setIcon(
+                    profileBitmap?.let { IconCompat.createWithBitmap(it) }
+                        ?: IconCompat.createWithBitmap(createLetterAvatarBitmap(context, senderName))
+                )
+                .setImportant(true)
+                .build()
+
             // Create bulletproof high-priority notification builder
             val builder = NotificationCompat.Builder(context, MSG_CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
@@ -310,16 +319,8 @@ object NotificationHelper {
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setStyle(
-                    NotificationCompat.MessagingStyle(
-                        Person.Builder()
-                            .setName(senderName)
-                            .setIcon(
-                                profileBitmap?.let { IconCompat.createWithBitmap(it) }
-                                    ?: IconCompat.createWithBitmap(createLetterAvatarBitmap(context, senderName))
-                            )
-                            .setImportant(true)
-                            .build()
-                    ).addMessage(cleanPreview, System.currentTimeMillis(), senderName)
+                    NotificationCompat.MessagingStyle(senderPerson)
+                        .addMessage(cleanPreview, System.currentTimeMillis(), senderPerson)
                 )
 
             if (profileBitmap != null) {

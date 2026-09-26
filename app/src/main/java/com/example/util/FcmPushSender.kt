@@ -145,8 +145,6 @@ object FcmPushSender {
             val channelId = if (type == "call" || type == "incoming_call") "knotlink_calls_channel" else "knotlink_msg_channel_v4"
             val ttl = if (isCall) "60s" else "86400s"
 
-            val cleanBody = NotificationHelper.formatCleanPreviewText(body).take(120)
-
             val messageObj = JSONObject().apply {
                 put("token", targetFcmToken)
 
@@ -155,30 +153,7 @@ object FcmPushSender {
                 put("android", JSONObject().apply {
                     put("priority", "HIGH")
                     put("ttl", ttl)
-                    if (type == "message") {
-                        put("notification", JSONObject().apply {
-                            put("channel_id", "knotlink_msg_channel_v4")
-                            if (!senderAvatar.isNullOrBlank() &&
-                                (senderAvatar.startsWith("http://") || senderAvatar.startsWith("https://"))) {
-                                put("image", senderAvatar)
-                            }
-                        })
-                    }
                 })
-
-                // Message pushes use notification + data. In background/closed state
-                // FCM displays the notification in the system tray; in foreground
-                // onMessageReceived still handles our richer in-app notification.
-                if (type == "message") {
-                    put("notification", JSONObject().apply {
-                        put("title", title)
-                        put("body", cleanBody)
-                        if (!senderAvatar.isNullOrBlank() &&
-                            (senderAvatar.startsWith("http://") || senderAvatar.startsWith("https://"))) {
-                            put("image", senderAvatar)
-                        }
-                    })
-                }
 
                 put("data", JSONObject().apply {
                     put("type", type)
@@ -263,6 +238,7 @@ object FcmPushSender {
             }
 
             if (!fcmToken.isNullOrBlank()) {
+                val cleanBody = NotificationHelper.formatCleanPreviewText(body).take(120)
                 sendPushToToken(
                     targetFcmToken = fcmToken,
                     type = type,

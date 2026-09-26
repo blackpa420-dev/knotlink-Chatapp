@@ -91,7 +91,11 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             } else {
                 try {
                     val localDao = com.example.data.local.BitChatDatabase.getDatabase(applicationContext).bitChatDao()
-                    if (senderId.isNotBlank()) localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty() else ""
+                    if (senderId.isNotBlank()) {
+                        kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                            localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty()
+                        }
+                    } else ""
                 } catch (_: Throwable) {
                     ""
                 }
