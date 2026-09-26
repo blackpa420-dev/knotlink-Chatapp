@@ -87,16 +87,26 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             val senderId = data["sender_id"] ?: ""
             val chatId = data["chat_id"] ?: data["room_id"] ?: senderId
             val rawSenderAvatarUrl = data["sender_avatar"] ?: ""
-            val senderAvatarUrl = if (rawSenderAvatarUrl.startsWith("http://") || rawSenderAvatarUrl.startsWith("https://")) {
+            val senderAvatarUrl = if (
+                rawSenderAvatarUrl.startsWith("http://") ||
+                rawSenderAvatarUrl.startsWith("https://")
+            ) {
                 rawSenderAvatarUrl
             } else {
                 try {
                     val localDao = com.example.data.local.BitChatDatabase.getDatabase(applicationContext).bitChatDao()
-                    if (senderId.isNotBlank()) {
+                    var cached = if (senderId.isNotBlank()) {
                         kotlinx.coroutines.runBlocking(Dispatchers.IO) {
                             localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty()
                         }
                     } else ""
+                    // Foreground delivery can arrive before the sender profile has
+                    // been cached locally. Resolve the public profile as a fallback
+                    // so foreground and background notifications render identically.
+                    if (cached.isBlank() && senderId.isNotBlank()) {
+                        cached = SupabaseService.getProfile(senderId).getOrNull()?.avatarUrl.orEmpty()
+                    }
+                    cached
                 } catch (_: Throwable) {
                     ""
                 }
