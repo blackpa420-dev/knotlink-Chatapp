@@ -268,7 +268,12 @@ object NotificationHelper {
 
             createNotificationChannels(context)
 
-            val cleanPreview = formatCleanPreviewText(text)
+            val biometricSecurity = com.example.security.BiometricSecurityManager(context.applicationContext)
+            val appLockEnabled = biometricSecurity.isAppUnlockEnabled
+            val chatLocked = chatId.isNotBlank() && biometricSecurity.isChatLocked(chatId)
+            val hideMessageContext = appLockEnabled || chatLocked
+            val visibleSenderName = if (hideMessageContext) "KnotLink" else senderName
+            val cleanPreview = if (hideMessageContext) "New message" else formatCleanPreviewText(text)
             val msgSoundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
 
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -286,7 +291,11 @@ object NotificationHelper {
 
             // Safely resolve avatar/profile bitmap
             val rawBitmap = try {
-                avatarBitmap ?: createLetterAvatarBitmap(context, senderName)
+                if (hideMessageContext) {
+                    createLetterAvatarBitmap(context, "KnotLink")
+                } else {
+                    avatarBitmap ?: createLetterAvatarBitmap(context, senderName)
+                }
             } catch (e: Throwable) {
                 null
             }
@@ -308,7 +317,7 @@ object NotificationHelper {
             // Create bulletproof high-priority notification builder
             val builder = NotificationCompat.Builder(context, MSG_CHANNEL_ID)
                 .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(senderName)
+                .setContentTitle(visibleSenderName)
                 .setContentText(cleanPreview)
                 .setColor(0xFF00A884.toInt()) // KnotLink Teal accent
                 .setPriority(NotificationCompat.PRIORITY_MAX)
@@ -328,50 +337,54 @@ object NotificationHelper {
                 builder.setLargeIcon(profileBitmap)
             }
 
-            // Add WhatsApp/Telegram style Direct Reply
-            try {
-                val remoteInput = RemoteInput.Builder(NotificationReplyReceiver.KEY_TEXT_REPLY)
-                    .setLabel("Reply to $senderName...")
-                    .build()
+            // Privacy mode: do not expose sender context or reply actions for protected chats/app lock.
+            if (!hideMessageContext) {
+                // Add WhatsApp/Telegram style Direct Reply
+                try {
+                    val remoteInput = RemoteInput.Builder(NotificationReplyReceiver.KEY_TEXT_REPLY)
+                        .setLabel("Reply to $visibleSenderName...")
+                        .build()
 
-                val replyIntent = Intent(context, NotificationReplyReceiver::class.java).apply {
-                    putExtra("chat_id", chatId)
-                    putExtra("sender_name", senderName)
-                    putExtra("sender_id", senderId)
+                    val replyIntent = Intent(context, NotificationReplyReceiver::class.java).apply {
+                        putExtra("chat_id", chatId)
+                        putExtra("sender_name", senderName)
+                        putExtra("sender_id", senderId)
+                    }
+                    val replyPendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        notifId + 1,
+                        replyIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                    )
+
+                    val replyAction = NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_send,
+                        "Reply",
+                        replyPendingIntent
+                    ).addRemoteInput(remoteInput).build()
+
+                    val markReadIntent = Intent(context, NotificationMarkReadReceiver::class.java).apply {
+                        putExtra("chat_id", chatId)
+                    }
+                    val markReadPendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        notifId + 2,
+                        markReadIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                    val markReadAction = NotificationCompat.Action.Builder(
+                        android.R.drawable.ic_menu_view,
+                        "Mark as Read",
+                        markReadPendingIntent
+                    ).build()
+
+                    builder.addAction(replyAction)
+                    builder.addAction(markReadAction)
+                } catch (e: Throwable) {
+                    android.util.Log.w("NotificationHelper", "Action buttons error: ${e.message}")
                 }
-                val replyPendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    notifId + 1,
-                    replyIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                )
 
-                val replyAction = NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_menu_send,
-                    "Reply",
-                    replyPendingIntent
-                ).addRemoteInput(remoteInput).build()
-
-                val markReadIntent = Intent(context, NotificationMarkReadReceiver::class.java).apply {
-                    putExtra("chat_id", chatId)
-                }
-                val markReadPendingIntent = PendingIntent.getBroadcast(
-                    context,
-                    notifId + 2,
-                    markReadIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-
-                val markReadAction = NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_menu_view,
-                    "Mark as Read",
-                    markReadPendingIntent
-                ).build()
-
-                builder.addAction(replyAction)
-                builder.addAction(markReadAction)
-            } catch (e: Throwable) {
-                android.util.Log.w("NotificationHelper", "Action buttons error: ${e.message}")
             }
 
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -401,6 +414,10 @@ object NotificationHelper {
         }
 
         createNotificationChannels(context)
+
+        val normalizedCallType = if (callType.contains("video", ignoreCase = true)) "VIDEO" else "AUDIO"
+        val isVideoCall = normalizedCallType == "VIDEO"
+        val callLabel = if (isVideoCall) "Incoming video call" else "Incoming audio call"
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -476,8 +493,8 @@ object NotificationHelper {
         val builder = NotificationCompat.Builder(context, CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setLargeIcon(profileBitmap)
-            .setContentTitle("Incoming $callType Call")
-            .setContentText("$callerName is calling you...")
+            .setContentTitle(callLabel)
+            .setContentText("$callerName • $callLabel")
             .setColor(0xFF00A884.toInt())
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -496,6 +513,10 @@ object NotificationHelper {
                 declinePendingIntent,
                 acceptPendingIntent
             )
+                .setIsVideo(isVideoCall)
+                .setAnswerButtonColorHint(0xFF10B981.toInt())
+                .setDeclineButtonColorHint(0xFFE11D48.toInt())
+                .setVerificationText(callLabel)
             builder.setStyle(callStyle)
         } else {
             builder.addAction(declineAction)
