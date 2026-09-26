@@ -1723,7 +1723,9 @@ object SupabaseService {
 
     suspend fun setCallSdpAnswer(callId: String, answerSdp: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId"
+            val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
+            // Do not accept an SDP answer after the call has already been declined/cancelled/ended.
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.(RINGING,ACCEPTED)"
             val bodyObj = JSONObject().apply {
                 put("sdp_answer", answerSdp)
                 put("status", "ACCEPTED")
@@ -1735,7 +1737,7 @@ object SupabaseService {
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
                     .addHeader("Authorization", "Bearer ${getAccessToken()}")
                     .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "return=minimal")
+                    .addHeader("Prefer", "return=representation")
                     .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
                     .build()
 
