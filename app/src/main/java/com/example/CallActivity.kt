@@ -129,7 +129,9 @@ class CallActivity : FragmentActivity() {
                 // Match the notification's lifetime. If the remote caller
                 // cancels before the session reaches the UI, remove this task.
                 kotlinx.coroutines.delay(65_000L)
-                if (!callWasActive && !activeCall.isActive) {
+                if (!viewModel.activeCall.value.isActive &&
+                    viewModel.incomingCallSession.value == null
+                ) {
                     finishCallTask()
                 }
             }
