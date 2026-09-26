@@ -1010,7 +1010,11 @@ fun ChatDetailScreen(
                         }
                     }
 
-                    itemsIndexed(displayedMessages, key = { _, msg -> msg.id }) { index, msg ->
+                    itemsIndexed(
+                        displayedMessages,
+                        key = { _, msg -> msg.id },
+                        contentType = { _, _ -> "message_row" }
+                    ) { index, msg ->
                         // Show date pill when day changes
                         val prevMsg = if (index > 0) displayedMessages[index - 1] else null
                         val currentHeader = if (msg.timestamp > 0L) {
