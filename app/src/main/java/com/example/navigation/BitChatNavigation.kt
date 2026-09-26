@@ -287,7 +287,7 @@ fun BitChatNavHost(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
-                        .height(56.dp)
+                        .padding(bottom = 2.dp)
                         .zIndex(150f)
                 ) {
                     DynamicIslandCallBanner(
