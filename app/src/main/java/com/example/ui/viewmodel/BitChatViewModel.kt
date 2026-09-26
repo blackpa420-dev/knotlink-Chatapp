@@ -297,32 +297,46 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         try {
                             val senderDisplayName = handledEntity.senderName.ifBlank { supaMsg.senderName }
                             var senderAvatarBitmap: android.graphics.Bitmap? = null
-                            // Prefer the already-synced Room chat/profile cache; do not add a
-                            // Supabase request just to decorate a notification.
+                            // Resolve the sender avatar from every local/remote source available.
+                            // Foreground Realtime can arrive before Room has the sender profile.
                             try {
                                 val localChat = repository.getChatById(supaMsg.chatId)
-                                val avatarUrl = localChat?.avatarType?.takeIf {
-                                    it.isNotBlank() && it != "default" && it.startsWith("http", ignoreCase = true)
+                                val localAvatar = localChat?.avatarType.orEmpty()
+
+                                fun loadAvatar(source: String): android.graphics.Bitmap? {
+                                    if (source.isBlank() || source == "default") return null
+                                    return try {
+                                        when {
+                                            source.startsWith("http://", ignoreCase = true) ||
+                                                source.startsWith("https://", ignoreCase = true) -> {
+                                                val connection = java.net.URL(source).openConnection() as java.net.HttpURLConnection
+                                                connection.connectTimeout = 2500
+                                                connection.readTimeout = 2500
+                                                connection.connect()
+                                                connection.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                            }
+                                            source.startsWith("content://", ignoreCase = true) -> {
+                                                application.contentResolver.openInputStream(android.net.Uri.parse(source))
+                                                    ?.use { android.graphics.BitmapFactory.decodeStream(it) }
+                                            }
+                                            else -> {
+                                                val file = java.io.File(source)
+                                                if (file.isFile) android.graphics.BitmapFactory.decodeFile(file.absolutePath) else null
+                                            }
+                                        }
+                                    } catch (_: Throwable) { null }
                                 }
-                                if (!avatarUrl.isNullOrBlank()) {
-                                    val connection = java.net.URL(avatarUrl).openConnection() as java.net.HttpURLConnection
-                                    connection.connectTimeout = 2500
-                                    connection.readTimeout = 2500
-                                    connection.connect()
-                                    senderAvatarBitmap = android.graphics.BitmapFactory.decodeStream(connection.inputStream)
-                                }
-                                // Foreground Realtime can arrive before Room has the sender
-                                // profile/avatar. Resolve the public profile as a fallback.
+
+                                senderAvatarBitmap = loadAvatar(localAvatar)
+
                                 if (senderAvatarBitmap == null && supaMsg.senderId.isNotBlank()) {
-                                    val profileAvatar = SupabaseService.getProfile(supaMsg.senderId)
-                                        .getOrNull()?.avatarUrl.orEmpty()
-                                    if (profileAvatar.isNotBlank()) {
-                                        val connection = java.net.URL(profileAvatar).openConnection() as java.net.HttpURLConnection
-                                        connection.connectTimeout = 2500
-                                        connection.readTimeout = 2500
-                                        connection.connect()
-                                        senderAvatarBitmap = android.graphics.BitmapFactory.decodeStream(connection.inputStream)
-                                    }
+                                    val profile = SupabaseService.getProfile(supaMsg.senderId).getOrNull()
+                                    senderAvatarBitmap = loadAvatar(profile?.avatarUrl.orEmpty())
+                                }
+
+                                if (senderAvatarBitmap == null && senderDisplayName.isNotBlank()) {
+                                    val profile = SupabaseService.getProfileByUsername(senderDisplayName).getOrNull()
+                                    senderAvatarBitmap = loadAvatar(profile?.avatarUrl.orEmpty())
                                 }
                             } catch (_: Throwable) { }
                             com.example.util.NotificationHelper.showIncomingMessageNotification(
