@@ -392,6 +392,14 @@ object NotificationHelper {
         callerId: String = "",
         callerAvatarBitmap: android.graphics.Bitmap? = null
     ) {
+        // Warm native WebRTC/audio resources while the phone is still ringing.
+        // This removes first-call initialization latency from the Answer action.
+        try {
+            com.example.webrtc.WebRtcCallEngine.getInstance(context).prewarmForCall()
+        } catch (e: Throwable) {
+            android.util.Log.w("WebRtcEngine", "Incoming-call prewarm unavailable: ${e.message}")
+        }
+
         createNotificationChannels(context)
 
         val intent = Intent(context, MainActivity::class.java).apply {
