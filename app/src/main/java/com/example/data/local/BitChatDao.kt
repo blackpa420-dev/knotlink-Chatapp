@@ -112,7 +112,21 @@ interface BitChatDao {
     @Query("UPDATE messages SET deliveryState = 'READ', isRead = 1 WHERE serverMessageId IN (:serverMessageIds)")
     suspend fun markMessagesAsReadByServerIds(serverMessageIds: List<String>)
 
-    @Query("UPDATE messages SET deliveryState = :deliveryState, isRead = CASE WHEN :deliveryState = 'READ' THEN 1 ELSE isRead END WHERE serverMessageId = :serverMessageId OR clientMessageId = :serverMessageId")
+    @Query("""
+        UPDATE messages SET
+            deliveryState = CASE
+                WHEN :deliveryState = 'READ' THEN 'READ'
+                WHEN :deliveryState = 'DELIVERED' AND deliveryState != 'READ' THEN 'DELIVERED'
+                WHEN :deliveryState = 'SENT' AND deliveryState NOT IN ('DELIVERED', 'READ') THEN 'SENT'
+                WHEN :deliveryState = 'FAILED' AND deliveryState NOT IN ('DELIVERED', 'READ') THEN 'FAILED'
+                ELSE deliveryState
+            END,
+            isRead = CASE
+                WHEN :deliveryState = 'READ' THEN 1
+                ELSE isRead
+            END
+        WHERE serverMessageId = :serverMessageId OR clientMessageId = :serverMessageId
+    """)
     suspend fun updateMessageDeliveryStateByServerId(serverMessageId: String, deliveryState: String)
 
     @Query("UPDATE messages SET isRead = :isRead WHERE id = :messageId")
