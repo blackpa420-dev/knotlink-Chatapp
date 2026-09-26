@@ -342,6 +342,51 @@ fun ChatDetailScreen(
         messages.filter { !it.isDeletedForMe && !(it.messageType == "SYSTEM_EVENT" && it.text.startsWith("[REACTION:")) }.sortedWith(compareBy({ it.timestamp }, { it.id }))
     }
 
+    // Precompute per-message display metadata once per message-list update.
+    // Keep expensive date formatting and reaction matching out of LazyColumn rows.
+    val messageDateHeaders = remember(validMessages) {
+        val calendar = java.util.Calendar.getInstance()
+        val todayDay = calendar.get(java.util.Calendar.DAY_OF_YEAR)
+        val todayYear = calendar.get(java.util.Calendar.YEAR)
+        val formatter = java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.getDefault())
+
+        buildMap<Long, String>(validMessages.size) {
+            validMessages.forEach { message ->
+                val label = if (message.timestamp <= 0L) {
+                    "Today"
+                } else {
+                    calendar.timeInMillis = message.timestamp
+                    val messageDay = calendar.get(java.util.Calendar.DAY_OF_YEAR)
+                    val messageYear = calendar.get(java.util.Calendar.YEAR)
+                    when {
+                        todayYear == messageYear && todayDay == messageDay -> "Today"
+                        todayYear == messageYear && todayDay - 1 == messageDay -> "Yesterday"
+                        else -> formatter.format(java.util.Date(message.timestamp))
+                    }
+                }
+                put(message.id, label)
+            }
+        }
+    }
+
+    val reactionsByLocalMessageId = remember(validMessages, reactionsList) {
+        val messageKeys = HashMap<String, Long>(validMessages.size * 2)
+        validMessages.forEach { message ->
+            messageKeys[message.id.toString()] = message.id
+            message.serverMessageId?.takeIf { it.isNotBlank() }?.let { serverId ->
+                messageKeys[serverId] = message.id
+            }
+        }
+
+        val grouped = HashMap<Long, MutableList<ReactionEntity>>()
+        reactionsList.forEach { reaction ->
+            messageKeys[reaction.messageId]?.let { localId ->
+                grouped.getOrPut(localId) { mutableListOf() }.add(reaction)
+            }
+        }
+        grouped.mapValues { (_, value) -> value.toList() }
+    }
+
     // Display paginated messages (30 per page, latest at the end)
     val displayedMessages = remember(validMessages, pageLimit) {
         if (validMessages.size <= pageLimit) validMessages else validMessages.takeLast(pageLimit)
@@ -394,7 +439,7 @@ fun ChatDetailScreen(
     val imeBottomPx = WindowInsets.ime.getBottom(density)
 
     // Auto-scroll logic: Instant scroll to latest message without visible jump/sliding
-    LaunchedEffect(displayedMessages.size, messages.lastOrNull()?.id, imeBottomPx) {
+    LaunchedEffect(displayedMessages.size, messages.lastOrNull()?.id) {
         if (displayedMessages.isNotEmpty()) {
             val targetIndex = displayedMessages.size
             listState.scrollToItem(targetIndex)
@@ -1017,33 +1062,8 @@ fun ChatDetailScreen(
                     ) { index, msg ->
                         // Show date pill when day changes
                         val prevMsg = if (index > 0) displayedMessages[index - 1] else null
-                        val currentHeader = if (msg.timestamp > 0L) {
-                            val cal = java.util.Calendar.getInstance()
-                            val todayDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
-                            val todayYear = cal.get(java.util.Calendar.YEAR)
-                            cal.timeInMillis = msg.timestamp
-                            val msgDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
-                            val msgYear = cal.get(java.util.Calendar.YEAR)
-                            when {
-                                todayYear == msgYear && todayDay == msgDay -> "Today"
-                                todayYear == msgYear && todayDay - 1 == msgDay -> "Yesterday"
-                                else -> java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(msg.timestamp))
-                            }
-                        } else "Today"
-
-                        val prevHeader = if (prevMsg != null && prevMsg.timestamp > 0L) {
-                            val cal = java.util.Calendar.getInstance()
-                            val todayDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
-                            val todayYear = cal.get(java.util.Calendar.YEAR)
-                            cal.timeInMillis = prevMsg.timestamp
-                            val msgDay = cal.get(java.util.Calendar.DAY_OF_YEAR)
-                            val msgYear = cal.get(java.util.Calendar.YEAR)
-                            when {
-                                todayYear == msgYear && todayDay == msgDay -> "Today"
-                                todayYear == msgYear && todayDay - 1 == msgDay -> "Yesterday"
-                                else -> java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(prevMsg.timestamp))
-                            }
-                        } else null
+                        val currentHeader = messageDateHeaders[msg.id] ?: "Today"
+                        val prevHeader = prevMsg?.let { messageDateHeaders[it.id] }
 
                         if (prevHeader == null || currentHeader != prevHeader) {
                             Box(
@@ -1069,7 +1089,7 @@ fun ChatDetailScreen(
                                 }
                             }
                         }
-                        val msgReactions = reactionsList.filter { it.messageId == msg.serverMessageId || it.messageId == msg.id.toString() }
+                        val msgReactions = reactionsByLocalMessageId[msg.id].orEmpty()
                         val isLastMsg = displayedMessages.lastOrNull()?.id == msg.id
                         val isTimeClicked = clickedMessageTimeId == msg.id
                         val currentAuthName = userIdentity?.fullName?.ifBlank { userIdentity?.username }?.ifBlank { "You" } ?: "You"
