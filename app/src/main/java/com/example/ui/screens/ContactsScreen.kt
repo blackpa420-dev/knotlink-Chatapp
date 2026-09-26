@@ -66,6 +66,7 @@ fun ContactsScreen(
     onContactClick: (ContactEntity) -> Unit,
     onVideoCallClick: (String) -> Unit,
     onTabSelected: (BitChatNavTab) -> Unit,
+    onActiveCallBannerClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val contacts by viewModel.filteredContacts.collectAsState()
@@ -154,6 +155,11 @@ fun ContactsScreen(
                     )
                 }
             }
+
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
 
             // Search Bar
             GlassPanel(
