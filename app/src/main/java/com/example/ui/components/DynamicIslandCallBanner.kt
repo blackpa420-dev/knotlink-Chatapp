@@ -161,8 +161,14 @@ fun ActiveCallBulletinSlot(
 
     AnimatedVisibility(
         visible = callState.isActive && callState.callType == "AUDIO",
-        enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-        exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+        enter = expandVertically(
+            expandFrom = Alignment.Top,
+            animationSpec = tween(durationMillis = 220)
+        ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+        exit = shrinkVertically(
+            shrinkTowards = Alignment.Top,
+            animationSpec = tween(durationMillis = 220)
+        ) + fadeOut(animationSpec = tween(durationMillis = 150)),
         modifier = modifier.fillMaxWidth()
     ) {
         DynamicIslandCallBanner(
