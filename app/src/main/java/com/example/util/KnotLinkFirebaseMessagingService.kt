@@ -191,6 +191,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     text = body,
                     chatId = chatId,
                     avatarBitmap = null,
+                    senderId = senderId,
                     serverMessageId = msgId
                 )
 
