@@ -941,6 +941,11 @@ fun ChatDetailScreen(
                 }
             }
 
+            com.example.ui.components.ActiveCallBulletinSlot(
+                viewModel = viewModel,
+                onExpandClick = onActiveCallBannerClick
+            )
+
             // Sticky Pinned Message Banner
             androidx.compose.animation.AnimatedVisibility(
                 visible = pinnedMessages.isNotEmpty(),
@@ -1017,11 +1022,6 @@ fun ChatDetailScreen(
                     }
                 }
             }
-
-            com.example.ui.components.ActiveCallBulletinSlot(
-                viewModel = viewModel,
-                onExpandClick = onActiveCallBannerClick
-            )
 
             // Chat Messages List with Floating New Message Indicator & Pagination
             Box(
