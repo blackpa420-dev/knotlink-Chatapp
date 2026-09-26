@@ -2064,36 +2064,34 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
+        Log.i("BitChatViewModel", "Remote termination received: callId=${callId ?: expectedCallId}, declined=$isDeclined")
+
         _incomingCallSession.value = null
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), callerName ?: "", expectedCallId)
-        if (_activeCall.value.isActive) {
-            if (isDeclined) {
-                _activeCall.value = _activeCall.value.copy(isConnected = false, callStatus = "BUSY")
-                triggerDeclineVibration()
-                viewModelScope.launch {
-                    delay(2500)
-                    callEngine.endCall(notifyRemote = false)
-                    callTimerJob?.cancel()
-                    callTimerJob = null
-                    callConnectTimestamp = 0L
-                    _activeCall.value = ActiveCallState(isActive = false)
-                    activeCallSessionId = null
-                    currentCallLogId = null
-                }
-            } else {
-                callEngine.endCall(notifyRemote = false)
-                callTimerJob?.cancel()
-                callTimerJob = null
-                callConnectTimestamp = 0L
-                _activeCall.value = ActiveCallState(isActive = false)
-                activeCallSessionId = null
-                currentCallLogId = null
-            }
-        }
-    }
+        callTimeoutJob?.cancel()
+        callTimeoutJob = null
 
+        NotificationHelper.cancelCallNotification(
+            getApplication<Application>(),
+            callerName ?: _activeCall.value.contactName,
+            callId ?: expectedCallId
+        )
+
+        // Always tear down WebRTC, even if Compose state has already lost isActive.
+        if (callEngine.engineState.value.isCallActive) {
+            callEngine.endCall(notifyRemote = false)
+        }
+
+        callTimerJob?.cancel()
+        callTimerJob = null
+        callConnectTimestamp = 0L
+        if (isDeclined) triggerDeclineVibration()
+
+        _activeCall.value = ActiveCallState(isActive = false)
+        activeCallSessionId = null
+        currentCallLogId = null
+    }
     fun declineIncomingCall(call: SupabaseCallSession) {
         _incomingCallSession.value = null
         NotificationHelper.cancelCallNotification(getApplication<Application>(), call.callerName, call.id)
@@ -2267,48 +2265,76 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     fun endCall() {
         activeCallStatusSyncJob?.cancel()
         activeCallStatusSyncJob = null
-        callEngine.endCall(notifyRemote = false)
+        callTimeoutJob?.cancel()
+        callTimeoutJob = null
+
         val lastState = _activeCall.value
         val sessId = activeCallSessionId
-        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
         val targetContactId = lastState.contactId
-        if (sessId != null) {
-            viewModelScope.launch {
-                val session = SupabaseService.getCallSession(sessId).getOrNull()
-                val myUid = repository.userIdentity.firstOrNull()?.supabaseUid.orEmpty()
-                val peerId = session?.let { if (it.callerId == myUid) it.receiverId else it.callerId }.orEmpty().ifBlank { targetContactId }
+        val elapsed = lastState.secondsElapsed
+        val logId = currentCallLogId
 
-                SupabaseService.updateCallSessionStatus(sessId, "ENDED", endedAt = System.currentTimeMillis())
-                if (peerId.isNotBlank()) {
-                    try {
-                        FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = peerId,
-                            type = "call_ended",
-                            title = "Call Ended",
-                            body = "Call was ended",
-                            senderName = lastState.contactName,
-                            chatId = sessId
-                        )
-                    } catch (e: Throwable) {
-                        Log.w("BitChatViewModel", "Error sending call_ended push: ${e.message}")
+        NotificationHelper.cancelCallNotification(getApplication<Application>(), lastState.contactName, sessId)
+
+        // Local teardown is immediate; remote termination is persisted separately.
+        callEngine.endCall(notifyRemote = false)
+
+        if (sessId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val session = SupabaseService.getCallSession(sessId).getOrNull()
+                    val myUid = repository.userIdentity.firstOrNull()?.supabaseUid.orEmpty()
+                    val peerId = session?.let {
+                        if (it.callerId == myUid) it.receiverId else it.callerId
+                    }.orEmpty().ifBlank { targetContactId }
+
+                    var ended = false
+                    repeat(3) { attempt ->
+                        if (!ended) {
+                            ended = SupabaseService.updateCallSessionStatus(
+                                sessId, "ENDED", endedAt = System.currentTimeMillis()
+                            ).getOrDefault(false)
+                            if (!ended && attempt < 2) delay(300L * (attempt + 1))
+                        }
                     }
+
+                    // FCM is sent only after the terminal DB transition succeeds or
+                    // the row is already terminal, preventing stale notifications.
+                    if (ended && peerId.isNotBlank()) {
+                        try {
+                            FcmPushSender.sendPushToUser(
+                                targetUserIdOrName = peerId,
+                                type = "call_ended",
+                                title = "Call Ended",
+                                body = "Call was ended",
+                                senderName = lastState.contactName,
+                                chatId = sessId
+                            )
+                        } catch (e: Throwable) {
+                            Log.w("BitChatViewModel", "Error sending call_ended push: ${e.message}")
+                        }
+                    } else if (!ended) {
+                        Log.w("BitChatViewModel", "Could not persist terminal ENDED state for call $sessId")
+                    }
+                } catch (e: Throwable) {
+                    Log.e("BitChatViewModel", "Remote call termination failed for $sessId: ${e.message}", e)
                 }
             }
         }
-        if (lastState.isActive) {
-            val elapsed = lastState.secondsElapsed
-            currentCallLogId?.let { logId ->
-                viewModelScope.launch {
-                    repository.updateCallLogDuration(logId, elapsed)
-                }
+
+        if (lastState.isActive && logId != null) {
+            viewModelScope.launch {
+                repository.updateCallLogDuration(logId, elapsed)
             }
         }
+
         callTimerJob?.cancel()
         callTimerJob = null
+        callConnectTimestamp = 0L
         _activeCall.value = ActiveCallState(isActive = false)
         activeCallSessionId = null
+        currentCallLogId = null
     }
-
     private val _isPartnerTyping = MutableStateFlow(false)
     val isPartnerTyping: StateFlow<Boolean> = _isPartnerTyping.asStateFlow()
 
