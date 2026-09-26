@@ -1901,9 +1901,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     fun handleIncomingCallIntent(callId: String, callerId: String, callerName: String, callType: String, autoAccept: Boolean) {
         viewModelScope.launch {
             val remoteSession = if (callId.isNotBlank()) SupabaseService.getCallSession(callId).getOrNull() else null
-            if (callId.isNotBlank() && remoteSession?.status?.equals("RINGING", ignoreCase = true) != true) return@launch
-            val session = remoteSession?.takeIf { it.status.equals("RINGING", ignoreCase = true) }
-                ?: SupabaseCallSession(
+            // Notification actions can race with the caller's session update. Accept
+            // only a live RINGING/ACCEPTED session; never fabricate a new call session.
+            if (callId.isNotBlank() &&
+                remoteSession?.status?.uppercase() !in setOf("RINGING", "ACCEPTED")) return@launch
+            val session = remoteSession?.takeIf {
+                it.status.uppercase() == "RINGING" || it.status.uppercase() == "ACCEPTED"
+            } ?: SupabaseCallSession(
                     id = callId.ifBlank { "call_" + callerName.hashCode() },
                     callId = callId.ifBlank { "call_" + callerName.hashCode() },
                     callerId = callerId.ifBlank { "caller_" + callerName.hashCode() },
@@ -2162,7 +2166,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             // Persist a public avatar URL in the call session. A local file path
             // from avatarPath cannot be rendered on the other device.
-            val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: SupabaseService.getProfile(myUid).getOrNull()?.avatarUrl.orEmpty())
+            val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf { it.startsWith("http://") || it.startsWith("https://") } ?: SupabaseService.getProfile(myUid).getOrNull()?.avatarUrl.orEmpty()
 
             // Create initial Call Session row in Supabase database FIRST
             SupabaseService.createCallSession(
