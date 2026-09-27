@@ -143,7 +143,9 @@ fun BitChatNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
     bitChatViewModel: BitChatViewModel = viewModel(),
-    isInPipMode: Boolean = false
+    isInPipMode: Boolean = false,
+    onCallScreenVisibilityChanged: (Boolean) -> Unit = {},
+    onVideoCallBackToPip: () -> Unit = {}
 ) {
     android.util.Log.d("BitChat_Debug", "BitChatNavHost composition started")
     val activeCallState by bitChatViewModel.activeCall.collectAsState()
@@ -155,6 +157,7 @@ fun BitChatNavHost(
     android.util.Log.d("BitChat_Debug", "BitChatNavHost current route: $currentRoute")
 
     val isCallScreenVisible = currentRoute.startsWith("audio_call") || currentRoute.startsWith("video_call")
+    androidx.compose.runtime.LaunchedEffect(isCallScreenVisible) { onCallScreenVisibilityChanged(isCallScreenVisible) }
 
     // A call route is entered before AudioCallScreen/VideoCallScreen has a
     // chance to initialize startCall(). Do NOT immediately pop a newly entered
@@ -603,7 +606,7 @@ fun BitChatNavHost(
                 contactName = resolvedName,
                 viewModel = bitChatViewModel,
                 onBackClick = {
-                    navController.popBackStack()
+                    onVideoCallBackToPip()
                 },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
