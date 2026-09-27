@@ -554,6 +554,7 @@ object NotificationHelper {
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             if (!callId.isNullOrBlank() || !callerName.isNullOrBlank()) {
+                if (!callId.isNullOrBlank()) ongoingCallAvatarCache.remove(callId)
                 manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller"))
                 manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller") + 1)
                 manager?.cancel(callNotificationId(callId ?: "", callerName ?: "Caller") + 2)
@@ -610,8 +611,15 @@ object NotificationHelper {
         val timeFormatted = String.format("%02d:%02d", minutes, seconds)
         val video = callType.equals("VIDEO", ignoreCase = true)
 
+        if (!callId.isBlank() && callerAvatarBitmap != null) {
+            ongoingCallAvatarCache[callId] = callerAvatarBitmap
+        }
         val profileBitmap = try {
-            (callerAvatarBitmap ?: createLetterAvatarBitmap(context, callerName)).let { getCircularBitmap(it) }
+            (
+                callerAvatarBitmap
+                    ?: ongoingCallAvatarCache[callId]
+                    ?: createLetterAvatarBitmap(context, callerName)
+            ).let { getCircularBitmap(it) }
         } catch (_: Throwable) {
             createLetterAvatarBitmap(context, callerName)
         }
