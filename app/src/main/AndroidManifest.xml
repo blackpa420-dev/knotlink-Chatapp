@@ -44,7 +44,7 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleTop"
-            android:taskAffinity="${applicationId}.call"
+            android:taskAffinity="${applicationId}"
             android:supportsPictureInPicture="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
             android:showWhenLocked="true"
