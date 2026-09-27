@@ -952,9 +952,10 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             Log.w(TAG, "Error restoring audioManager: ${e.message}")
         }
 
+        @Suppress("DEPRECATION")
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) audioManager?.clearCommunicationDevice()
-            else { @Suppress("DEPRECATION") audioManager?.isSpeakerphoneOn = false }
+            else audioManager?.isSpeakerphoneOn = false
             audioManager?.isMicrophoneMute = false
             audioManager?.mode = AudioManager.MODE_NORMAL
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {

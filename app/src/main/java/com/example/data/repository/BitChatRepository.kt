@@ -827,14 +827,14 @@ class BitChatRepository(val dao: BitChatDao) {
         val readerUid = reader?.supabaseUid?.ifBlank { reader.email }?.ifBlank { reader.username }.orEmpty()
         if (result.isSuccess && readerUid.isNotBlank()) {
             messageIds.forEach { serverId ->
-                val local = dao.getMessageByServerId(serverId)
+                val local = dao.findMessageByServerId(serverId)
                 if (local != null && local.senderUid.isNotBlank() && local.senderUid != readerUid) {
                     SupabaseRealtimeManager.broadcastMessageMutation(
                         SupabaseMessage(
                             id = serverId,
                             chatId = chatId,
                             senderId = readerUid,
-                            senderName = reader.fullName.ifBlank { reader.username },
+                            senderName = reader?.fullName?.ifBlank { reader.username }.orEmpty(),
                             receiverId = local.senderUid,
                             text = local.text,
                             timestamp = System.currentTimeMillis(),

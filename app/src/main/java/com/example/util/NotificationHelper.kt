@@ -404,7 +404,8 @@ object NotificationHelper {
         callId: String = "",
         callerId: String = "",
         callerAvatarBitmap: android.graphics.Bitmap? = null,
-        silentUpdate: Boolean = false
+        silentUpdate: Boolean = false,
+        peerId: String = callerId
     ) {
         // Warm native WebRTC/audio resources while the phone is still ringing.
         // This removes first-call initialization latency from the Answer action.

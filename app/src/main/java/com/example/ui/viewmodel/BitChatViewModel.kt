@@ -2669,7 +2669,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun togglePinMessage(chatId: String, message: MessageEntity, forEveryone: Boolean) {
+    fun togglePinMessage(chatId: String, message: MessageEntity, forEveryone: Boolean = false) {
         viewModelScope.launch {
             repository.togglePinMessage(
                 chatId = chatId,

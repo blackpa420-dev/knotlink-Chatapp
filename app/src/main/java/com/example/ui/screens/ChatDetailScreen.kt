@@ -1897,7 +1897,7 @@ fun ChatDetailScreen(
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             for (index in 0 until 18) {
-                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72))
+                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72)).toFloat()
                                                 val speaking = recordingAmplitude > 0.035f
                                                 val h = if (speaking) {
                                                     (5f + (recordingAmplitude * 24f * (0.35f + phase))).coerceIn(5f, 28f)
