@@ -1234,7 +1234,7 @@ object SupabaseService {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
             val bodyObj = JSONObject().apply {
                 put("is_deleted_for_everyone", true)
-                put("text", "This message was deleted")
+                put("text", "")
             }
 
             val request = Request.Builder()
