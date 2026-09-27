@@ -2187,9 +2187,32 @@ class BitChatRepository(val dao: BitChatDao) {
     ) {
         val now = System.currentTimeMillis()
         val targetId = serverMessageId ?: messageId.toString()
+        val local = dao.getMessageById(messageId)
         dao.updateMessageTextWithRowId(messageId, targetId, newText, now)
+
         if (!serverMessageId.isNullOrBlank()) {
-            SupabaseService.editMessage(serverMessageId, newText)
+            val result = SupabaseService.editMessage(serverMessageId, newText)
+            if (result.isSuccess && local != null) {
+                val identity = dao.getUserIdentity().firstOrNull()
+                SupabaseRealtimeManager.broadcastMessageMutation(
+                    SupabaseMessage(
+                        id = serverMessageId,
+                        chatId = chatId,
+                        senderId = identity?.supabaseUid ?: local.senderUid,
+                        senderName = identity?.fullName?.ifBlank { identity.username } ?: local.senderName,
+                        receiverId = local.receiverUid,
+                        text = newText,
+                        timestamp = now,
+                        status = local.deliveryState.ifBlank { "SENT" },
+                        isRead = local.isRead,
+                        messageType = local.messageType,
+                        isEdited = true,
+                        isPinned = local.isPinned,
+                        clientMsgId = local.clientMessageId
+                    ),
+                    mutation = "EDIT"
+                )
+            }
         }
     }
 
@@ -2201,11 +2224,33 @@ class BitChatRepository(val dao: BitChatDao) {
     ) {
         val now = System.currentTimeMillis()
         val targetId = serverMessageId ?: messageId.toString()
+        val local = dao.getMessageById(messageId)
 
         if (deleteForEveryone) {
             dao.updateMessageDeletedForEveryone(targetId, now)
             if (!serverMessageId.isNullOrBlank()) {
-                SupabaseService.deleteMessageForEveryone(serverMessageId)
+                val result = SupabaseService.deleteMessageForEveryone(serverMessageId)
+                if (result.isSuccess && local != null) {
+                    val identity = dao.getUserIdentity().firstOrNull()
+                    SupabaseRealtimeManager.broadcastMessageMutation(
+                        SupabaseMessage(
+                            id = serverMessageId,
+                            chatId = chatId,
+                            senderId = identity?.supabaseUid ?: local.senderUid,
+                            senderName = identity?.fullName?.ifBlank { identity.username } ?: local.senderName,
+                            receiverId = local.receiverUid,
+                            text = "",
+                            timestamp = now,
+                            status = local.deliveryState.ifBlank { "SENT" },
+                            isRead = local.isRead,
+                            messageType = local.messageType,
+                            isDeletedForEveryone = true,
+                            isPinned = false,
+                            clientMsgId = local.clientMessageId
+                        ),
+                        mutation = "DELETE"
+                    )
+                }
             }
         } else {
             dao.updateMessageDeletedForMe(messageId)
@@ -2213,6 +2258,7 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun toggleReaction(
+
         chatId: String,
         messageId: Long,
         serverMessageId: String?,
@@ -2254,9 +2300,10 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
         val targetId = serverMessageId ?: messageId.toString()
         val newPinned = !currentIsPinned
-        val now = if (newPinned) System.currentTimeMillis() else null
+        val now = System.currentTimeMillis()
+        val local = dao.getMessageById(messageId)
 
-        dao.updateMessagePinnedStatus(targetId, newPinned, now)
+        dao.updateMessagePinnedStatus(targetId, newPinned, if (newPinned) now else null)
 
         if (newPinned) {
             dao.insertPinnedMessage(
@@ -2264,7 +2311,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     chatId = chatId,
                     messageId = targetId,
                     pinnedByUid = currentUid,
-                    pinnedAt = System.currentTimeMillis()
+                    pinnedAt = now
                 )
             )
         } else {
@@ -2272,7 +2319,27 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         if (!serverMessageId.isNullOrBlank()) {
-            SupabaseService.updateMessagePinnedStatus(serverMessageId, newPinned)
+            val result = SupabaseService.updateMessagePinnedStatus(serverMessageId, newPinned)
+            if (result.isSuccess && local != null) {
+                SupabaseRealtimeManager.broadcastMessageMutation(
+                    SupabaseMessage(
+                        id = serverMessageId,
+                        chatId = chatId,
+                        senderId = currentUid,
+                        senderName = currentIdentity?.fullName?.ifBlank { currentIdentity.username } ?: local.senderName,
+                        receiverId = local.receiverUid,
+                        text = local.text,
+                        timestamp = now,
+                        status = local.deliveryState.ifBlank { "SENT" },
+                        isRead = local.isRead,
+                        messageType = local.messageType,
+                        isPinned = newPinned,
+                        isEdited = local.isEdited,
+                        clientMsgId = local.clientMessageId
+                    ),
+                    mutation = if (newPinned) "PIN" else "UNPIN"
+                )
+            }
         }
     }
 
