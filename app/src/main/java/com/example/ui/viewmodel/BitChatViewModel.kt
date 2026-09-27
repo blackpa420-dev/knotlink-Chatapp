@@ -2406,6 +2406,38 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /** Resume the already-running process-local call after CallActivity -> MainActivity handoff. */
+    fun resumeActiveCallFromBridge(): Boolean {
+        val bridge = ActiveCallBridge.state.value ?: return false
+        if (bridge.callId.isBlank() || !bridge.isConnected) return false
+
+        // If this ViewModel already owns the call, do not create or replace a session.
+        if (_activeCall.value.isActive && activeCallSessionId == bridge.callId) return true
+
+        // The WebRTC engine is a process singleton, so the media session can remain
+        // alive while CallActivity is replaced by MainActivity. Rehydrate only the
+        // UI/session state; never call startCall() here.
+        if (!callEngine.engineState.value.isCallActive) return false
+
+        activeCallSessionId = bridge.callId
+        _activeCall.value = ActiveCallState(
+            isActive = true,
+            isConnected = true,
+            contactId = bridge.peerId,
+            contactName = bridge.peerName,
+            contactAvatar = "",
+            callType = bridge.callType,
+            secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
+                .coerceAtLeast(0L) / 1000L).toInt(),
+            isMuted = false,
+            isSpeaker = callEngine.engineState.value.isSpeakerOn,
+            callStatus = "CONNECTED"
+        )
+        startActiveCallStatusSync(bridge.callId)
+        startCallTimer(bridge.startedAt)
+        return true
+    }
+
     fun toggleMute() {
         val muted = callEngine.toggleMute()
         _activeCall.value = _activeCall.value.copy(isMuted = muted)
