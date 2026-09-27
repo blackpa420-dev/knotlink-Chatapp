@@ -37,7 +37,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                     if (callId.isNotBlank()) {
                         SupabaseService.updateCallSessionStatus(callId, "DECLINED", endedAt = System.currentTimeMillis())
                     }
-                    if (callerId.isNotBlank()) {
+                    if (peerId.isNotBlank()) {
                         FcmPushSender.sendPushToUser(
                             targetUserIdOrName = peerId,
                             type = "call_declined",
@@ -73,9 +73,9 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                             endedAt = System.currentTimeMillis()
                         )
                     }
-                    if (callerId.isNotBlank()) {
+                    if (peerId.isNotBlank()) {
                         FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = callerId,
+                            targetUserIdOrName = peerId,
                             type = "call_ended",
                             title = "Call Ended",
                             body = "Call was ended",
