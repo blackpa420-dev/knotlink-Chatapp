@@ -150,6 +150,7 @@ fun BitChatNavHost(
     android.util.Log.d("BitChat_Debug", "BitChatNavHost composition started")
     val activeCallState by bitChatViewModel.activeCall.collectAsState()
     val incomingCallSession by bitChatViewModel.incomingCallSession.collectAsState()
+    val activeCallBridge by com.example.call.ActiveCallBridge.state.collectAsState()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: ""
     val context = LocalContext.current
@@ -283,11 +284,20 @@ fun BitChatNavHost(
     }
 
     val openActiveAudioCall = {
-        val route = BitChatRoutes.audioCall(
-            activeCallState.contactId,
+        val contactId = if (activeCallState.isActive) {
+            activeCallState.contactId
+        } else {
+            activeCallBridge?.peerId.orEmpty()
+        }
+        val contactName = if (activeCallState.isActive) {
             activeCallState.contactName
-        )
-        navController.navigate(route)
+        } else {
+            activeCallBridge?.peerName.orEmpty()
+        }
+
+        if (contactId.isNotBlank()) {
+            navController.navigate(BitChatRoutes.audioCall(contactId, contactName))
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
