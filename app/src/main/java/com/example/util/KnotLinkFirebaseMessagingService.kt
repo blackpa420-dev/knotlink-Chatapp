@@ -327,6 +327,26 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
         }
     }
 
+    override fun onDeletedMessages() {
+        super.onDeletedMessages()
+        // FCM explicitly recommends a full server sync when pending messages were
+        // dropped. Recover both chat history and call history on the next callback.
+        scope.launch(Dispatchers.IO) {
+            try {
+                val db = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
+                val identity = db.bitChatDao().getUserIdentitySync()
+                val uid = identity?.supabaseUid?.ifBlank { identity?.email }.orEmpty()
+                if (uid.isNotBlank()) {
+                    val repository = com.example.data.repository.BitChatRepository(db.bitChatDao())
+                    repository.syncAllChatHistory(uid, identity?.username.orEmpty())
+                    repository.syncCallHistory(uid, identity?.username.orEmpty())
+                }
+            } catch (e: Throwable) {
+                Log.w("KnotLinkFCM", "Full sync after deleted FCM messages failed: " + e.message)
+            }
+        }
+    }
+
     private fun downloadBitmapFromUrl(url: String): android.graphics.Bitmap? {
         if (url.isBlank()) return null
         return try {
