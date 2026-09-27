@@ -65,6 +65,26 @@ class CallActivity : FragmentActivity() {
         }
     }
 
+    private fun returnToMainActivityForAudioCall() {
+        try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                )
+                putExtra("return_from_active_audio_call", true)
+                putExtra("call_id", callId)
+                putExtra("caller_id", callerId)
+                putExtra("caller_name", callerName)
+                putExtra("call_type", "AUDIO")
+            }
+            startActivity(intent)
+        } catch (_: Throwable) {
+            moveTaskToBack(true)
+        }
+    }
+
     private fun finishCallTask() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -280,7 +300,11 @@ class CallActivity : FragmentActivity() {
 
     override fun onBackPressed() {
         if (::viewModel.isInitialized && viewModel.activeCall.value.isActive) {
-            enterVideoPipOrBackground()
+            if (callType.equals("VIDEO", ignoreCase = true)) {
+                enterVideoPipOrBackground()
+            } else {
+                returnToMainActivityForAudioCall()
+            }
             return
         }
         finishCallTask()
