@@ -2124,7 +2124,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     callerName = _activeCall.value.contactName,
                     secondsElapsed = elapsed,
                     callId = activeCallSessionId.orEmpty(),
-                    callType = _activeCall.value.callType
+                    callType = _activeCall.value.callType,
+                    peerId = _activeCall.value.contactId
                 )
                 delay(1000)
             }
@@ -2251,6 +2252,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         )
         addCallLog(contactId = contactId, contactName = contactName, callType = callType, direction = "OUTGOING", durationSeconds = 0)
 
+        // Show the ongoing-call notification immediately, including while the
+        // call is still ringing. The contact id is updated to the resolved
+        // Supabase UID below once recipient resolution completes.
+        NotificationHelper.showOngoingAudioCallNotification(
+            context = getApplication<Application>(),
+            callerName = contactName,
+            secondsElapsed = 0,
+            callId = callId,
+            callType = callType,
+            peerId = contactId
+        )
+
         // Make the call screen the authoritative destination as soon as an outgoing
         // video call becomes active, so the global floating PiP cannot steal the
         // initial presentation while the signaling session is being created.
@@ -2284,6 +2297,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
                 _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
+
+                NotificationHelper.showOngoingAudioCallNotification(
+                    context = getApplication<Application>(),
+                    callerName = contactName,
+                    secondsElapsed = 0,
+                    callId = callId,
+                    callType = callType,
+                    peerId = resolvedReceiverId
+                )
 
                 val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf {
                     it.startsWith("http://") || it.startsWith("https://")
