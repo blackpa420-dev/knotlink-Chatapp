@@ -87,6 +87,9 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             val senderId = data["sender_id"] ?: ""
             val chatId = data["chat_id"] ?: data["room_id"] ?: senderId
             val rawSenderAvatarUrl = data["sender_avatar"] ?: ""
+            // FCM must render the notification immediately. Do not perform a
+            // Supabase/profile network lookup here; Android gives onMessageReceived
+            // only a short processing window for high-priority pushes.
             val senderAvatarUrl = if (
                 rawSenderAvatarUrl.startsWith("http://") ||
                 rawSenderAvatarUrl.startsWith("https://")
@@ -95,18 +98,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             } else {
                 try {
                     val localDao = com.example.data.local.BitChatDatabase.getDatabase(applicationContext).bitChatDao()
-                    if (senderId.isNotBlank()) {
-                        kotlinx.coroutines.runBlocking(Dispatchers.IO) {
-                            var cached = localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty()
-                            // Foreground delivery can arrive before the sender profile has
-                            // been cached locally. Resolve the public profile as a fallback
-                            // so foreground and background notifications render identically.
-                            if (cached.isBlank()) {
-                                cached = SupabaseService.getProfile(senderId).getOrNull()?.avatarUrl.orEmpty()
-                            }
-                            cached
-                        }
-                    } else ""
+                    if (senderId.isNotBlank()) localDao.getCachedProfile(senderId)?.avatarUrl.orEmpty() else ""
                 } catch (_: Throwable) {
                     ""
                 }
@@ -136,21 +128,34 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
                 // Resolve the caller avatar before the first render so the call
                 // notification never flashes an avatar-less version and then gets replaced.
-                val callAvatarBitmap = if (senderAvatarUrl.isNotBlank()) {
-                    downloadBitmapFromUrl(senderAvatarUrl)
-                } else {
-                    null
-                }
-
-                // 1. INSTANT CALL NOTIFICATION DISPLAY with avatar and call type.
+                // 1. Render the call notification immediately. Avatar download is
+                // deliberately deferred so a sleeping device does not miss the call alert.
                 NotificationHelper.showIncomingCallNotification(
                     context = applicationContext,
                     callerName = callerName,
                     callType = callType,
                     callId = chatId,
                     callerId = senderId,
-                    callerAvatarBitmap = callAvatarBitmap
+                    callerAvatarBitmap = null
                 )
+
+                // 2. Enrich the already-visible notification with the avatar silently.
+                if (senderAvatarUrl.isNotBlank()) {
+                    scope.launch(Dispatchers.IO) {
+                        val bitmap = downloadBitmapFromUrl(senderAvatarUrl)
+                        if (bitmap != null) {
+                            NotificationHelper.showIncomingCallNotification(
+                                context = applicationContext,
+                                callerName = callerName,
+                                callType = callType,
+                                callId = chatId,
+                                callerId = senderId,
+                                callerAvatarBitmap = bitmap,
+                                silentUpdate = true
+                            )
+                        }
+                    }
+                }
 
                 // 2. INSTANT ROOM DB CALL LOG INSERTION (so call history shows up even when app is closed)
                 scope.launch {
@@ -195,24 +200,36 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
                 val msgId = data["server_message_id"]?.ifBlank { null } ?: ("msg_" + java.util.UUID.randomUUID().toString().take(8))
 
-                // 1. Resolve the avatar BEFORE the first notification render.
-                // This prevents a silent second notify() from replacing the initial
-                // avatar-less notification a moment later.
-                val messageAvatarBitmap = if (senderAvatarUrl.isNotBlank()) {
-                    downloadBitmapFromUrl(senderAvatarUrl)
-                } else {
-                    null
-                }
-
+                // 1. Render the message notification immediately. Never block the
+                // first notification on a profile/avatar HTTP request.
                 NotificationHelper.showIncomingMessageNotification(
                     context = applicationContext,
                     senderName = callerName,
                     text = body,
                     chatId = chatId,
-                    avatarBitmap = messageAvatarBitmap,
+                    avatarBitmap = null,
                     senderId = senderId,
                     serverMessageId = msgId
                 )
+
+                // 2. Fetch avatar only after the visible notification is posted.
+                if (senderAvatarUrl.isNotBlank()) {
+                    scope.launch(Dispatchers.IO) {
+                        val bitmap = downloadBitmapFromUrl(senderAvatarUrl)
+                        if (bitmap != null) {
+                            NotificationHelper.showIncomingMessageNotification(
+                                context = applicationContext,
+                                senderName = callerName,
+                                text = body,
+                                chatId = chatId,
+                                avatarBitmap = bitmap,
+                                senderId = senderId,
+                                serverMessageId = msgId,
+                                isAvatarUpdate = true
+                            )
+                        }
+                    }
+                }
 
                 // 2. INSTANT ROOM DB INSERTION so inbox is immediately updated without network lag
                 val ts = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
