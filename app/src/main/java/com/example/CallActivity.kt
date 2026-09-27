@@ -4,6 +4,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
+import android.app.PictureInPictureParams
+import android.util.Rational
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -253,11 +255,32 @@ class CallActivity : FragmentActivity() {
         setIntent(intent)
     }
 
+    private fun enterVideoPipOrBackground() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
+            callType.equals("VIDEO", ignoreCase = true) &&
+            ::viewModel.isInitialized &&
+            viewModel.activeCall.value.isActive &&
+            !isInPictureInPictureMode
+        ) {
+            try {
+                val builder = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    builder.setAutoEnterEnabled(true)
+                }
+                setPictureInPictureParams(builder.build())
+                enterPictureInPictureMode(builder.build())
+                return
+            } catch (_: Throwable) {
+            }
+        }
+        moveTaskToBack(true)
+    }
+
     override fun onBackPressed() {
-        // A dedicated call task must never reveal MainActivity. While active,
-        // Back minimizes the call task and keeps the call alive.
         if (::viewModel.isInitialized && viewModel.activeCall.value.isActive) {
-            moveTaskToBack(true)
+            enterVideoPipOrBackground()
             return
         }
         finishCallTask()
