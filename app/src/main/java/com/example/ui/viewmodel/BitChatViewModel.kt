@@ -1,5 +1,7 @@
 package com.example.ui.viewmodel
 
+import com.example.call.ActiveCallBridge
+
 import android.app.Activity
 import android.app.Application
 import android.content.Context
@@ -2083,6 +2085,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isMuted = false,
             isSpeaker = isVideo
         )
+        ActiveCallBridge.start(call.id, call.callerId, callerName, call.callType, isConnected = false)
         addCallLog(
             contactId = call.callerId,
             contactName = callerName,
@@ -2113,6 +2116,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             callConnectTimestamp = System.currentTimeMillis()
         }
         _activeCall.value = _activeCall.value.copy(isConnected = true, callStatus = "CONNECTED")
+        ActiveCallBridge.setConnected(callConnectTimestamp)
         callTimerJob?.cancel()
         callTimerJob = viewModelScope.launch {
             while (isActive && _activeCall.value.isActive) {
@@ -2199,6 +2203,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        ActiveCallBridge.clear(callId ?: expectedCallId)
         _activeCall.value = ActiveCallState(isActive = false)
         activeCallSessionId = null
         currentCallLogId = null
@@ -2252,6 +2257,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isMuted = false,
             isSpeaker = isVideo
         )
+        ActiveCallBridge.start(callId, contactId, contactName, callType, isConnected = false)
         addCallLog(contactId = contactId, contactName = contactName, callType = callType, direction = "OUTGOING", durationSeconds = 0)
 
         // Show the ongoing-call notification immediately, including while the
