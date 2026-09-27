@@ -335,7 +335,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             try {
                 val db = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
                 val identity = db.bitChatDao().getUserIdentitySync()
-                val uid = identity?.supabaseUid?.ifBlank { identity?.email }.orEmpty()
+                val uid = identity?.let { it.supabaseUid.ifBlank { it.email } }.orEmpty()
                 if (uid.isNotBlank()) {
                     val repository = com.example.data.repository.BitChatRepository(db.bitChatDao())
                     repository.syncAllChatHistory(uid, identity?.username.orEmpty())
