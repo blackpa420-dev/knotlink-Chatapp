@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -189,20 +190,15 @@ class MainActivity : FragmentActivity() {
           Surface(modifier = Modifier.fillMaxSize()) {
             val engineState by vm.callEngineState.collectAsState()
 
-            Box(modifier = Modifier.fillMaxSize()) {
-              BitChatNavHost(
-                bitChatViewModel = vm,
-                isInPipMode = isInPipModeState
-              )
-
+            Column(modifier = Modifier.fillMaxSize()) {
               if (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)) {
                 val mins = engineState.callDurationSeconds / 60
                 val secs = engineState.callDurationSeconds % 60
                 Surface(
                   modifier = Modifier
-                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .height(58.dp)
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
                     .clickable {
                       try {
                         startActivity(
@@ -222,51 +218,56 @@ class MainActivity : FragmentActivity() {
                         Log.w("BitChat_Debug", "Could not reopen audio call: " + e.message)
                       }
                     },
-                  shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                  shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
                   color = androidx.compose.ui.graphics.Color(0xFF151A24),
-                  shadowElevation = 8.dp
+                  shadowElevation = 4.dp
                 ) {
                   Row(
                     modifier = Modifier
                       .fillMaxWidth()
-                      .padding(horizontal = 16.dp, vertical = 11.dp),
+                      .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Surface(
-                      shape = androidx.compose.foundation.shape.CircleShape,
-                      color = androidx.compose.ui.graphics.Color(0xFF2563EB)
-                    ) {
-                      Text(
-                        text = "☎",
-                        modifier = Modifier.padding(9.dp),
-                        color = androidx.compose.ui.graphics.Color.White,
-                        fontSize = 15.sp
-                      )
-                    }
+                    Text(
+                      text = "☎",
+                      color = androidx.compose.ui.graphics.Color(0xFF60A5FA),
+                      fontSize = 16.sp
+                    )
                     Column(
                       modifier = Modifier
                         .weight(1f)
-                        .padding(start = 12.dp)
+                        .padding(start = 10.dp)
                     ) {
                       Text(
                         text = engineState.peerName.ifBlank { "Audio call" },
                         color = androidx.compose.ui.graphics.Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
                       )
                       Text(
                         text = "Ongoing call • %02d:%02d • Tap to return".format(mins, secs),
                         color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.68f),
-                        fontSize = 11.sp
+                        fontSize = 10.sp
                       )
                     }
                     Text(
-                      text = "↗",
-                      color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.82f),
+                      text = "›",
+                      color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f),
                       fontSize = 20.sp
                     )
                   }
                 }
+              }
+
+              Box(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .weight(1f)
+              ) {
+                BitChatNavHost(
+                  bitChatViewModel = vm,
+                  isInPipMode = isInPipModeState
+                )
               }
             }
           }
