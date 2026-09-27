@@ -227,7 +227,13 @@ class MainActivity : FragmentActivity() {
 
   private fun handleNotificationIntent(intent: android.content.Intent?) {
     if (intent == null) return
-    val actionAcceptCall = intent.getBooleanExtra("action_accept_call", false)
+    val returningFromActiveAudioCall = intent.getBooleanExtra("return_from_active_audio_call", false)
+    if (returningFromActiveAudioCall) {
+      bitChatViewModel?.resumeActiveCallFromBridge()
+      return
+    }
+
+        val actionAcceptCall = intent.getBooleanExtra("action_accept_call", false)
     val actionIncomingCallScreen = intent.getBooleanExtra("action_incoming_call_screen", false) || intent.getBooleanExtra("is_incoming_call", false)
     val callId = intent.getStringExtra("call_id") ?: ""
     val callerId = intent.getStringExtra("caller_id") ?: ""
