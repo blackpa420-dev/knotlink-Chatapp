@@ -420,16 +420,21 @@ fun ChatDetailScreen(
 
     LaunchedEffect(chatId) {
         viewModel.listenTypingStatusForChat(chatId)
-        viewModel.markUserMessagesAsRead(chatId)
+        // Do not mark messages read merely because the chat route opened.
+        // A message becomes READ only after the user has actually reached the
+        // latest visible area of the conversation.
         pageLimit = 30
         unreadNewMessagesCount = 0
         hasInitialScrolled = false
     }
 
-    LaunchedEffect(messages.size, chatId) {
+    LaunchedEffect(isUserNearBottom, hasInitialScrolled, messages.size, chatId) {
+        if (!hasInitialScrolled || !isUserNearBottom) return@LaunchedEffect
+
         val unreadServerMessageIds = messages
             .filter { !it.isFromUser && (it.deliveryState != "READ" || !it.isRead) }
             .mapNotNull { it.serverMessageId?.takeIf { id -> id.isNotBlank() } }
+
         if (unreadServerMessageIds.isNotEmpty()) {
             viewModel.markMessagesAsRead(chatId, unreadServerMessageIds)
         }
@@ -1157,9 +1162,9 @@ fun ChatDetailScreen(
                                     onClick = {
                                         clickedMessageTimeId = if (clickedMessageTimeId == msg.id) null else msg.id
                                     },
-                                    onToggleReadStatus = { id, currentIsRead ->
-                                        viewModel.toggleMessageReadStatus(id, currentIsRead)
-                                    },
+                                    // Read state is server-driven; tapping a bubble must
+                                    // never toggle the sent-message status by itself.
+                                    onToggleReadStatus = { _, _ -> },
                                     onLongClick = {
                                         selectedMessageForAction = msg
                                     },
@@ -1909,7 +1914,9 @@ fun ChatDetailScreen(
                                             value = inputText,
                                             onValueChange = { text ->
                                                 inputText = text
-                                                if (text.isNotEmpty()) {
+                                                if (editingMessage != null) {
+                                                    viewModel.setUserTyping(chatId, false)
+                                                } else if (text.isNotEmpty()) {
                                                     viewModel.setUserTyping(chatId, true)
                                                 } else {
                                                     viewModel.setUserTyping(chatId, false)
@@ -2832,6 +2839,7 @@ fun ChatDetailScreen(
                                         label = "Edit Message",
                                         isNightMode = isNightMode,
                                         onClick = {
+                                            viewModel.setUserTyping(chatId, false)
                                             editingMessage = msg
                                             inputText = msg.text
                                             selectedMessageForAction = null
