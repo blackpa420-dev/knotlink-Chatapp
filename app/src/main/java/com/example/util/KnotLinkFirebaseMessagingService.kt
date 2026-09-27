@@ -165,12 +165,12 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                         val ts = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
                         val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
                         val timeStr = sdf.format(java.util.Date(ts))
-                        val callLogId = if (chatId.isNotBlank()) "${chatId}_$ts" else "call_${java.util.UUID.randomUUID().toString().take(8)}"
+                        val callLogId = if (chatId.isNotBlank()) "remote_call_$chatId" else "remote_call_${java.util.UUID.randomUUID().toString().take(8)}"
                         val callLog = com.example.data.local.CallLogEntity(
                             id = callLogId,
                             contactId = if (senderId.isNotBlank()) senderId else chatId,
                             contactName = callerName,
-                            callType = if (callType.equals("Video", ignoreCase = true)) "VIDEO" else "AUDIO",
+                            callType = if (callType.equals("Video", ignoreCase = true) || callType.equals("VIDEO", ignoreCase = true)) "VIDEO" else "AUDIO",
                             direction = "INCOMING",
                             timestampMillis = ts,
                             timeString = timeStr,
