@@ -160,6 +160,10 @@ fun VideoCallScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .then(
+                if (isInPipMode) Modifier.clip(RoundedCornerShape(18.dp))
+                else Modifier
+            )
             .background(Color.Black)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
