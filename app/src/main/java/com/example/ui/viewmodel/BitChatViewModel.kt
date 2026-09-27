@@ -2660,12 +2660,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun togglePinMessage(chatId: String, message: MessageEntity) {
+    fun togglePinMessage(chatId: String, message: MessageEntity, forEveryone: Boolean) {
         viewModelScope.launch {
-            repository.togglePinMessage(chatId, message.id, message.serverMessageId, message.isPinned)
-            val action = if (!message.isPinned) "pinned" else "unpinned"
-            val eventType = if (!message.isPinned) "MESSAGE_PINNED" else "MESSAGE_UNPINNED"
-            repository.sendSystemEvent(chatId, eventType, "📌 A message was $action")
+            repository.togglePinMessage(
+                chatId = chatId,
+                messageId = message.id,
+                serverMessageId = message.serverMessageId,
+                currentIsPinned = message.isPinned,
+                broadcastToOthers = forEveryone
+            )
         }
     }
 
