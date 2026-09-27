@@ -252,8 +252,10 @@ class CallActivity : FragmentActivity() {
     }
 
     override fun onBackPressed() {
-        // Do not let the Back button expose MainActivity from the call task.
+        // A dedicated call task must never reveal MainActivity. While active,
+        // Back minimizes the call task and keeps the call alive.
         if (::viewModel.isInitialized && viewModel.activeCall.value.isActive) {
+            moveTaskToBack(true)
             return
         }
         finishCallTask()
