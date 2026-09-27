@@ -200,8 +200,8 @@ class MainActivity : FragmentActivity() {
                  (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)))
               if (showAudioBulletin) {
                 var bulletinNow by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
-                androidx.compose.runtime.LaunchedEffect(sharedCall?.callId, engineState.isCallActive) {
-                  while (true) {
+                androidx.compose.runtime.LaunchedEffect(showAudioBulletin, sharedCall?.callId, engineState.isCallActive) {
+                  while (showAudioBulletin) {
                     bulletinNow = System.currentTimeMillis()
                     kotlinx.coroutines.delay(1000L)
                   }
