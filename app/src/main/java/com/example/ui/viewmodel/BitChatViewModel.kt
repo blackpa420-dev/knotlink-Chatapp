@@ -2116,6 +2116,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             while (isActive && _activeCall.value.isActive) {
                 val elapsed = maxOf(0L, (System.currentTimeMillis() - callConnectTimestamp) / 1000L).toInt()
                 _activeCall.value = _activeCall.value.copy(secondsElapsed = elapsed)
+                // Keep a native ongoing-call notification alive while the call is
+                // connected, so minimizing/backing out of CallActivity never makes
+                // the active call disappear from the notification shade.
+                NotificationHelper.showOngoingAudioCallNotification(
+                    context = getApplication<Application>(),
+                    callerName = _activeCall.value.contactName,
+                    secondsElapsed = elapsed,
+                    callId = activeCallSessionId.orEmpty(),
+                    callType = _activeCall.value.callType
+                )
                 delay(1000)
             }
         }
