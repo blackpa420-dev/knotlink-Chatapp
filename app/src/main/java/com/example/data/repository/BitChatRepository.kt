@@ -882,7 +882,7 @@ class BitChatRepository(val dao: BitChatDao) {
                         timestampMillis = ts,
                         timeString = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(ts)),
                         durationSeconds = duration,
-                        avatarType = call.callerAvatar?.ifBlank { null } ?: existingChat?.avatarType ?: "default"
+                        avatarType = call.callerAvatar?.takeIf { it.isNotBlank() } ?: existingChat?.avatarType ?: "default"
                     )
                 )
             }
