@@ -1662,6 +1662,53 @@ object SupabaseService {
         }
     }
 
+    suspend fun getUserCallHistory(
+        userId: String,
+        username: String? = null,
+        email: String? = null,
+        limit: Int = 100
+    ): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
+        try {
+            val ids = mutableListOf(userId)
+            if (!username.isNullOrBlank()) {
+                ids.add(username)
+                ids.add(username.removePrefix("@"))
+                ids.add(if (username.endsWith(".link")) username else "$username.link")
+            }
+            if (!email.isNullOrBlank()) ids.add(email)
+
+            val filters = ids.filter { it.isNotBlank() }.distinct().flatMap {
+                val enc = java.net.URLEncoder.encode(it, "UTF-8")
+                listOf("caller_id.eq.$" + enc, "receiver_id.eq.$" + enc)
+            }
+            if (filters.isEmpty()) return@withContext Result.success(emptyList())
+
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
+                "?or=(${filters.joinToString(",")})&order=started_at.desc&limit=${limit}&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("Failed to fetch call history: ${response.code}"))
+            }
+
+            val arr = JSONArray(body)
+            val list = mutableListOf<SupabaseCallSession>()
+            for (i in 0 until arr.length()) {
+                list.add(SupabaseCallSession.fromJson(arr.getJSONObject(i)))
+            }
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getUserCallHistory", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun getCallSession(callId: String): Result<SupabaseCallSession> = withContext(Dispatchers.IO) {
         try {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId&select=*"
