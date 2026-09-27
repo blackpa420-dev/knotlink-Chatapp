@@ -2132,7 +2132,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     callId = activeCallSessionId.orEmpty(),
                     callType = _activeCall.value.callType,
                     peerId = _activeCall.value.contactId
-                )
+        ,
+                    isConnected = true        )
                 delay(1000)
             }
         }
@@ -2270,7 +2271,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             callId = callId,
             callType = callType,
             peerId = contactId
-        )
+,
+            isConnected = false        )
 
         // Make the call screen the authoritative destination as soon as an outgoing
         // video call becomes active, so the global floating PiP cannot steal the
