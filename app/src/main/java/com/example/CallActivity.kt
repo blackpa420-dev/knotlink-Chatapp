@@ -49,6 +49,7 @@ class CallActivity : FragmentActivity() {
     private var callerId: String = ""
     private var callerName: String = "Caller"
     private var callType: String = "AUDIO"
+    private var inPipMode by mutableStateOf(false)
 
     private fun showOverLockScreen() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -201,12 +202,8 @@ class CallActivity : FragmentActivity() {
                                     contactId = callerId.ifBlank { callId },
                                     contactName = callerName,
                                     viewModel = viewModel,
-                                    isInPipMode = false,
-                                    onBackClick = {
-                                        // Back from the in-call UI minimizes this dedicated
-                                        // call task without terminating the active WebRTC session.
-                                        moveTaskToBack(true)
-                                    },
+                                    isInPipMode = inPipMode,
+                                    onBackClick = { enterVideoPipOrBackground() },
                                     onEndCallClick = {
                                         viewModel.endCall()
                                         finishCallTask()
@@ -217,10 +214,7 @@ class CallActivity : FragmentActivity() {
                                     contactId = callerId.ifBlank { callId },
                                     contactName = callerName,
                                     viewModel = viewModel,
-                                    onBackClick = {
-                                        // Match Android Back: hide the call task, keep the call alive.
-                                        moveTaskToBack(true)
-                                    },
+                                    onBackClick = { returnToMainActivityForAudioCall() },
                                     onEndCallClick = {
                                         viewModel.endCall()
                                         finishCallTask()
@@ -290,12 +284,18 @@ class CallActivity : FragmentActivity() {
                     builder.setAutoEnterEnabled(true)
                 }
                 setPictureInPictureParams(builder.build())
+                inPipMode = true
                 enterPictureInPictureMode(builder.build())
                 return
             } catch (_: Throwable) {
             }
         }
         moveTaskToBack(true)
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        inPipMode = isInPictureInPictureMode
     }
 
     override fun onBackPressed() {
