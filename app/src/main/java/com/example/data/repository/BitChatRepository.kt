@@ -1501,23 +1501,36 @@ class BitChatRepository(val dao: BitChatDao) {
             val syncKey = "user_history:$myUid"
             val previousSync = dao.getSyncState(syncKey)?.lastSyncedAt ?: 0L
 
-            val historyRes = if (previousSync > 0L) {
-                SupabaseService.fetchUserMessagesSince(
-                    userId = myUid,
-                    username = myUsername.takeIf { it.isNotBlank() && it != myUid },
-                    email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
-                    sinceTimestamp = previousSync,
-                    limit = 200
-                )
-            } else {
-                SupabaseService.fetchUserMessages(
-                    userId = myUid,
-                    username = myUsername.takeIf { it.isNotBlank() && it != myUid },
-                    email = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername },
-                    limit = 200
-                )
+            val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
+            val historyEmail = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername }
+
+            // Always fetch a recent server window when the app returns from a long
+            // background/closed period. This is the recovery path when an FCM data
+            // message was delayed, dropped, or the service process was killed.
+            val recentRes = SupabaseService.fetchUserMessages(
+                userId = myUid,
+                username = historyUsername,
+                email = historyEmail,
+                limit = 500
+            )
+            if (recentRes.isSuccess) {
+                recentRes.getOrNull()?.let { fetchedMessages.addAll(it) }
             }
-            if (historyRes.isSuccess) historyRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+
+            // Also fetch the incremental window with a small overlap so timestamp
+            // boundaries and delayed delivery cannot leave a permanent hole.
+            if (previousSync > 0L) {
+                val sinceRes = SupabaseService.fetchUserMessagesSince(
+                    userId = myUid,
+                    username = historyUsername,
+                    email = historyEmail,
+                    sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
+                    limit = 500
+                )
+                if (sinceRes.isSuccess) {
+                    sinceRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+                }
+            }
 
             val uniqueMessages = fetchedMessages.distinctBy { it.id }.sortedBy { it.timestamp }
             val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
