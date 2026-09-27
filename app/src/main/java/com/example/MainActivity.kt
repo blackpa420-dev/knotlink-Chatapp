@@ -36,6 +36,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.navigation.BitChatNavHost
+import com.example.call.ActiveCallBridge
 import com.example.ui.theme.BitChatTheme
 import com.example.ui.viewmodel.BitChatViewModel
 import com.example.util.NotificationHelper
@@ -47,6 +48,7 @@ class MainActivity : FragmentActivity() {
   private var wasCallActiveInSession = false
   private var currentIntentState = mutableStateOf<Intent?>(null)
   private var pendingAcceptedCall: PendingAcceptedCall? = null
+  private var isCallScreenVisible by mutableStateOf(false)
 
   private data class PendingAcceptedCall(
     val callId: String,
@@ -166,6 +168,7 @@ class MainActivity : FragmentActivity() {
         bitChatViewModel = vm
 
         val activeCallState by vm.activeCall.collectAsState()
+        val bridgeCallState by ActiveCallBridge.state.collectAsState()
         androidx.compose.runtime.LaunchedEffect(activeCallState.isActive) {
           updateLockScreenFlags(activeCallState.isActive)
           if (activeCallState.isActive) {
@@ -191,26 +194,44 @@ class MainActivity : FragmentActivity() {
             val engineState by vm.callEngineState.collectAsState()
 
             Column(modifier = Modifier.fillMaxSize()) {
-              if (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)) {
-                val mins = engineState.callDurationSeconds / 60
-                val secs = engineState.callDurationSeconds % 60
+              val sharedCall = bridgeCallState
+              val showAudioBulletin = !isCallScreenVisible &&
+                (sharedCall?.callType?.equals("AUDIO", ignoreCase = true) == true ||
+                 (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)))
+              if (showAudioBulletin) {
+                var bulletinNow by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+                androidx.compose.runtime.LaunchedEffect(sharedCall?.callId, engineState.isCallActive) {
+                  while (true) {
+                    bulletinNow = System.currentTimeMillis()
+                    kotlinx.coroutines.delay(1000L)
+                  }
+                }
+                val startedAt = sharedCall?.startedAt ?: System.currentTimeMillis()
+                val elapsed = if (sharedCall != null) {
+                  ((bulletinNow - startedAt).coerceAtLeast(0L) / 1000L).toInt()
+                } else engineState.callDurationSeconds
+                val mins = elapsed / 60
+                val secs = elapsed % 60
                 Surface(
                   modifier = Modifier
                     .fillMaxWidth()
                     .height(58.dp)
                     .padding(horizontal = 8.dp, vertical = 5.dp)
                     .clickable {
+                      val peerName = sharedCall?.peerName ?: engineState.peerName
+                      val peerId = sharedCall?.peerId ?: engineState.peerId
                       try {
                         startActivity(
                           Intent(this@MainActivity, CallActivity::class.java).apply {
                             addFlags(
-                              Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                              Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
                                 Intent.FLAG_ACTIVITY_SINGLE_TOP or
                                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                             )
-                            putExtra("call_id", engineState.activeCallId ?: "")
-                            putExtra("caller_id", engineState.peerId)
-                            putExtra("caller_name", engineState.peerName.ifBlank { "Active call" })
+                            putExtra("call_id", sharedCall?.callId ?: engineState.activeCallId ?: "")
+                            putExtra("caller_id", peerId)
+                            putExtra("caller_name", peerName.ifBlank { "Active call" })
                             putExtra("call_type", "AUDIO")
                           }
                         )
@@ -223,23 +244,13 @@ class MainActivity : FragmentActivity() {
                   shadowElevation = 4.dp
                 ) {
                   Row(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .padding(horizontal = 12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Text(
-                      text = "☎",
-                      color = androidx.compose.ui.graphics.Color(0xFF60A5FA),
-                      fontSize = 16.sp
-                    )
-                    Column(
-                      modifier = Modifier
-                        .weight(1f)
-                        .padding(start = 10.dp)
-                    ) {
+                    Text("☎", color = androidx.compose.ui.graphics.Color(0xFF60A5FA), fontSize = 16.sp)
+                    Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
                       Text(
-                        text = engineState.peerName.ifBlank { "Audio call" },
+                        text = (sharedCall?.peerName ?: engineState.peerName).ifBlank { "Audio call" },
                         color = androidx.compose.ui.graphics.Color.White,
                         fontSize = 13.sp,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
@@ -250,11 +261,7 @@ class MainActivity : FragmentActivity() {
                         fontSize = 10.sp
                       )
                     }
-                    Text(
-                      text = "›",
-                      color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f),
-                      fontSize = 20.sp
-                    )
+                    Text("›", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f), fontSize = 20.sp)
                   }
                 }
               }
@@ -266,7 +273,9 @@ class MainActivity : FragmentActivity() {
               ) {
                 BitChatNavHost(
                   bitChatViewModel = vm,
-                  isInPipMode = isInPipModeState
+                  isInPipMode = isInPipModeState,
+                  onCallScreenVisibilityChanged = { isCallScreenVisible = it },
+                  onVideoCallBackToPip = { enterSystemPipMode() }
                 )
               }
             }
@@ -324,7 +333,7 @@ class MainActivity : FragmentActivity() {
 
   private fun enterSystemPipMode() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val aspectRatio = Rational(9, 16)
+      val aspectRatio = Rational(16, 9)
       val params = PictureInPictureParams.Builder()
         .setAspectRatio(aspectRatio)
         .build()
