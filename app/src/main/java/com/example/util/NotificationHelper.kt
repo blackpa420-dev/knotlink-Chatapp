@@ -22,7 +22,7 @@ object NotificationHelper {
 
     const val MSG_CHANNEL_ID = "knotlink_msg_channel_v4"
     const val CALL_CHANNEL_ID = "knotlink_calls_channel_v3"
-    const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel"
+    const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel_v2"
 
     @Volatile
     var activeChatId: String? = null
@@ -124,7 +124,7 @@ object NotificationHelper {
             val ongoingCallChannel = NotificationChannel(
                 ONGOING_CALL_CHANNEL_ID,
                 "KnotLink Active Calls",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Silent ongoing status bar notification for active voice calls"
                 enableVibration(false)
@@ -475,7 +475,7 @@ object NotificationHelper {
             putExtra("caller_id", callerId)
             putExtra("caller_name", callerName)
             putExtra("call_type", callType)
-            putExtra("peer_id", peerId)
+            putExtra("peer_id", callerId)
         }
         val declinePendingIntent = PendingIntent.getBroadcast(
             context,
@@ -593,6 +593,7 @@ object NotificationHelper {
             putExtra("call_id", callId)
             putExtra("caller_name", callerName)
             putExtra("call_type", callType)
+            putExtra("peer_id", peerId)
         }
         val endPendingIntent = PendingIntent.getBroadcast(
             context,
@@ -616,7 +617,7 @@ object NotificationHelper {
             .setContentTitle(if (video) "Ongoing Video Call" else "Ongoing Voice Call")
             .setContentText("$callerName • $timeFormatted")
             .setColor(0xFF00A884.toInt())
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
