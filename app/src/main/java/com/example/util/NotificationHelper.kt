@@ -423,7 +423,7 @@ object NotificationHelper {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 android.util.Log.i(
                     "NotificationHelper",
-                    "Call full-screen intent allowed=" + nm?.canUseFullScreenIntent
+                    "Call full-screen intent allowed=" + nm?.canUseFullScreenIntent()
                 )
             } catch (_: Throwable) {}
         }
