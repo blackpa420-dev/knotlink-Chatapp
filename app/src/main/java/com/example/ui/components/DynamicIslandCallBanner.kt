@@ -31,9 +31,13 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.call.ActiveCallBridge
 import com.example.ui.viewmodel.ActiveCallState
 import com.example.ui.viewmodel.BitChatViewModel
 
@@ -157,10 +162,44 @@ fun ActiveCallBulletinSlot(
     onExpandClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val callState by viewModel.activeCall.collectAsState()
+    val localCallState by viewModel.activeCall.collectAsState()
+    val bridgeCall by ActiveCallBridge.state.collectAsState()
+
+    // CallActivity uses its own ViewModel instance. When an incoming receiver
+    // presses Back, MainActivity returns with its ViewModel still idle, while
+    // the process-local bridge still contains the live call. Use the bridge
+    // as the fallback source so the bulletin is visible on the receiver too.
+    var bridgeElapsedSeconds by remember(bridgeCall?.callId) { mutableIntStateOf(0) }
+
+    LaunchedEffect(bridgeCall?.callId, bridgeCall?.startedAt, bridgeCall?.isConnected) {
+        if (bridgeCall == null) {
+            bridgeElapsedSeconds = 0
+            return@LaunchedEffect
+        }
+        while (true) {
+            bridgeElapsedSeconds = ((System.currentTimeMillis() - bridgeCall.startedAt)
+                .coerceAtLeast(0L) / 1000L).toInt()
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
+
+    val effectiveCallState = if (localCallState.isActive) {
+        localCallState
+    } else {
+        bridgeCall?.let {
+            ActiveCallState(
+                isActive = true,
+                isConnected = it.isConnected,
+                contactId = it.peerId,
+                contactName = it.peerName,
+                callType = it.callType,
+                secondsElapsed = bridgeElapsedSeconds
+            )
+        } ?: localCallState
+    }
 
     AnimatedVisibility(
-        visible = callState.isActive && callState.callType == "AUDIO",
+        visible = effectiveCallState.isActive && effectiveCallState.callType == "AUDIO",
         enter = expandVertically(
             expandFrom = Alignment.Top,
             animationSpec = tween(durationMillis = 220)
@@ -172,7 +211,7 @@ fun ActiveCallBulletinSlot(
         modifier = modifier.fillMaxWidth()
     ) {
         DynamicIslandCallBanner(
-            callState = callState,
+            callState = effectiveCallState,
             onExpandClick = onExpandClick,
             modifier = Modifier.fillMaxWidth()
         )
