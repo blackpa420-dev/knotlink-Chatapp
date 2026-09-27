@@ -475,6 +475,7 @@ object NotificationHelper {
             putExtra("caller_id", callerId)
             putExtra("caller_name", callerName)
             putExtra("call_type", callType)
+            putExtra("peer_id", peerId)
         }
         val declinePendingIntent = PendingIntent.getBroadcast(
             context,
@@ -567,7 +568,8 @@ object NotificationHelper {
         callerName: String,
         secondsElapsed: Int,
         callId: String = "",
-        callType: String = "AUDIO"
+        callType: String = "AUDIO",
+        peerId: String = ""
     ) {
         createNotificationChannels(context)
 
@@ -577,6 +579,7 @@ object NotificationHelper {
             putExtra("caller_name", callerName)
             putExtra("call_type", callType)
             putExtra("action_accept_call", true)
+            putExtra("peer_id", peerId)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -603,6 +606,11 @@ object NotificationHelper {
         val timeFormatted = String.format("%02d:%02d", minutes, seconds)
         val video = callType.equals("VIDEO", ignoreCase = true)
 
+        val callerPerson = Person.Builder()
+            .setName(callerName)
+            .setImportant(true)
+            .build()
+
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(if (video) "Ongoing Video Call" else "Ongoing Voice Call")
@@ -614,6 +622,7 @@ object NotificationHelper {
             .setOnlyAlertOnce(true)
             .setSound(null)
             .setContentIntent(pendingIntent)
+            .addPerson(callerPerson)
             .addAction(
                 NotificationCompat.Action.Builder(
                     android.R.drawable.ic_menu_close_clear_cancel,
@@ -621,6 +630,12 @@ object NotificationHelper {
                     endPendingIntent
                 ).build()
             )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setStyle(
+                NotificationCompat.CallStyle.forOngoingCall(callerPerson, endPendingIntent)
+            )
+        }
 
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
