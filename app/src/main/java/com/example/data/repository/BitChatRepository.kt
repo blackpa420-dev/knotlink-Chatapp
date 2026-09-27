@@ -634,7 +634,7 @@ class BitChatRepository(val dao: BitChatDao) {
             timestampString = currentTime,
             isFromUser = isFromUser,
             isRead = isRead,
-            senderUid = if (isFromUser) currentUid else "",
+            senderUid = if (isFromUser || messageType == "SYSTEM_EVENT") currentUid else "",
             receiverUid = otherParticipant,
             clientMessageId = clientMsgId,
             syncStatus = "PENDING",
