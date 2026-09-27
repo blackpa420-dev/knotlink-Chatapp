@@ -280,7 +280,7 @@ class CallActivity : FragmentActivity() {
         ) {
             try {
                 val builder = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
+                    .setAspectRatio(Rational(9, 16))
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     builder.setAutoEnterEnabled(true)
                 }
