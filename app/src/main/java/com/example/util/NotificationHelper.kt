@@ -22,7 +22,7 @@ object NotificationHelper {
 
     const val MSG_CHANNEL_ID = "knotlink_msg_channel_v4"
     const val CALL_CHANNEL_ID = "knotlink_calls_channel_v3"
-    const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel_v2"
+    const val ONGOING_CALL_CHANNEL_ID = "knotlink_ongoing_calls_channel_v3"
 
     @Volatile
     var activeChatId: String? = null
@@ -124,9 +124,9 @@ object NotificationHelper {
             val ongoingCallChannel = NotificationChannel(
                 ONGOING_CALL_CHANNEL_ID,
                 "KnotLink Active Calls",
-                NotificationManager.IMPORTANCE_HIGH
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Silent ongoing status bar notification for active voice calls"
+                description = "Persistent notification for active and outgoing calls"
                 enableVibration(false)
                 vibrationPattern = longArrayOf(0)
                 setSound(null, null)
@@ -570,7 +570,8 @@ object NotificationHelper {
         secondsElapsed: Int,
         callId: String = "",
         callType: String = "AUDIO",
-        peerId: String = ""
+        peerId: String = "",
+        isConnected: Boolean = true
     ) {
         createNotificationChannels(context)
 
@@ -615,10 +616,10 @@ object NotificationHelper {
 
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(if (video) "Ongoing Video Call" else "Ongoing Voice Call")
+            .setContentTitle(if (isConnected) { if (video) "Ongoing Video Call" else "Ongoing Voice Call" } else { if (video) "Calling • Video Call" else "Calling • Voice Call" })
             .setContentText("$callerName • $timeFormatted")
             .setColor(0xFF00A884.toInt())
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
