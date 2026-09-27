@@ -8050,7 +8050,9 @@ private fun TelegramMenuItem(
 }
 
 @Composable
-private fun TelegramTranslateDialog(
+private private val translationCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+fun TelegramTranslateDialog(
     message: MessageEntity,
     isNightMode: Boolean,
     onDismiss: () -> Unit
@@ -8071,54 +8073,81 @@ private fun TelegramTranslateDialog(
     LaunchedEffect(selectedLanguage, message.text) {
         isLoading = true
         translatedText = ""
+
+        val cacheKey = selectedLanguage + "\u0000" + message.text.trim()
+        val cached = translationCache[cacheKey]
+        if (!cached.isNullOrBlank()) {
+            translatedText = cached
+            isLoading = false
+            return@LaunchedEffect
+        }
+
         translatedText = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val buildConfigKey = try {
                 val field = com.example.BuildConfig::class.java.getField("GEMINI_API_KEY")
                 field.get(null) as? String
             } catch (_: Exception) { null }
 
-            val apiKey = if (!buildConfigKey.isNullOrBlank() && buildConfigKey != "MY_GEMINI_API_KEY") {
-                buildConfigKey
-            } else {
-                "AQ.Ab8RN6JEUFv1Bl10GKpTegJPthiuCUlB-lfxiZjV0ajF4f_0Sw"
+            val apiKey = buildConfigKey?.takeIf {
+                it.isNotBlank() && it != "MY_GEMINI_API_KEY"
             }
-            val modelsToTry = listOf("gemini-3.5-flash")
-            var finalRes: String? = null
 
-            for (modelName in modelsToTry) {
-                try {
-                    val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-                    val url = java.net.URL(urlString)
-                    val conn = url.openConnection() as java.net.HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.doOutput = true
+            if (apiKey.isNullOrBlank()) {
+                return@withContext "Translation unavailable. Gemini API key is not configured."
+            }
 
-                    val prompt = "Translate the following message into $selectedLanguage. Return ONLY the translated text without markdown wrappers, notes, or quotes:\n\n${message.text}"
-                    val body = org.json.JSONObject().apply {
-                        put("contents", org.json.JSONArray().apply {
-                            put(org.json.JSONObject().apply {
-                                put("parts", org.json.JSONArray().apply {
-                                    put(org.json.JSONObject().apply { put("text", prompt) })
-                                })
+            try {
+                val modelName = "gemini-3.5-flash-lite"
+                val urlString = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
+                val url = java.net.URL(urlString)
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 5000
+                conn.readTimeout = 8000
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.setRequestProperty("x-goog-api-key", apiKey)
+                conn.doOutput = true
+
+                val prompt = "Translate into \${selectedLanguage}. Return only the translation, no notes, markdown, or quotes:\n\${message.text.trim()}"
+                val body = org.json.JSONObject().apply {
+                    put("contents", org.json.JSONArray().apply {
+                        put(org.json.JSONObject().apply {
+                            put("parts", org.json.JSONArray().apply {
+                                put(org.json.JSONObject().apply { put("text", prompt) })
                             })
                         })
-                    }
+                    })
+                    put("generationConfig", org.json.JSONObject().apply {
+                        put("temperature", 0.1)
+                        put("maxOutputTokens", 256)
+                    })
+                }
 
-                    conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                    if (conn.responseCode == 200) {
-                        val resp = conn.inputStream.bufferedReader().use { it.readText() }
-                        val json = org.json.JSONObject(resp)
-                        val cand = json.optJSONArray("candidates")?.optJSONObject(0)
-                        val text = cand?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text")
-                        if (!text.isNullOrBlank()) {
-                            finalRes = text.trim()
-                            break
-                        }
+                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+
+                if (conn.responseCode == 200) {
+                    val resp = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(resp)
+                    val text = json.optJSONArray("candidates")
+                        ?.optJSONObject(0)
+                        ?.optJSONObject("content")
+                        ?.optJSONArray("parts")
+                        ?.optJSONObject(0)
+                        ?.optString("text")
+                        ?.trim()
+
+                    if (!text.isNullOrBlank()) {
+                        translationCache[cacheKey] = text
+                        text
+                    } else {
+                        "Translation unavailable."
                     }
-                } catch (_: Exception) {}
+                } else {
+                    "Translation unavailable."
+                }
+            } catch (_: Exception) {
+                "Translation unavailable. Please check internet connection."
             }
-            finalRes ?: "Translation unavailable. Please check internet connection."
         }
         isLoading = false
     }
