@@ -46,6 +46,7 @@
             android:launchMode="singleTop"
             android:taskAffinity="${applicationId}.call"
             android:supportsPictureInPicture="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:windowSoftInputMode="adjustResize"
