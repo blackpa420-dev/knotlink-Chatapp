@@ -68,23 +68,28 @@ class CallActivity : FragmentActivity() {
 
     private fun returnToMainActivityForAudioCall() {
         try {
+            if (!isTaskRoot) {
+                // MainActivity is directly underneath CallActivity now. Finishing
+                // this activity gives the receiver the exact same Back behavior
+                // as the sender's normal NavController popBackStack().
+                finish()
+                overridePendingTransition(0, 0)
+                return
+            }
+
+            // If the call was opened from a notification while the app task did
+            // not exist, create the normal app task once and restore the call state.
             val intent = Intent(this, MainActivity::class.java).apply {
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP
-                )
                 putExtra("return_from_active_audio_call", true)
                 putExtra("call_id", callId)
                 putExtra("caller_id", callerId)
                 putExtra("caller_name", callerName)
                 putExtra("call_type", "AUDIO")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            // Keep receiver Back transition consistent with the call route's
-            // non-animated handoff and remove the dedicated call task.
             overridePendingTransition(0, 0)
-            finishAndRemoveTask()
+            finish()
         } catch (_: Throwable) {
             moveTaskToBack(true)
         }
