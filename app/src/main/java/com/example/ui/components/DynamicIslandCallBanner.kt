@@ -172,12 +172,13 @@ fun ActiveCallBulletinSlot(
     var bridgeElapsedSeconds by remember(bridgeCall?.callId) { mutableIntStateOf(0) }
 
     LaunchedEffect(bridgeCall?.callId, bridgeCall?.startedAt, bridgeCall?.isConnected) {
-        if (bridgeCall == null) {
+        val currentBridge = bridgeCall
+        if (currentBridge == null) {
             bridgeElapsedSeconds = 0
             return@LaunchedEffect
         }
         while (true) {
-            bridgeElapsedSeconds = ((System.currentTimeMillis() - bridgeCall.startedAt)
+            bridgeElapsedSeconds = ((System.currentTimeMillis() - currentBridge.startedAt)
                 .coerceAtLeast(0L) / 1000L).toInt()
             kotlinx.coroutines.delay(1000L)
         }
