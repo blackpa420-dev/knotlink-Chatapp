@@ -259,6 +259,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                 _initialHistorySyncError.value = null
                                 launch(Dispatchers.IO) {
                                     val success = repository.syncAllChatHistory(currentUid, currentUsername)
+                                    // Restore call history as well. FCM call notifications can be
+                                    // missed while the process is dead, but call sessions are server-backed.
+                                    repository.syncCallHistory(currentUid, currentUsername)
                                     withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                                         _initialHistorySyncing.value = false
                                         _initialHistorySyncError.value = if (success) null else "Could not restore chat history."
