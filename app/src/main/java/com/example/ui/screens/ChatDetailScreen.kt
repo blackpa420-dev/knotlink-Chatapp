@@ -302,6 +302,7 @@ fun ChatDetailScreen(
     var recordingAmplitude by remember { mutableStateOf(0f) }
     var recordingStartedAt by remember { mutableStateOf(0L) }
     var lastRecordingFinishedTime by remember { mutableStateOf(0L) }
+    var showVoiceRecorderBottomSheet by remember { mutableStateOf(false) }
 
     val audioRecordPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -1164,7 +1165,7 @@ fun ChatDetailScreen(
                                 }
                             ) {
                                 FigmaMessageBubbleRow(
-                                    message = msg,
+                                    message = msg.copy(isPinned = msg.isPinned || pinnedMessages.any { it.messageId == (msg.serverMessageId ?: msg.id.toString()) }),
                                     isNightMode = isNightMode,
                                     animTextColor = animTextColor,
                                     reactions = msgReactions,
@@ -1180,7 +1181,8 @@ fun ChatDetailScreen(
                                     // never toggle the sent-message status by itself.
                                     onToggleReadStatus = null,
                                     onLongClick = {
-                                        selectedMessageForAction = msg
+                                        val localPin = pinnedMessages.any { it.messageId == (msg.serverMessageId ?: msg.id.toString()) }
+                                        selectedMessageForAction = msg.copy(isPinned = msg.isPinned || localPin)
                                     },
                                     onReactionClick = { emoji ->
                                         viewModel.toggleReaction(chatId, msg, emoji)
@@ -2293,6 +2295,10 @@ fun ChatDetailScreen(
                                                 isButtonHolding = false
                                                 val holdDuration = System.currentTimeMillis() - startTime
 
+                                                if (!isHeldRecording && !isCancelled && holdDuration < 700L) {
+                                                    showVoiceRecorderBottomSheet = true
+                                                }
+
                                                 if (isCancelled) {
                                                     isRecording = false
                                                     isRecordingLocked = false
@@ -2983,8 +2989,6 @@ fun ChatDetailScreen(
                         onClick = {
                             viewModel.togglePinMessage(chatId, msgToPin, forEveryone = alsoPinForOpponent)
                             if (alsoPinForOpponent) {
-                                val act = if (isUnpinning) "unpinned" else "pinned"
-                                viewModel.sendSystemEvent(chatId, "MESSAGE_PINNED", "📌 A message was $act")
                             }
                             showPinConfirmDialog = false
                             messageToPin = null
@@ -3518,202 +3522,232 @@ fun ChatDetailScreen(
             }
         }
 
-        // 5. Fullscreen Centered Voice Note Recording Overlay
-        androidx.compose.animation.AnimatedVisibility(
-            visible = isRecording,
-            enter = androidx.compose.animation.fadeIn(tween(200)) + androidx.compose.animation.scaleIn(initialScale = 0.85f, animationSpec = spring()),
-            exit = androidx.compose.animation.fadeOut(tween(200)) + androidx.compose.animation.scaleOut(targetScale = 0.85f, animationSpec = spring()),
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.70f)),
-                contentAlignment = Alignment.Center
-            ) {
-                val waveTransition = rememberInfiniteTransition(label = "wave_ring_fullscreen")
-                
-                // Continuous rotating angle for gradient ring border
-                val ringRotation by waveTransition.animateFloat(
-                    initialValue = 0f, targetValue = 360f,
-                    animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing), repeatMode = RepeatMode.Restart),
-                    label = "ring_rotation"
-                )
+        // Voice Note Recorder Bottom Sheet
+        if (showVoiceRecorderBottomSheet) {
+            val voiceRecorderSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            var sheetRecordSeconds by remember { mutableStateOf(0) }
+            var sheetIsRecordingPaused by remember { mutableStateOf(false) }
+            var sheetIsViewOnce by remember { mutableStateOf(false) }
 
-                // Animated Expanding Rings
-                val ringPulse1 by waveTransition.animateFloat(
-                    initialValue = 1f, targetValue = 1.6f,
-                    animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing), repeatMode = RepeatMode.Restart),
-                    label = "rp1"
-                )
-                val ringAlpha1 by waveTransition.animateFloat(
-                    initialValue = 0.55f, targetValue = 0f,
-                    animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing), repeatMode = RepeatMode.Restart),
-                    label = "ra1"
-                )
-                val ringPulse2 by waveTransition.animateFloat(
-                    initialValue = 1f, targetValue = 2.0f,
-                    animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), repeatMode = RepeatMode.Restart),
-                    label = "rp2"
-                )
-                val ringAlpha2 by waveTransition.animateFloat(
-                    initialValue = 0.42f, targetValue = 0f,
-                    animationSpec = infiniteRepeatable(tween(1500, easing = LinearEasing), repeatMode = RepeatMode.Restart),
-                    label = "ra2"
-                )
+            // Start recording immediately when bottom sheet is shown
+            LaunchedEffect(Unit) {
+                com.example.util.AudioRecorderManager.startRecording(localContext)
+                sheetRecordSeconds = 0
+            }
 
-                // Outer expanding pulsing waves
-                Box(
-                    modifier = Modifier
-                        .size(195.dp * ringPulse2)
-                        .clip(CircleShape)
-                        .background(Color(0xFF8B5CF6).copy(alpha = ringAlpha2))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(195.dp * ringPulse1)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2563EB).copy(alpha = ringAlpha1))
-                )
-
-                // Side equalizer waveform bars (7 bars left, 7 bars right)
-                Row(
-                    modifier = Modifier.width(330.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left Waveform Bars
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (i in 0 until 7) {
-                            val barH by waveTransition.animateFloat(
-                                initialValue = 10f + i * 7f,
-                                targetValue = 52f - i * 5f,
-                                animationSpec = infiniteRepeatable(tween(200 + i * 40), repeatMode = RepeatMode.Reverse),
-                                label = "fs_left_$i"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .width(5.dp)
-                                    .height(barH.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6))
-                                        )
-                                    )
-                            )
-                        }
-                    }
-
-                    // Right Waveform Bars
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        for (i in 0 until 7) {
-                            val barH by waveTransition.animateFloat(
-                                initialValue = 52f - i * 6f,
-                                targetValue = 10f + i * 6f,
-                                animationSpec = infiniteRepeatable(tween(240 + i * 38), repeatMode = RepeatMode.Reverse),
-                                label = "fs_right_$i"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .width(5.dp)
-                                    .height(barH.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6))
-                                        )
-                                    )
-                            )
-                        }
+            // Timer countdown
+            LaunchedEffect(sheetIsRecordingPaused) {
+                while (true) {
+                    delay(1000L)
+                    if (!sheetIsRecordingPaused) {
+                        sheetRecordSeconds++
                     }
                 }
+            }
 
-                // Center Ring (Voice icon removed, Time at top, text below time)
-                Surface(
+            ModalBottomSheet(
+                onDismissRequest = {
+                    com.example.util.AudioRecorderManager.cancelRecording()
+                    showVoiceRecorderBottomSheet = false
+                },
+                sheetState = voiceRecorderSheetState,
+                containerColor = if (isNightMode) Color(0xFF14151C) else Color.White,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            ) {
+                Column(
                     modifier = Modifier
-                        .size(195.dp)
-                        .graphicsLayer { rotationZ = ringRotation }
-                        .shadow(28.dp, CircleShape, spotColor = Color(0xFF2563EB)),
-                    shape = CircleShape,
-                    color = Color.Transparent,
-                    border = BorderStroke(
-                        4.dp,
-                        Brush.sweepGradient(
-                            listOf(
-                                Color(0xFF2563EB),
-                                Color(0xFF06B6D4),
-                                Color(0xFFEC4899),
-                                Color(0xFF8B5CF6),
-                                Color(0xFF38BDF8),
-                                Color(0xFF2563EB)
-                            )
-                        )
-                    )
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 36.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
+                    Text(
+                        text = if (sheetIsRecordingPaused) "Recording Paused" else "Recording Voice Note...",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isNightMode) Color.White else Color(0xFF0F172A)
+                    )
+
+                    // Animated pulsing ring (Pulse wave)
+                    val pulseTransition = rememberInfiniteTransition(label = "sheetMicPulse")
+                    val pulseScale by pulseTransition.animateFloat(
+                        initialValue = 1.0f,
+                        targetValue = 1.6f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1200, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "pulseScale"
+                    )
+                    val pulseAlpha by pulseTransition.animateFloat(
+                        initialValue = 0.6f,
+                        targetValue = 0f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(1200, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Restart
+                        ),
+                        label = "pulseAlpha"
+                    )
+
                     Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer { rotationZ = -ringRotation } // Keep inner text/timer upright
-                            .background(
-                                Brush.radialGradient(
-                                    listOf(Color(0xFF1E1B4B), Color(0xFF0F172A))
-                                )
-                            ),
+                        modifier = Modifier.size(140.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(16.dp)
-                        ) {
-                            // 1. Time Counter (Top)
-                            val mins = recordSeconds / 60
-                            val secs = recordSeconds % 60
-                            Text(
-                                text = String.format("%02d:%02d", mins, secs),
-                                color = Color.White,
-                                fontSize = 36.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.sp
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // 2. Recording Status text (Below Time) with pulsing REC dot
-                            val recDotAlpha by waveTransition.animateFloat(
-                                initialValue = 0.2f, targetValue = 1f,
-                                animationSpec = infiniteRepeatable(tween(450), repeatMode = RepeatMode.Reverse),
-                                label = "recDotAlpha"
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                        if (!sheetIsRecordingPaused) {
+                            Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color(0xFFEF4444).copy(alpha = 0.20f))
-                                    .border(1.dp, Color(0xFFEF4444).copy(alpha = 0.40f), RoundedCornerShape(14.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(8.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFEF4444).copy(alpha = recDotAlpha))
+                                    .size(80.dp * pulseScale)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF2563EB).copy(alpha = pulseAlpha))
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF2563EB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (sheetIsRecordingPaused) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = "Mic",
+                                tint = Color.White,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+
+                    // Recording Timer
+                    val durStr = String.format("%02d:%02d", sheetRecordSeconds / 60, sheetRecordSeconds % 60)
+                    Text(
+                        text = durStr,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (sheetIsRecordingPaused) Color.Gray else Color(0xFF2563EB)
+                    )
+
+                    // Control Buttons (Delete, View-Once, Pause/Resume, Send)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 1. Delete (Cancel) Button
+                        IconButton(
+                            onClick = {
+                                com.example.util.AudioRecorderManager.cancelRecording()
+                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                showVoiceRecorderBottomSheet = false
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                tint = Color(0xFFEF4444)
+                            )
+                        }
+
+                        // 2. View Once "1" Button
+                        IconButton(
+                            onClick = {
+                                sheetIsViewOnce = !sheetIsViewOnce
+                                try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (sheetIsViewOnce) Color(0xFF8B5CF6) else (if (isNightMode) Color(0xFF1E202B) else Color(0xFFE2E8F0)),
+                                    CircleShape
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    "Recording...",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFF87171)
+                        ) {
+                            Text(
+                                text = "1",
+                                color = if (sheetIsViewOnce) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 18.sp
+                            )
+                        }
+
+                        // 3. Pause / Resume Button
+                        IconButton(
+                            onClick = {
+                                if (sheetIsRecordingPaused) {
+                                    com.example.util.AudioRecorderManager.resumeRecording()
+                                    sheetIsRecordingPaused = false
+                                } else {
+                                    com.example.util.AudioRecorderManager.pauseRecording()
+                                    sheetIsRecordingPaused = true
+                                }
+                                try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (isNightMode) Color(0xFF1E202B) else Color(0xFFE2E8F0),
+                                    CircleShape
                                 )
-                            }
+                        ) {
+                            Icon(
+                                imageVector = if (sheetIsRecordingPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                                contentDescription = if (sheetIsRecordingPaused) "Resume" else "Pause",
+                                tint = if (isNightMode) Color.White else Color(0xFF0F172A)
+                            )
+                        }
+
+                        // 4. Send Button
+                        IconButton(
+                            onClick = {
+                                val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
+                                if (recFile != null && recFile.exists() && secs >= 1) {
+                                    val formattedDur = String.format("%02d:%02d", secs / 60, secs % 60)
+                                    val base64Data = try {
+                                        val bytes = recFile.readBytes()
+                                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                    } catch (_: Exception) { null }
+
+                                    val textToSend = if (sheetIsViewOnce) {
+                                        if (!base64Data.isNullOrBlank()) {
+                                            "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                        } else {
+                                            "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                        }
+                                    } else {
+                                        if (!base64Data.isNullOrBlank()) {
+                                            "[AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ Voice Note ($formattedDur)"
+                                        } else {
+                                            "[AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ Voice Note ($formattedDur)"
+                                        }
+                                    }
+                                    viewModel.sendMessage(chatId, textToSend)
+                                    Toast.makeText(localContext, if (sheetIsViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    com.example.util.AudioRecorderManager.cancelRecording()
+                                    Toast.makeText(localContext, "Recording too short ⏱️", Toast.LENGTH_SHORT).show()
+                                }
+                                showVoiceRecorderBottomSheet = false
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(Color(0xFF2563EB), CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send",
+                                tint = Color.White
+                            )
                         }
                     }
                 }
             }
+        }
+
+
+
         }
 
     }
