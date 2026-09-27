@@ -2938,7 +2938,11 @@ fun ChatDetailScreen(
         // 2. Pin Message Confirmation Dialog (Telegram Style)
         if (showPinConfirmDialog && messageToPin != null) {
             val msgToPin = messageToPin!!
-            var alsoPinForOpponent by remember { mutableStateOf(true) }
+            var alsoPinForOpponent by remember(msgToPin.serverMessageId, msgToPin.id, pinnedMessages) {
+                val key = msgToPin.serverMessageId ?: msgToPin.id.toString()
+                val existingPin = pinnedMessages.firstOrNull { it.messageId == key }
+                mutableStateOf(existingPin == null || !existingPin.pinnedByUid.startsWith("private:", ignoreCase = true))
+            }
             val isUnpinning = msgToPin.isPinned
 
             AlertDialog(
@@ -3485,7 +3489,7 @@ fun ChatDetailScreen(
                                     }
                                     IconButton(
                                         onClick = {
-                                            msgEntity?.let { viewModel.togglePinMessage(chatId, it) }
+                                            msgEntity?.let { viewModel.togglePinMessage(chatId, it, forEveryone = !pinnedItem.pinnedByUid.startsWith("private:", ignoreCase = true)) }
                                         },
                                         modifier = Modifier.size(28.dp)
                                     ) {
