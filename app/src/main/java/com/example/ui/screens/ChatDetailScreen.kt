@@ -3252,6 +3252,8 @@ fun ChatDetailScreen(
                             items(filteredForwardChats, key = { it.id }) { targetChat ->
                                 val isSelected = selectedForwardChatIds.contains(targetChat.id)
                                 val hasCustomAvatar = targetChat.avatarType.isNotBlank() && targetChat.avatarType != "default" && targetChat.avatarType != "assistant"
+                                val isAssistantChat = targetChat.avatarType.equals("assistant", ignoreCase = true) ||
+                                    targetChat.name.equals("KnotLink Assistant", ignoreCase = true)
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -3284,28 +3286,41 @@ fun ChatDetailScreen(
                                                 model = if (targetChat.avatarType.startsWith("/")) File(targetChat.avatarType) else targetChat.avatarType,
                                                 contentDescription = targetChat.name,
                                                 modifier = Modifier
-                                                    .size(44.dp)
-                                                    .clip(CircleShape),
+                                                    .size(48.dp)
+                                                    .clip(CircleShape)
+                                                    .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape),
                                                 contentScale = ContentScale.Crop
                                             )
                                         } else {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(44.dp)
+                                                    .size(48.dp)
                                                     .clip(CircleShape)
                                                     .background(
                                                         Brush.linearGradient(
-                                                            listOf(Color(0xFF2563EB), Color(0xFF7C3AED))
+                                                            if (isAssistantChat)
+                                                                listOf(Color(0xFF2563EB), Color(0xFF7C3AED))
+                                                            else
+                                                                listOf(Color(0xFF0EA5E9), Color(0xFF2563EB))
                                                         )
                                                     ),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(
-                                                    text = targetChat.name.take(1).uppercase(),
-                                                    color = Color.White,
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
+                                                if (isAssistantChat) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.SmartToy,
+                                                        contentDescription = "KnotLink Assistant",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(24.dp)
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = targetChat.name.take(1).uppercase(),
+                                                        color = Color.White,
+                                                        fontSize = 17.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
                                             }
                                         }
                                         Spacer(modifier = Modifier.width(14.dp))
