@@ -324,8 +324,8 @@ object NotificationHelper {
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setSound(msgSoundUri)
-                .setVibrate(longArrayOf(0, 500, 250, 500))
+                .setSound(if (isAvatarUpdate) null else msgSoundUri)
+                .setVibrate(if (isAvatarUpdate) longArrayOf(0) else longArrayOf(0, 500, 250, 500))
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setStyle(
@@ -403,7 +403,8 @@ object NotificationHelper {
         callType: String,
         callId: String = "",
         callerId: String = "",
-        callerAvatarBitmap: android.graphics.Bitmap? = null
+        callerAvatarBitmap: android.graphics.Bitmap? = null,
+        silentUpdate: Boolean = false
     ) {
         // Warm native WebRTC/audio resources while the phone is still ringing.
         // This removes first-call initialization latency from the Answer action.
@@ -514,8 +515,8 @@ object NotificationHelper {
             .setColor(0xFF00A884.toInt())
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setSound(callSoundUri)
-            .setVibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000))
+            .setSound(if (silentUpdate) null else callSoundUri)
+            .setVibrate(if (silentUpdate) longArrayOf(0) else longArrayOf(0, 1000, 500, 1000, 500, 1000))
             .setOngoing(true)
             .setAutoCancel(true)
             .setTimeoutAfter(60_000L)
