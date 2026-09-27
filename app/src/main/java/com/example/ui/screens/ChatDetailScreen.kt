@@ -340,7 +340,13 @@ fun ChatDetailScreen(
 
     // Filter out messages deleted for me, guaranteed chronological ordering
     val validMessages = remember(messages) {
-        messages.filter { !it.isDeletedForMe && !(it.messageType == "SYSTEM_EVENT" && it.text.startsWith("[REACTION:")) }.sortedWith(compareBy({ it.timestamp }, { it.id }))
+        messages
+            .filter {
+                !it.isDeletedForMe &&
+                    !it.isDeletedForEveryone &&
+                    !(it.messageType == "SYSTEM_EVENT" && it.text.startsWith("[REACTION:"))
+            }
+            .sortedWith(compareBy({ it.timestamp }, { it.id }))
     }
 
     // Precompute per-message display metadata once per message-list update.
