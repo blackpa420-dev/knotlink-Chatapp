@@ -181,8 +181,9 @@ class CallActivity : FragmentActivity() {
                                     viewModel = viewModel,
                                     isInPipMode = false,
                                     onBackClick = {
-                                        // Never navigate back into the normal app
-                                        // from a lock-screen call.
+                                        // Back from the in-call UI minimizes this dedicated
+                                        // call task without terminating the active WebRTC session.
+                                        moveTaskToBack(true)
                                     },
                                     onEndCallClick = {
                                         viewModel.endCall()
@@ -195,7 +196,8 @@ class CallActivity : FragmentActivity() {
                                     contactName = callerName,
                                     viewModel = viewModel,
                                     onBackClick = {
-                                        // Keep the user inside the call task.
+                                        // Match Android Back: hide the call task, keep the call alive.
+                                        moveTaskToBack(true)
                                     },
                                     onEndCallClick = {
                                         viewModel.endCall()
