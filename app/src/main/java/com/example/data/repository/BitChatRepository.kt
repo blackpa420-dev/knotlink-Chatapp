@@ -808,15 +808,23 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun markUserMessagesAsRead(chatId: String) {
-        dao.markUserMessagesAsRead(chatId)
+        val unreadServerIds = try {
+            dao.getMessagesForChat(chatId).first()
+                .asSequence()
+                .filter { !it.isFromUser && it.deliveryState != "READ" && !it.serverMessageId.isNullOrBlank() }
+                .mapNotNull { it.serverMessageId }
+                .distinct()
+                .toList()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+
+        if (unreadServerIds.isNotEmpty()) {
+            markMessagesAsRead(chatId, unreadServerIds)
+        } else {
+            dao.markUserMessagesAsRead(chatId)
+        }
         dao.resetChatUnreadCount(chatId)
-        try {
-            val currentIdentity = userIdentity.firstOrNull()
-            val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email }?.ifBlank { currentIdentity.username } ?: ""
-            if (currentUid.isNotBlank()) {
-                SupabaseService.markMessagesAsRead(chatId, currentUid)
-            }
-        } catch (_: Exception) {}
     }
 
     suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>) {
@@ -1502,12 +1510,12 @@ class BitChatRepository(val dao: BitChatDao) {
             text = msgText,
             timestampString = timeStr,
             isFromUser = false,
-            isRead = supaMsg.isRead || isChatOpen,
+            isRead = supaMsg.isRead,
             senderUid = supaMsg.senderId,
             receiverUid = myUid,
             serverMessageId = supaMsg.id,
             syncStatus = "SYNCED",
-            deliveryState = if (isChatOpen || supaMsg.isRead) "READ" else "DELIVERED",
+            deliveryState = if (supaMsg.isRead) "READ" else "DELIVERED",
             timestamp = supaMsg.timestamp,
             messageType = supaMsg.messageType,
             replyToMessageId = replyToId,
@@ -1532,6 +1540,14 @@ class BitChatRepository(val dao: BitChatDao) {
                     pinnedAt = supaMsg.timestamp
                 )
             )
+        }
+
+        if (isChatOpen && supaMsg.id.isNotBlank() && !supaMsg.isRead) {
+            try {
+                markMessagesAsRead(supaMsg.chatId, listOf(supaMsg.id))
+            } catch (_: Throwable) {
+                // Near-bottom observer will retry if the realtime/server update fails.
+            }
         }
 
         // Mark as delivered on server
