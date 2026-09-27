@@ -22,6 +22,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         val callId = intent.getStringExtra("call_id") ?: ""
         val callerId = intent.getStringExtra("caller_id") ?: ""
+        val peerId = intent.getStringExtra("peer_id") ?: callerId
         val callerName = intent.getStringExtra("caller_name") ?: "Caller"
         val callType = if (intent.getStringExtra("call_type")?.equals("VIDEO", ignoreCase = true) == true) "VIDEO" else "AUDIO"
 
@@ -38,7 +39,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                     }
                     if (callerId.isNotBlank()) {
                         FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = callerId,
+                            targetUserIdOrName = peerId,
                             type = "call_declined",
                             title = "Call Declined",
                             body = "Call was declined",
