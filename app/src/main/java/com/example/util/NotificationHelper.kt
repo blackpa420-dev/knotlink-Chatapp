@@ -487,6 +487,7 @@ object NotificationHelper {
 
         val rawBitmap = callerAvatarBitmap ?: createLetterAvatarBitmap(context, callerName)
         val profileBitmap = getCircularBitmap(rawBitmap)
+        if (callId.isNotBlank()) ongoingCallAvatarCache[callId] = profileBitmap
         val iconCompat = IconCompat.createWithBitmap(profileBitmap)
 
         val callerPerson = Person.Builder()
