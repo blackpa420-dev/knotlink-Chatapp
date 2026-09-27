@@ -68,7 +68,6 @@ fun VideoCallScreen(
 ) {
     val context = LocalContext.current
 
-    // Back navigation is handled centrally by BitChatNavHost for call routes.
 
     val callEngineState by (viewModel?.callEngineState ?: remember { MutableStateFlow(CallEngineState()) }).collectAsState()
     val activeCall by (viewModel?.activeCall ?: remember { MutableStateFlow(ActiveCallState()) }).collectAsState()
