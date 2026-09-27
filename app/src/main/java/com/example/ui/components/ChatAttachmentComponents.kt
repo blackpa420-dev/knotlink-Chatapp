@@ -915,7 +915,6 @@ fun PollCreatorDialog(
     onDismiss: () -> Unit,
     onCreatePoll: (pollSerializedString: String) -> Unit
 ) {
-    var pollTitle by remember { mutableStateOf("") }
     var pollQuestion by remember { mutableStateOf("") }
     var allowMultipleChoices by remember { mutableStateOf(false) }
     val optionsList = remember { mutableStateListOf("", "") }
@@ -966,21 +965,6 @@ fun PollCreatorDialog(
                         Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = textColor)
                     }
                 }
-
-                // Box 1: Poll Title (e.g. Title / Tag)
-                OutlinedTextField(
-                    value = pollTitle,
-                    onValueChange = { pollTitle = it },
-                    label = { Text("Poll Title") },
-                    placeholder = { Text("e.g. Weekend Event") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF2563EB),
-                        unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.2f) else Color(0xFFCBD5E1)
-                    ),
-                    singleLine = true
-                )
 
                 // Box 2: Question / Topic
                 OutlinedTextField(
@@ -1107,8 +1091,8 @@ fun PollCreatorDialog(
                 Button(
                     onClick = {
                         val validOptions = optionsList.map { it.trim() }.filter { it.isNotBlank() }
-                        val effectiveTitle = pollTitle.trim().ifBlank { pollQuestion.trim() }.ifBlank { "Poll" }
-                        val effectiveQuestion = if (pollQuestion.isNotBlank()) pollQuestion.trim() else effectiveTitle
+                        val effectiveTitle = "Live Poll"
+                        val effectiveQuestion = pollQuestion.trim()
                         if (validOptions.size >= 2) {
                             val pollOptions = validOptions.mapIndexed { idx, optText ->
                                 PollOptionData("opt_$idx", optText)
