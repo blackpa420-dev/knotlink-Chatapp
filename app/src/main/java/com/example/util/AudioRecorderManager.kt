@@ -56,6 +56,14 @@ object AudioRecorderManager {
         }
     }
 
+    fun currentAmplitude(): Int {
+        return try {
+            mediaRecorder?.maxAmplitude?.coerceIn(0, 32767) ?: 0
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
     fun stopRecording(): Pair<File?, Int> {
         val file = currentFile
         var durationSecs = 0
