@@ -932,12 +932,14 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 val params = sender.parameters ?: continue
                 if (params.encodings.isEmpty()) continue
                 for (encoding in params.encodings) {
-                    encoding.minBitrateBps = (quality.targetBitrateKbps * 0.45 * 1000).toInt().coerceAtLeast(120_000)
+                    encoding.minBitrateBps = (quality.targetBitrateKbps * 0.30 * 1000).toInt().coerceAtLeast(100_000)
                     encoding.maxBitrateBps = quality.targetBitrateKbps * 1000
                     encoding.maxFramerate = quality.targetFps
                     encoding.scaleResolutionDownBy = quality.scaleResolutionDownBy
                 }
-                params.degradationPreference = RtpParameters.DegradationPreference.BALANCED
+                // Prefer preserving motion smoothness; WebRTC can reduce resolution
+                // before aggressively reducing frame rate when bandwidth falls.
+                params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                 sender.parameters = params
             }
             peerConnection?.setBitrate(100_000, (quality.targetBitrateKbps * 1000).coerceAtLeast(250_000), (quality.targetBitrateKbps * 1000).coerceAtLeast(300_000))
@@ -956,7 +958,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     val caps = if (network != null) cm.getNetworkCapabilities(network) else null
                     val isWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
                     val isCellular = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
-                    val transportCeiling = if (isWifi) CallQuality.ULTRA_2K else if (isCellular) CallQuality.FHD_1080P else CallQuality.HD_720P
+                    // Keep normal calls capped at FHD/720p. The previous 2K Wi-Fi
+                    // ceiling created large visible quality swings on mobile devices.
+                    val transportCeiling = if (isWifi) CallQuality.FHD_1080P else if (isCellular) CallQuality.HD_720P else CallQuality.HD_720P
                     var rttMs = _engineState.value.roundTripTimeMs
                     var packetLoss = _engineState.value.packetLossPercent
 
@@ -994,13 +998,15 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     val target = when {
                         veryBad -> CallQuality.LOW_360P
                         bad -> CallQuality.SD_480P
-                        isWifi -> CallQuality.ULTRA_2K
-                        isCellular -> if (packetLoss >= 4f || rttMs >= 180L) CallQuality.HD_720P else CallQuality.FHD_1080P
+                        isWifi -> CallQuality.FHD_1080P
+                        isCellular -> if (packetLoss >= 4f || rttMs >= 180L) CallQuality.HD_720P else CallQuality.HD_720P
                         else -> CallQuality.HD_720P
                     }
                     val capped = if (target.ordinal > transportCeiling.ordinal) transportCeiling else target
-                    val canUpgrade = now - lastQualityChangeAt >= 12_000L
-                    val canChange = now - lastQualityChangeAt >= 5_000L
+                    // Hysteresis prevents visible quality oscillation: downgrades need
+                    // a sustained problem and upgrades need a longer stable window.
+                    val canUpgrade = now - lastQualityChangeAt >= 15_000L
+                    val canChange = now - lastQualityChangeAt >= 8_000L
                     if (capped.ordinal > current.ordinal && !canUpgrade) {
                         // Keep current quality until the connection is stable.
                     } else if (capped != current && canChange) {
