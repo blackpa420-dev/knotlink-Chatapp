@@ -241,7 +241,12 @@ object SupabaseRealtimeManager {
                                 val isFromMe = isFromMe(msg.senderId, msg.senderName)
                                 val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
                                 if (!isFromMe && isForMe && msg.id.isNotBlank()) {
-                                    scope.launch { _incomingMessages.emit(msg) }
+                                    scope.launch {
+                                        _incomingMessages.emit(msg)
+                                        if (msg.status.equals("READ", ignoreCase = true) || msg.isRead) {
+                                            _messageStatusUpdates.emit(msg)
+                                        }
+                                    }
                                 }
                             } else if (subEvent == "new_message" || event == "new_message" || innerPayload.has("text")) {
                                 val msg = SupabaseMessage.fromJson(innerPayload)
