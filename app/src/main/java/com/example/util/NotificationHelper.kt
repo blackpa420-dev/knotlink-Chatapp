@@ -616,8 +616,16 @@ object NotificationHelper {
 
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(if (isConnected) { if (video) "Ongoing Video Call" else "Ongoing Voice Call" } else { if (video) "Calling • Video Call" else "Calling • Voice Call" })
-            .setContentText("$callerName • $timeFormatted")
+            .setContentTitle(callerName)
+            .setContentText(
+                if (isConnected) {
+                    if (video) "Ongoing video call • $timeFormatted • Tap to return"
+                    else "Ongoing voice call • $timeFormatted • Tap to return"
+                } else {
+                    if (video) "Calling • Video call • Tap to return"
+                    else "Calling • Voice call • Tap to return"
+                }
+            )
             .setColor(0xFF00A884.toInt())
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_CALL)
