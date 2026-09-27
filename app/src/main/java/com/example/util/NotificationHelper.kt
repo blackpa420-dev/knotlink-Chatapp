@@ -562,12 +562,21 @@ object NotificationHelper {
         }
     }
 
-    fun showOngoingAudioCallNotification(context: Context, callerName: String, secondsElapsed: Int) {
+    fun showOngoingAudioCallNotification(
+        context: Context,
+        callerName: String,
+        secondsElapsed: Int,
+        callId: String = "",
+        callType: String = "AUDIO"
+    ) {
         createNotificationChannels(context)
 
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(context, com.example.CallActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("open_audio_call", true)
+            putExtra("call_id", callId)
+            putExtra("caller_name", callerName)
+            putExtra("call_type", callType)
+            putExtra("action_accept_call", true)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
@@ -576,20 +585,42 @@ object NotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val endIntent = Intent(context, NotificationCallActionReceiver::class.java).apply {
+            action = NotificationCallActionReceiver.ACTION_END_CALL
+            putExtra("call_id", callId)
+            putExtra("caller_name", callerName)
+            putExtra("call_type", callType)
+        }
+        val endPendingIntent = PendingIntent.getBroadcast(
+            context,
+            10100,
+            endIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val minutes = secondsElapsed / 60
         val seconds = secondsElapsed % 60
         val timeFormatted = String.format("%02d:%02d", minutes, seconds)
+        val video = callType.equals("VIDEO", ignoreCase = true)
 
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("Ongoing Voice Call • $callerName")
-            .setContentText("Tap to return to call ($timeFormatted)")
+            .setContentTitle(if (video) "Ongoing Video Call" else "Ongoing Voice Call")
+            .setContentText("$callerName • $timeFormatted")
             .setColor(0xFF00A884.toInt())
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setSound(null)
             .setContentIntent(pendingIntent)
+            .addAction(
+                NotificationCompat.Action.Builder(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Hang up",
+                    endPendingIntent
+                ).build()
+            )
 
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
@@ -598,6 +629,7 @@ object NotificationHelper {
             android.util.Log.e("BitChat_Debug", "Error showing ongoing call notification: ${e.message}", e)
         }
     }
+
 
     private fun persistFcmTokenWithRetry(context: Context, userId: String, token: String) {
         CoroutineScope(Dispatchers.IO).launch {
