@@ -7873,10 +7873,10 @@ private fun TelegramMenuItem(
     }
 }
 
-@Composable
-private private val translationCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+private val translationCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-fun TelegramTranslateDialog(
+@Composable
+private fun TelegramTranslateDialog(
     message: MessageEntity,
     isNightMode: Boolean,
     onDismiss: () -> Unit
