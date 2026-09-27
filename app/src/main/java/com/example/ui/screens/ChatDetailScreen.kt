@@ -299,8 +299,9 @@ fun ChatDetailScreen(
     var isRecordingLocked by remember { mutableStateOf(false) }
     var recordSeconds by remember { mutableStateOf(0) }
     var recordDragOffsetX by remember { mutableStateOf(0f) }
+    var recordingAmplitude by remember { mutableStateOf(0f) }
+    var recordingStartedAt by remember { mutableStateOf(0L) }
     var lastRecordingFinishedTime by remember { mutableStateOf(0L) }
-    var showVoiceRecorderBottomSheet by remember { mutableStateOf(false) }
 
     val audioRecordPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -481,13 +482,20 @@ fun ChatDetailScreen(
 
     LaunchedEffect(isRecording) {
         if (isRecording) {
+            recordingStartedAt = System.currentTimeMillis()
             recordSeconds = 0
             while (isRecording) {
-                kotlinx.coroutines.delay(1000L)
+                kotlinx.coroutines.delay(80L)
                 if (!isRecordingPaused) {
-                    recordSeconds++
+                    recordSeconds = ((System.currentTimeMillis() - recordingStartedAt).coerceAtLeast(0L) / 1000L).toInt()
+                    val raw = com.example.util.AudioRecorderManager.currentAmplitude()
+                    recordingAmplitude = (raw / 32767f).coerceIn(0f, 1f)
+                } else {
+                    recordingAmplitude = 0f
                 }
             }
+        } else {
+            recordingAmplitude = 0f
         }
     }
 
@@ -1870,7 +1878,7 @@ fun ChatDetailScreen(
                                             .fillMaxWidth()
                                             .padding(horizontal = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         val mins = recordSeconds / 60
                                         val secs = recordSeconds % 60
@@ -1878,12 +1886,36 @@ fun ChatDetailScreen(
                                             text = String.format("%02d:%02d", mins, secs),
                                             color = Color(0xFFEF4444),
                                             fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
                                         )
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            for (index in 0 until 18) {
+                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72))
+                                                val speaking = recordingAmplitude > 0.035f
+                                                val h = if (speaking) {
+                                                    (5f + (recordingAmplitude * 24f * (0.35f + phase))).coerceIn(5f, 28f)
+                                                } else 5f
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(3.dp)
+                                                        .height(h.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (recordDragOffsetX < -120f) Color(0xFFEF4444)
+                                                            else Color(0xFF2563EB).copy(alpha = 0.9f)
+                                                        )
+                                                )
+                                            }
+                                        }
                                         Text(
-                                            text = if (recordDragOffsetX < -120f) "Release to delete 🗑️" else "‹ Slide left to cancel",
+                                            text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
                                             color = if (recordDragOffsetX < -120f) Color(0xFFEF4444) else animSubTextColor,
-                                            fontSize = 13.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
@@ -2145,7 +2177,7 @@ fun ChatDetailScreen(
 
                             Box(
                                 modifier = Modifier
-                                    .size(56.dp)
+                                    .size(64.dp)
                                     .pointerInput(Unit) {
                                         awaitPointerEventScope {
                                             while (true) {
@@ -2177,7 +2209,7 @@ fun ChatDetailScreen(
                                                 try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
 
                                                 val holdJob = coroutineScope.launch {
-                                                    delay(160L)
+                                                    delay(90L)
                                                     isHeldRecording = true
                                                     isRecording = true
                                                     isRecordingLocked = false
@@ -2267,10 +2299,6 @@ fun ChatDetailScreen(
                                                     recordSeconds = 0
                                                     recordDragOffsetX = 0f
                                                     lastRecordingFinishedTime = System.currentTimeMillis()
-                                                } else if (!isHeldRecording && holdDuration < 250L) {
-                                                    // Single click: show voice recorder bottom sheet
-                                                    try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
-                                                    showVoiceRecorderBottomSheet = true
                                                 } else if (isHeldRecording) {
                                                     if (isRecordingLocked) {
                                                         // Let them record hands free
@@ -3354,231 +3382,6 @@ fun ChatDetailScreen(
             }
         }
 
-        // 5. Voice Note Recorder Bottom Sheet
-        if (showVoiceRecorderBottomSheet) {
-            val voiceRecorderSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            var sheetRecordSeconds by remember { mutableStateOf(0) }
-            var sheetIsRecordingPaused by remember { mutableStateOf(false) }
-            var sheetIsViewOnce by remember { mutableStateOf(false) }
-
-            // Start recording immediately when bottom sheet is shown
-            LaunchedEffect(Unit) {
-                com.example.util.AudioRecorderManager.startRecording(localContext)
-                sheetRecordSeconds = 0
-            }
-
-            // Timer countdown
-            LaunchedEffect(sheetIsRecordingPaused) {
-                while (true) {
-                    delay(1000L)
-                    if (!sheetIsRecordingPaused) {
-                        sheetRecordSeconds++
-                    }
-                }
-            }
-
-            ModalBottomSheet(
-                onDismissRequest = {
-                    com.example.util.AudioRecorderManager.cancelRecording()
-                    showVoiceRecorderBottomSheet = false
-                },
-                sheetState = voiceRecorderSheetState,
-                containerColor = if (isNightMode) Color(0xFF14151C) else Color.White,
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .padding(bottom = 36.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    Text(
-                        text = if (sheetIsRecordingPaused) "Recording Paused" else "Recording Voice Note...",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isNightMode) Color.White else Color(0xFF0F172A)
-                    )
-
-                    // Animated pulsing ring (Pulse wave)
-                    val pulseTransition = rememberInfiniteTransition(label = "sheetMicPulse")
-                    val pulseScale by pulseTransition.animateFloat(
-                        initialValue = 1.0f,
-                        targetValue = 1.6f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1200, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "pulseScale"
-                    )
-                    val pulseAlpha by pulseTransition.animateFloat(
-                        initialValue = 0.6f,
-                        targetValue = 0f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1200, easing = FastOutSlowInEasing),
-                            repeatMode = RepeatMode.Restart
-                        ),
-                        label = "pulseAlpha"
-                    )
-
-                    Box(
-                        modifier = Modifier.size(140.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (!sheetIsRecordingPaused) {
-                            Box(
-                                modifier = Modifier
-                                    .size(80.dp * pulseScale)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF2563EB).copy(alpha = pulseAlpha))
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(80.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2563EB)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (sheetIsRecordingPaused) Icons.Default.MicOff else Icons.Default.Mic,
-                                contentDescription = "Mic",
-                                tint = Color.White,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-                    }
-
-                    // Recording Timer
-                    val durStr = String.format("%02d:%02d", sheetRecordSeconds / 60, sheetRecordSeconds % 60)
-                    Text(
-                        text = durStr,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (sheetIsRecordingPaused) Color.Gray else Color(0xFF2563EB)
-                    )
-
-                    // Control Buttons (Delete, View-Once, Pause/Resume, Send)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 1. Delete (Cancel) Button
-                        IconButton(
-                            onClick = {
-                                com.example.util.AudioRecorderManager.cancelRecording()
-                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
-                                showVoiceRecorderBottomSheet = false
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(Color(0xFFEF4444).copy(alpha = 0.15f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete",
-                                tint = Color(0xFFEF4444)
-                            )
-                        }
-
-                        // 2. View Once "1" Button
-                        IconButton(
-                            onClick = {
-                                sheetIsViewOnce = !sheetIsViewOnce
-                                try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(
-                                    if (sheetIsViewOnce) Color(0xFF8B5CF6) else (if (isNightMode) Color(0xFF1E202B) else Color(0xFFE2E8F0)),
-                                    CircleShape
-                                )
-                        ) {
-                            Text(
-                                text = "1",
-                                color = if (sheetIsViewOnce) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 18.sp
-                            )
-                        }
-
-                        // 3. Pause / Resume Button
-                        IconButton(
-                            onClick = {
-                                if (sheetIsRecordingPaused) {
-                                    com.example.util.AudioRecorderManager.resumeRecording()
-                                    sheetIsRecordingPaused = false
-                                } else {
-                                    com.example.util.AudioRecorderManager.pauseRecording()
-                                    sheetIsRecordingPaused = true
-                                }
-                                try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(
-                                    if (isNightMode) Color(0xFF1E202B) else Color(0xFFE2E8F0),
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = if (sheetIsRecordingPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                contentDescription = if (sheetIsRecordingPaused) "Resume" else "Pause",
-                                tint = if (isNightMode) Color.White else Color(0xFF0F172A)
-                            )
-                        }
-
-                        // 4. Send Button
-                        IconButton(
-                            onClick = {
-                                val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
-                                if (recFile != null && recFile.exists() && secs >= 1) {
-                                    val formattedDur = String.format("%02d:%02d", secs / 60, secs % 60)
-                                    val base64Data = try {
-                                        val bytes = recFile.readBytes()
-                                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                    } catch (_: Exception) { null }
-
-                                    val textToSend = if (sheetIsViewOnce) {
-                                        if (!base64Data.isNullOrBlank()) {
-                                            "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
-                                        } else {
-                                            "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
-                                        }
-                                    } else {
-                                        if (!base64Data.isNullOrBlank()) {
-                                            "[AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ Voice Note ($formattedDur)"
-                                        } else {
-                                            "[AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ Voice Note ($formattedDur)"
-                                        }
-                                    }
-                                    viewModel.sendMessage(chatId, textToSend)
-                                    Toast.makeText(localContext, if (sheetIsViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    com.example.util.AudioRecorderManager.cancelRecording()
-                                    Toast.makeText(localContext, "Recording too short ⏱️", Toast.LENGTH_SHORT).show()
-                                }
-                                showVoiceRecorderBottomSheet = false
-                            },
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(Color(0xFF2563EB), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Send,
-                                contentDescription = "Send",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Pinned Messages Bottom Sheet
         if (showPinnedSheet) {
             val pinnedSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
