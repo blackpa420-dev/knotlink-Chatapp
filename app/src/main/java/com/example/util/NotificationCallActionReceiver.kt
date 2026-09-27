@@ -14,6 +14,7 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_DECLINE_CALL = "com.knotlink.ACTION_DECLINE_CALL"
         const val ACTION_ACCEPT_CALL = "com.knotlink.ACTION_ACCEPT_CALL"
+        const val ACTION_END_CALL = "com.knotlink.ACTION_END_CALL"
         private const val TAG = "NotificationCallAction"
     }
 
@@ -55,6 +56,40 @@ class NotificationCallActionReceiver : BroadcastReceiver() {
                     context.sendBroadcast(endIntent)
                 } catch (e: Throwable) {
                     Log.e(TAG, "Error declining call from notification: ${e.message}", e)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+        } else if (action == ACTION_END_CALL) {
+            val pendingResult = goAsync()
+            NotificationHelper.cancelCallNotification(context, callerName, callId)
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    if (callId.isNotBlank()) {
+                        SupabaseService.updateCallSessionStatus(
+                            callId,
+                            "ENDED",
+                            endedAt = System.currentTimeMillis()
+                        )
+                    }
+                    if (callerId.isNotBlank()) {
+                        FcmPushSender.sendPushToUser(
+                            targetUserIdOrName = callerId,
+                            type = "call_ended",
+                            title = "Call Ended",
+                            body = "Call was ended",
+                            senderName = callerName,
+                            chatId = callId
+                        )
+                    }
+                    val endIntent = Intent("com.knotlink.CALL_ENDED").apply {
+                        putExtra("caller_name", callerName)
+                        putExtra("call_id", callId)
+                        setPackage(context.packageName)
+                    }
+                    context.sendBroadcast(endIntent)
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Error ending call from ongoing notification: ${e.message}", e)
                 } finally {
                     pendingResult.finish()
                 }
