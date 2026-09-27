@@ -3752,11 +3752,6 @@ fun ChatDetailScreen(
                 }
             }
         }
-
-
-
-        }
-
     }
 }
 
