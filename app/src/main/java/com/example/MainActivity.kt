@@ -194,78 +194,9 @@ class MainActivity : FragmentActivity() {
             val engineState by vm.callEngineState.collectAsState()
 
             Column(modifier = Modifier.fillMaxSize()) {
-              val sharedCall = bridgeCallState
-              val showAudioBulletin = !isCallScreenVisible &&
-                (sharedCall?.callType?.equals("AUDIO", ignoreCase = true) == true ||
-                 (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)))
-              if (showAudioBulletin) {
-                var bulletinNow by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
-                androidx.compose.runtime.LaunchedEffect(showAudioBulletin, sharedCall?.callId, engineState.isCallActive) {
-                  while (showAudioBulletin) {
-                    bulletinNow = System.currentTimeMillis()
-                    kotlinx.coroutines.delay(1000L)
-                  }
-                }
-                val startedAt = sharedCall?.startedAt ?: System.currentTimeMillis()
-                val elapsed = if (sharedCall != null) {
-                  ((bulletinNow - startedAt).coerceAtLeast(0L) / 1000L).toInt()
-                } else engineState.callDurationSeconds
-                val mins = elapsed / 60
-                val secs = elapsed % 60
-                Surface(
-                  modifier = Modifier
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
-                    .clickable {
-                      val peerName = sharedCall?.peerName ?: engineState.peerName
-                      val peerId = sharedCall?.peerId ?: engineState.peerId
-                      try {
-                        startActivity(
-                          Intent(this@MainActivity, CallActivity::class.java).apply {
-                            addFlags(
-                              Intent.FLAG_ACTIVITY_NEW_TASK or
-                                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                            )
-                            putExtra("call_id", sharedCall?.callId ?: engineState.activeCallId ?: "")
-                            putExtra("caller_id", peerId)
-                            putExtra("caller_name", peerName.ifBlank { "Active call" })
-                            putExtra("call_type", "AUDIO")
-                          }
-                        )
-                      } catch (e: Throwable) {
-                        Log.w("BitChat_Debug", "Could not reopen audio call: " + e.message)
-                      }
-                    },
-                  shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                  color = androidx.compose.ui.graphics.Color(0xFF151A24),
-                  shadowElevation = 4.dp
-                ) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Text("☎", color = androidx.compose.ui.graphics.Color(0xFF60A5FA), fontSize = 16.sp)
-                    Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
-                      Text(
-                        text = (sharedCall?.peerName ?: engineState.peerName).ifBlank { "Audio call" },
-                        color = androidx.compose.ui.graphics.Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
-                      )
-                      Text(
-                        text = "Ongoing call • %02d:%02d • Tap to return".format(mins, secs),
-                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.68f),
-                        fontSize = 10.sp
-                      )
-                    }
-                    Text("›", color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.72f), fontSize = 20.sp)
-                  }
-                }
-              }
-
+              // Do not render a global in-app "Ongoing call" bar here.
+              // The compact Voice Call bulletin belongs to ChatDetailScreen,
+              // where it does not shift the entire app layout.
               Box(
                 modifier = Modifier
                   .fillMaxWidth()
@@ -333,7 +264,7 @@ class MainActivity : FragmentActivity() {
 
   private fun enterSystemPipMode() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val aspectRatio = Rational(16, 9)
+      val aspectRatio = Rational(9, 16)
       val params = PictureInPictureParams.Builder()
         .setAspectRatio(aspectRatio)
         .build()
