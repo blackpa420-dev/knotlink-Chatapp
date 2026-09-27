@@ -14,13 +14,22 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -177,10 +186,88 @@ class MainActivity : FragmentActivity() {
 
         BitChatTheme {
           Surface(modifier = Modifier.fillMaxSize()) {
-            BitChatNavHost(
-              bitChatViewModel = vm,
-              isInPipMode = isInPipModeState
-            )
+            val engineState by vm.callEngineState.collectAsState()
+
+            Box(modifier = Modifier.fillMaxSize()) {
+              BitChatNavHost(
+                bitChatViewModel = vm,
+                isInPipMode = isInPipModeState
+              )
+
+              if (engineState.isCallActive && engineState.callType.equals("AUDIO", ignoreCase = true)) {
+                val mins = engineState.callDurationSeconds / 60
+                val secs = engineState.callDurationSeconds % 60
+                Surface(
+                  modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                  shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+                  color = androidx.compose.ui.graphics.Color(0xFF151A24),
+                  shadowElevation = 8.dp,
+                  onClick = {
+                    try {
+                      startActivity(
+                        Intent(this@MainActivity, CallActivity::class.java).apply {
+                          addFlags(
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                              Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                              Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                          )
+                          putExtra("call_id", engineState.activeCallId ?: "")
+                          putExtra("caller_id", engineState.peerId)
+                          putExtra("caller_name", engineState.peerName.ifBlank { "Active call" })
+                          putExtra("call_type", "AUDIO")
+                        }
+                      )
+                    } catch (e: Throwable) {
+                      Log.w("BitChat_Debug", "Could not reopen audio call: " + e.message)
+                    }
+                  }
+                ) {
+                  Row(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .padding(horizontal = 16.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                  ) {
+                    Surface(
+                      shape = androidx.compose.foundation.shape.CircleShape,
+                      color = androidx.compose.ui.graphics.Color(0xFF2563EB)
+                    ) {
+                      Text(
+                        text = "☎",
+                        modifier = Modifier.padding(9.dp),
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 15.sp
+                      )
+                    }
+                    Column(
+                      modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp)
+                    ) {
+                      Text(
+                        text = engineState.peerName.ifBlank { "Audio call" },
+                        color = androidx.compose.ui.graphics.Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                      )
+                      Text(
+                        text = "Ongoing call • %02d:%02d • Tap to return".format(mins, secs),
+                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.68f),
+                        fontSize = 11.sp
+                      )
+                    }
+                    Text(
+                      text = "↗",
+                      color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.82f),
+                      fontSize = 20.sp
+                    )
+                  }
+                }
+              }
+            }
           }
         }
       }
