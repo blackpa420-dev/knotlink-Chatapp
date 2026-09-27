@@ -418,7 +418,9 @@ object SupabaseRealtimeManager {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error in sync loop: " + e.message)
                 }
-                delay(20_000L)
+                // Keep presence fresh enough for chat-list indicators without
+                // hammering the backend; realtime remains the primary fast path.
+                delay(8_000L)
             }
         }
     }
