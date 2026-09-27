@@ -1,7 +1,10 @@
 package com.example.webrtc
 
 import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.AudioAttributes
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.util.Log
@@ -65,7 +68,9 @@ data class CallEngineState(
     val localAudioLevel: Float = 0.0f,
     val remoteAudioLevel: Float = 0.0f,
     val callDurationSeconds: Int = 0,
-    val connectedAt: Long? = null
+    val connectedAt: Long? = null,
+    val peerId: String = "",
+    val peerName: String = ""
 )
 
 class WebRtcCallEngine private constructor(private val context: Context) {
@@ -109,8 +114,8 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         try {
             initWebRtcInternal()
             val audioDeviceModule = JavaAudioDeviceModule.builder(context)
-                .setUseHardwareAcousticEchoCanceler(false)
-                .setUseHardwareNoiseSuppressor(false)
+                .setUseHardwareAcousticEchoCanceler(true)
+                .setUseHardwareNoiseSuppressor(true)
                 .createAudioDeviceModule()
 
             val builder = PeerConnectionFactory.builder()
@@ -162,6 +167,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
     private var videoCaptureControlJob: Job? = null
     private var lastQualityChangeAt: Long = 0L
     private var videoCapturePausedByScreen = false
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     private fun initWebRtcInternal() {
         if (!isWebRtcInitialized) {
@@ -201,7 +207,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         callId: String = "session_${System.currentTimeMillis()}",
         isCaller: Boolean = true,
         callType: String = "VIDEO",
-        isVideo: Boolean = callType.equals("VIDEO", ignoreCase = true)
+        isVideo: Boolean = callType.equals("VIDEO", ignoreCase = true),
+        peerId: String = "",
+        peerName: String = ""
     ) {
         Log.d(TAG, "startCall called: callId=$callId, isCaller=$isCaller, isVideo=$isVideo")
         setupAudioSubsystem(isVideo)
@@ -215,6 +223,8 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             callType = if (isVideo) "VIDEO" else "AUDIO",
             isCameraOn = isVideo,
             isSpeakerOn = isVideo,
+            peerId = peerId,
+            peerName = peerName,
             currentQuality = if (isVideo) CallQuality.HD_720P else CallQuality.SD_480P
         )
 
@@ -249,15 +259,42 @@ class WebRtcCallEngine private constructor(private val context: Context) {
 
     private fun setupAudioSubsystem(isVideo: Boolean) {
         try {
-            audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager?.isMicrophoneMute = false
-            @Suppress("DEPRECATION")
-            audioManager?.isSpeakerphoneOn = isVideo
+            val am = audioManager ?: return
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val attrs = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+                audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                    .setAudioAttributes(attrs).setAcceptsDelayedFocusGain(false).build()
+                am.requestAudioFocus(audioFocusRequest!!)
+            }
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.isMicrophoneMute = false
+            setCommunicationRoute(isVideo)
         } catch (e: Throwable) {
-            Log.w(TAG, "setupAudioSubsystem warning: ${e.message}")
+            Log.w(TAG, "setupAudioSubsystem warning: " + e.message, e)
         }
     }
 
+    private fun setCommunicationRoute(isSpeaker: Boolean) {
+        val am = audioManager ?: return
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val devices = am.getAvailableCommunicationDevices()
+                val wantedType = if (isSpeaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+                val target = devices.firstOrNull { it.type == wantedType }
+                    ?: if (!isSpeaker) devices.firstOrNull {
+                        it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET || it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                    } else null
+                if (target != null) am.setCommunicationDevice(target) else if (!isSpeaker) am.clearCommunicationDevice()
+            } else {
+                @Suppress("DEPRECATION")
+                am.isSpeakerphoneOn = isSpeaker
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Communication route change failed: " + e.message, e)
+        }
+    }
     private fun setupLocalMedia(isVideo: Boolean) {
         val factory = peerConnectionFactory ?: run {
             Log.e(TAG, "peerConnectionFactory is null; cannot setup local media")
@@ -774,7 +811,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             }
             audioManager?.isMicrophoneMute = newMute
         } catch (e: Throwable) {
-            Log.w(TAG, "toggleMute error: ${e.message}")
+            Log.w(TAG, "toggleMute error: " + e.message, e)
         }
         _engineState.value = _engineState.value.copy(isMuted = newMute)
         return newMute
@@ -782,16 +819,11 @@ class WebRtcCallEngine private constructor(private val context: Context) {
 
     fun toggleSpeaker(): Boolean {
         val newSpeaker = !_engineState.value.isSpeakerOn
-        try {
-            @Suppress("DEPRECATION")
-            audioManager?.isSpeakerphoneOn = newSpeaker
-        } catch (e: Throwable) {
-            Log.w(TAG, "toggleSpeaker error: ${e.message}")
-        }
+        try { setCommunicationRoute(newSpeaker) }
+        catch (e: Throwable) { Log.w(TAG, "toggleSpeaker error: " + e.message, e) }
         _engineState.value = _engineState.value.copy(isSpeakerOn = newSpeaker)
         return newSpeaker
     }
-
     fun toggleCamera(): Boolean {
         val newCamera = !_engineState.value.isCameraOn
         localVideoTrackInstance?.setEnabled(newCamera)
@@ -920,6 +952,16 @@ class WebRtcCallEngine private constructor(private val context: Context) {
             Log.w(TAG, "Error restoring audioManager: ${e.message}")
         }
 
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) audioManager?.clearCommunicationDevice()
+            else { @Suppress("DEPRECATION") audioManager?.isSpeakerphoneOn = false }
+            audioManager?.isMicrophoneMute = false
+            audioManager?.mode = AudioManager.MODE_NORMAL
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { audioManager?.abandonAudioFocusRequest(it) }
+                audioFocusRequest = null
+            }
+        } catch (e: Throwable) { Log.w(TAG, "releaseAudioSubsystem warning: " + e.message, e) }
         _engineState.value = CallEngineState(isCallActive = false)
         Log.d(TAG, "WebRtcCallEngine call ended and cleaned up")
     }
