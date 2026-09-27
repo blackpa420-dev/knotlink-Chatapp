@@ -53,6 +53,9 @@ abstract class BitChatDatabase : RoomDatabase() {
                         "bitchat_database"
                     )
                     .addMigrations(MIGRATION_13_14)
+                    // Older builds existed without a complete migration chain.
+                    // Rebuild only from legacy starting versions instead of crashing.
+                    .fallbackToDestructiveMigrationFrom(false, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
                     .build()
                     INSTANCE = instance
                     Log.d("BitChat_Debug", "Room database instance built successfully")
