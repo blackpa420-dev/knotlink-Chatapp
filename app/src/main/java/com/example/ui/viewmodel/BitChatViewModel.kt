@@ -2085,7 +2085,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isMuted = false,
             isSpeaker = isVideo
         )
-        ActiveCallBridge.start(call.id, call.callerId, callerName, call.callType, isConnected = false)
+        ActiveCallBridge.start(
+            call.id,
+            call.callerId,
+            callerName,
+            call.callType,
+            isConnected = false,
+            peerAvatar = call.callerAvatar ?: ""
+        )
 
         // Keep the native system call notification alive immediately after Answer.
         // It is updated to the connected timer by startCallTimer() without creating
@@ -2272,7 +2279,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isMuted = false,
             isSpeaker = isVideo
         )
-        ActiveCallBridge.start(callId, contactId, contactName, callType, isConnected = false)
+        ActiveCallBridge.start(
+            callId,
+            contactId,
+            contactName,
+            callType,
+            isConnected = false
+        )
         addCallLog(contactId = contactId, contactName = contactName, callType = callType, direction = "OUTGOING", durationSeconds = 0)
 
         // Show the ongoing-call notification immediately, including while the
@@ -2321,6 +2334,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
                 _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
+                ActiveCallBridge.setPeerAvatar(resolvedAvatar)
 
                 NotificationHelper.showOngoingAudioCallNotification(
                     context = getApplication<Application>(),
@@ -2439,7 +2453,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isConnected = true,
             contactId = bridge.peerId,
             contactName = bridge.peerName,
-            contactAvatar = "",
+            contactAvatar = bridge.peerAvatar,
             callType = bridge.callType,
             secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
                 .coerceAtLeast(0L) / 1000L).toInt(),
