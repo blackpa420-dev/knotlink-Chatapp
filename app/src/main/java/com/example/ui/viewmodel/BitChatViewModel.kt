@@ -2086,6 +2086,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             isSpeaker = isVideo
         )
         ActiveCallBridge.start(call.id, call.callerId, callerName, call.callType, isConnected = false)
+
+        // Keep the native system call notification alive immediately after Answer.
+        // It is updated to the connected timer by startCallTimer() without creating
+        // another notification card.
+        NotificationHelper.showOngoingAudioCallNotification(
+            context = getApplication<Application>(),
+            callerName = callerName,
+            secondsElapsed = 0,
+            callId = call.id,
+            callType = call.callType,
+            peerId = call.callerId,
+            isConnected = false
+        )
+
         addCallLog(
             contactId = call.callerId,
             contactName = callerName,
