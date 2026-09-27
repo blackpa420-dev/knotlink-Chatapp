@@ -82,6 +82,10 @@ class CallActivity : FragmentActivity() {
                 putExtra("call_type", "AUDIO")
             }
             startActivity(intent)
+            // Keep receiver Back transition consistent with the call route's
+            // non-animated handoff and remove the dedicated call task.
+            overridePendingTransition(0, 0)
+            finishAndRemoveTask()
         } catch (_: Throwable) {
             moveTaskToBack(true)
         }
@@ -286,6 +290,9 @@ class CallActivity : FragmentActivity() {
                 }
                 setPictureInPictureParams(builder.build())
                 inPipMode = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    window.setBackgroundDrawableResource(android.R.color.transparent)
+                }
                 enterPictureInPictureMode(builder.build())
                 return
             } catch (_: Throwable) {
@@ -300,6 +307,9 @@ class CallActivity : FragmentActivity() {
     ) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         inPipMode = isInPictureInPictureMode
+        if (!isInPictureInPictureMode) {
+            window.setBackgroundDrawableResource(android.R.color.black)
+        }
     }
 
     override fun onBackPressed() {
