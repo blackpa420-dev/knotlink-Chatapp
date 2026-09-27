@@ -8108,7 +8108,7 @@ fun TelegramTranslateDialog(
                 conn.setRequestProperty("x-goog-api-key", apiKey)
                 conn.doOutput = true
 
-                val prompt = "Translate into \${selectedLanguage}. Return only the translation, no notes, markdown, or quotes:\n\${message.text.trim()}"
+                val prompt = "Translate into ${selectedLanguage}. Return only the translation, no notes, markdown, or quotes:\n${message.text.trim()}"
                 val body = org.json.JSONObject().apply {
                     put("contents", org.json.JSONArray().apply {
                         put(org.json.JSONObject().apply {
