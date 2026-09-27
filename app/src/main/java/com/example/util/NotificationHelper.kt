@@ -124,7 +124,7 @@ object NotificationHelper {
             val ongoingCallChannel = NotificationChannel(
                 ONGOING_CALL_CHANNEL_ID,
                 "KnotLink Active Calls",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Persistent notification for active and outgoing calls"
                 enableVibration(false)
@@ -571,7 +571,8 @@ object NotificationHelper {
         callId: String = "",
         callType: String = "AUDIO",
         peerId: String = "",
-        isConnected: Boolean = true
+        isConnected: Boolean = true,
+        callerAvatarBitmap: android.graphics.Bitmap? = null
     ) {
         createNotificationChannels(context)
 
@@ -609,23 +610,30 @@ object NotificationHelper {
         val timeFormatted = String.format("%02d:%02d", minutes, seconds)
         val video = callType.equals("VIDEO", ignoreCase = true)
 
+        val profileBitmap = try {
+            (callerAvatarBitmap ?: createLetterAvatarBitmap(context, callerName)).let { getCircularBitmap(it) }
+        } catch (_: Throwable) {
+            createLetterAvatarBitmap(context, callerName)
+        }
+
         val callerPerson = Person.Builder()
             .setName(callerName)
+            .setIcon(IconCompat.createWithBitmap(profileBitmap))
             .setImportant(true)
             .build()
 
+        val stateText = if (isConnected) {
+            if (video) "Ongoing call • $timeFormatted • Tap to return"
+            else "Ongoing call • $timeFormatted • Tap to return"
+        } else {
+            "Ringing…"
+        }
+
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
+            .setLargeIcon(profileBitmap)
             .setContentTitle(callerName)
-            .setContentText(
-                if (isConnected) {
-                    if (video) "Ongoing video call • $timeFormatted • Tap to return"
-                    else "Ongoing voice call • $timeFormatted • Tap to return"
-                } else {
-                    if (video) "Calling • Video call • Tap to return"
-                    else "Calling • Voice call • Tap to return"
-                }
-            )
+            .setContentText(stateText)
             .setColor(0xFF00A884.toInt())
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -642,11 +650,14 @@ object NotificationHelper {
                 ).build()
             )
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setStyle(
-                NotificationCompat.CallStyle.forOngoingCall(callerPerson, endPendingIntent)
-            )
-        }
+        // Use the normal Android expanded notification surface so OEM Android
+        // can apply its own transparent/rounded notification presentation.
+        // This matches the system UI used by common chat/calling apps and keeps
+        // the Hang Up action visible without replacing the system background.
+        builder.setStyle(
+            NotificationCompat.BigTextStyle()
+                .bigText(stateText)
+        )
 
         try {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
