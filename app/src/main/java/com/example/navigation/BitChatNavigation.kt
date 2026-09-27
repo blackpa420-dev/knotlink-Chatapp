@@ -189,17 +189,6 @@ fun BitChatNavHost(
         }
     }
 
-    // Ongoing Audio Call notification update
-    androidx.compose.runtime.LaunchedEffect(activeCallState.isActive, activeCallState.callType, activeCallState.secondsElapsed) {
-        if (activeCallState.isActive && activeCallState.callType == "AUDIO") {
-            com.example.util.NotificationHelper.showOngoingAudioCallNotification(
-                context = context,
-                callerName = activeCallState.contactName.ifBlank { "BitChat User" },
-                secondsElapsed = activeCallState.secondsElapsed
-            )
-        }
-    }
-
     // Auto-navigate to Video Call Screen when system PiP activates so System PiP captures only the video stream
     androidx.compose.runtime.LaunchedEffect(isInPipMode, activeCallState.isActive, activeCallState.callType) {
         if (isInPipMode && activeCallState.isActive && activeCallState.callType == "VIDEO" && !currentRoute.startsWith("video_call")) {
