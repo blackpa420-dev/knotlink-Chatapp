@@ -455,8 +455,9 @@ fun ChatDetailScreen(
     // Auto-scroll logic: Instant scroll to latest message without visible jump/sliding
     LaunchedEffect(displayedMessages.size, messages.lastOrNull()?.id) {
         if (displayedMessages.isNotEmpty()) {
-            val targetIndex = displayedMessages.size
-            listState.scrollToItem(targetIndex)
+            kotlinx.coroutines.yield()
+            val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+            listState.scrollToItem(lastIndex)
             hasInitialScrolled = true
             unreadNewMessagesCount = 0
             previousMessageCount = messages.size
@@ -966,83 +967,6 @@ fun ChatDetailScreen(
                 onExpandClick = onActiveCallBannerClick
             )
 
-            // Sticky Pinned Message Banner
-            androidx.compose.animation.AnimatedVisibility(
-                visible = pinnedMessages.isNotEmpty(),
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                val latestPinned = pinnedMessages.lastOrNull()
-                val pinnedMsgEntity = validMessages.find { it.serverMessageId == latestPinned?.messageId || it.id.toString() == latestPinned?.messageId }
-                Surface(
-                    onClick = {
-                        if (pinnedMessages.size > 1) {
-                            showPinnedSheet = true
-                        } else if (pinnedMsgEntity != null) {
-                            val idx = displayedMessages.indexOfFirst { it.id == pinnedMsgEntity.id }
-                            if (idx >= 0) {
-                                coroutineScope.launch { listState.animateScrollToItem(idx) }
-                            }
-                        }
-                    },
-                    color = if (isNightMode) Color(0xFF1E202B) else Color(0xFFF1F5F9),
-                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PushPin,
-                                contentDescription = "Pinned",
-                                tint = Color(0xFFF59E0B),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (pinnedMessages.size > 1) "Pinned Messages (${pinnedMessages.size})" else "Pinned Message",
-                                color = Color(0xFFF59E0B),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = pinnedMsgEntity?.text ?: "Pinned message",
-                                color = animTextColor,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        TextButton(
-                            onClick = { showPinnedSheet = true },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "View All",
-                                color = Color(0xFF2563EB),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-
             // Chat Messages List with Floating New Message Indicator & Pagination
             Box(
                 modifier = Modifier
@@ -1253,6 +1177,85 @@ fun ChatDetailScreen(
                         }
                     }
                 }
+
+                // Sticky Pinned Message Banner (overlay; does not reserve message-list height)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = pinnedMessages.isNotEmpty(),
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                val latestPinned = pinnedMessages.lastOrNull()
+                val pinnedMsgEntity = validMessages.find { it.serverMessageId == latestPinned?.messageId || it.id.toString() == latestPinned?.messageId }
+                Surface(
+                    onClick = {
+                        if (pinnedMessages.size > 1) {
+                            showPinnedSheet = true
+                        } else if (pinnedMsgEntity != null) {
+                            val idx = displayedMessages.indexOfFirst { it.id == pinnedMsgEntity.id }
+                            if (idx >= 0) {
+                                coroutineScope.launch { listState.animateScrollToItem(idx) }
+                            }
+                        }
+                    },
+                    color = if (isNightMode) Color(0xFF1E202B) else Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .zIndex(20f),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFF59E0B).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PushPin,
+                                contentDescription = "Pinned",
+                                tint = Color(0xFFF59E0B),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (pinnedMessages.size > 1) "Pinned Messages (${pinnedMessages.size})" else "Pinned Message",
+                                color = Color(0xFFF59E0B),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = pinnedMsgEntity?.text ?: "Pinned message",
+                                color = animTextColor,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        TextButton(
+                            onClick = { showPinnedSheet = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "View All",
+                                color = Color(0xFF2563EB),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
             }
 
             // Modern Horizontally Scrollable 6-Option Glass Attachment Menu
