@@ -809,7 +809,7 @@ class BitChatRepository(val dao: BitChatDao) {
 
     suspend fun markUserMessagesAsRead(chatId: String) {
         val unreadServerIds = try {
-            dao.getMessagesForChat(chatId).first()
+            dao.getMessagesForChat(chatId).firstOrNull().orEmpty()
                 .asSequence()
                 .filter { !it.isFromUser && it.deliveryState != "READ" && !it.serverMessageId.isNullOrBlank() }
                 .mapNotNull { it.serverMessageId }
