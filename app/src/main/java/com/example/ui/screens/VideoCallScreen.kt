@@ -189,7 +189,10 @@ fun VideoCallScreen(
                             init(eglCtx, null)
                         }
                         setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        setEnableHardwareScaler(true)
+                        // Fixed-size hardware scaling is documented by WebRTC as potentially
+                        // buggy on some devices. Keep the remote renderer dynamically sized.
+                        setEnableHardwareScaler(false)
+                        disableFpsReduction()
                         setMirror(false)
                         viewModel.callEngine.attachRemoteVideoSink(this)
                     }
@@ -209,7 +212,8 @@ fun VideoCallScreen(
                             init(eglCtx, null)
                         }
                         setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        setEnableHardwareScaler(true)
+                        setEnableHardwareScaler(false)
+                        disableFpsReduction()
                         setMirror(isFrontCamera)
                         viewModel.callEngine.attachLocalVideoSink(this)
                     }
