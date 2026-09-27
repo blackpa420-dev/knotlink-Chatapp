@@ -822,7 +822,33 @@ class BitChatRepository(val dao: BitChatDao) {
     suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>) {
         if (messageIds.isEmpty()) return
         dao.markMessagesAsReadByServerIds(messageIds)
-        SupabaseService.markMessagesAsRead(chatId, messageIds)
+        val result = SupabaseService.markMessagesAsRead(chatId, messageIds)
+        val reader = dao.getUserIdentity().firstOrNull()
+        val readerUid = reader?.supabaseUid?.ifBlank { reader.email }?.ifBlank { reader.username }.orEmpty()
+        if (result.isSuccess && readerUid.isNotBlank()) {
+            messageIds.forEach { serverId ->
+                val local = dao.getMessageByServerId(serverId)
+                if (local != null && local.senderUid.isNotBlank() && local.senderUid != readerUid) {
+                    SupabaseRealtimeManager.broadcastMessageMutation(
+                        SupabaseMessage(
+                            id = serverId,
+                            chatId = chatId,
+                            senderId = readerUid,
+                            senderName = reader.fullName.ifBlank { reader.username },
+                            receiverId = local.senderUid,
+                            text = local.text,
+                            timestamp = System.currentTimeMillis(),
+                            status = "READ",
+                            isRead = true,
+                            messageType = local.messageType,
+                            isPinned = local.isPinned,
+                            clientMsgId = local.clientMessageId
+                        ),
+                        mutation = "READ"
+                    )
+                }
+            }
+        }
     }
 
     suspend fun retryMessage(message: MessageEntity): MessageEntity {
@@ -2192,7 +2218,10 @@ class BitChatRepository(val dao: BitChatDao) {
 
         if (!serverMessageId.isNullOrBlank()) {
             val result = SupabaseService.editMessage(serverMessageId, newText)
-            if (result.isSuccess && local != null) {
+            if (!result.isSuccess) {
+                android.util.Log.w("BitChatRepo", "Remote edit persistence failed for $serverMessageId; broadcasting realtime mutation")
+            }
+            if (local != null) {
                 val identity = dao.getUserIdentity().firstOrNull()
                 SupabaseRealtimeManager.broadcastMessageMutation(
                     SupabaseMessage(
@@ -2294,7 +2323,8 @@ class BitChatRepository(val dao: BitChatDao) {
         chatId: String,
         messageId: Long,
         serverMessageId: String?,
-        currentIsPinned: Boolean
+        currentIsPinned: Boolean,
+        broadcastToOthers: Boolean = false
     ) {
         val currentIdentity = dao.getUserIdentity().firstOrNull()
         val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
@@ -2320,7 +2350,10 @@ class BitChatRepository(val dao: BitChatDao) {
 
         if (!serverMessageId.isNullOrBlank()) {
             val result = SupabaseService.updateMessagePinnedStatus(serverMessageId, newPinned)
-            if (result.isSuccess && local != null) {
+            if (!result.isSuccess) {
+                android.util.Log.w("BitChatRepo", "Remote pin persistence failed for $serverMessageId")
+            }
+            if (broadcastToOthers && local != null) {
                 SupabaseRealtimeManager.broadcastMessageMutation(
                     SupabaseMessage(
                         id = serverMessageId,
