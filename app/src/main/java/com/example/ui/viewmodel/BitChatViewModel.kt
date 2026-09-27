@@ -2501,6 +2501,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         callTimerJob?.cancel()
         callTimerJob = null
         callConnectTimestamp = 0L
+        ActiveCallBridge.clear(sessId)
         _activeCall.value = ActiveCallState(isActive = false)
         activeCallSessionId = null
         currentCallLogId = null
