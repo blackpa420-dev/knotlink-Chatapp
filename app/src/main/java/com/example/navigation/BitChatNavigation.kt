@@ -555,7 +555,7 @@ fun BitChatNavHost(
                 viewModel = bitChatViewModel,
                 isInPipMode = isInPipMode,
                 onBackClick = {
-                    navController.popBackStack()
+                    onVideoCallBackToPip()
                 },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
@@ -595,7 +595,7 @@ fun BitChatNavHost(
                 contactName = resolvedName,
                 viewModel = bitChatViewModel,
                 onBackClick = {
-                    onVideoCallBackToPip()
+                    navController.popBackStack()
                 },
                 onEndCallClick = {
                     bitChatViewModel.endCall()
