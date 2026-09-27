@@ -1487,12 +1487,18 @@ fun ChecklistCreatorDialog(
     var newItemText by remember { mutableStateOf("") }
     val context = LocalContext.current
 
-    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(26.dp),
             color = if (isNightMode) Color(0xFF1E202B) else Color.White,
             border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.12f) else Color(0xFFE2E8F0)),
-            modifier = Modifier.fillMaxWidth().padding(12.dp)
+            modifier = Modifier
+                .fillMaxWidth(0.94f)
+                .fillMaxHeight(0.88f)
+                .navigationBarsPadding()
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
