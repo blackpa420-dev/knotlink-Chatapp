@@ -2205,6 +2205,15 @@ class BitChatRepository(val dao: BitChatDao) {
         submitAbuseReport("GROUP", chatId, reason, details)
     }
 
+
+    private fun resolveMutationReceiver(local: MessageEntity, currentUid: String): String {
+        return if (local.senderUid.equals(currentUid, ignoreCase = true)) {
+            local.receiverUid
+        } else {
+            local.senderUid
+        }
+    }
+
     suspend fun editMessage(
         chatId: String,
         messageId: Long,
@@ -2229,7 +2238,7 @@ class BitChatRepository(val dao: BitChatDao) {
                         chatId = chatId,
                         senderId = identity?.supabaseUid ?: local.senderUid,
                         senderName = identity?.fullName?.ifBlank { identity.username } ?: local.senderName,
-                        receiverId = if (chatId.startsWith("group_", ignoreCase = true)) "all" else local.receiverUid,
+                        receiverId = if (chatId.startsWith("group_", ignoreCase = true)) "all" else resolveMutationReceiver(local, identity?.supabaseUid ?: local.senderUid),
                         text = newText,
                         timestamp = now,
                         status = local.deliveryState.ifBlank { "SENT" },
@@ -2267,7 +2276,7 @@ class BitChatRepository(val dao: BitChatDao) {
                             chatId = chatId,
                             senderId = identity?.supabaseUid ?: local.senderUid,
                             senderName = identity?.fullName?.ifBlank { identity.username } ?: local.senderName,
-                            receiverId = local.receiverUid,
+                            receiverId = resolveMutationReceiver(local, identity?.supabaseUid ?: local.senderUid),
                             text = "",
                             timestamp = now,
                             status = local.deliveryState.ifBlank { "SENT" },
@@ -2332,15 +2341,23 @@ class BitChatRepository(val dao: BitChatDao) {
         val newPinned = !currentIsPinned
         val now = System.currentTimeMillis()
         val local = dao.getMessageById(messageId)
+        val existingPin = dao.getPinnedMessagesForChat(chatId).firstOrNull()?.firstOrNull { it.messageId == targetId }
+        val existingPinIsPrivate = existingPin?.pinnedByUid?.startsWith("private:", ignoreCase = true) == true
 
-        dao.updateMessagePinnedStatus(targetId, newPinned, if (newPinned) now else null)
+        // A private pin exists only in this device's local pinned_messages table.
+        // A shared pin is persisted in the message row and Supabase so both peers see it.
+        val syncForEveryone = broadcastToOthers || (!newPinned && local?.isPinned == true && !existingPinIsPrivate)
+
+        if (syncForEveryone) {
+            dao.updateMessagePinnedStatus(targetId, newPinned, if (newPinned) now else null)
+        }
 
         if (newPinned) {
             dao.insertPinnedMessage(
                 PinnedMessageEntity(
                     chatId = chatId,
                     messageId = targetId,
-                    pinnedByUid = currentUid,
+                    pinnedByUid = if (broadcastToOthers) currentUid else "private:$currentUid",
                     pinnedAt = now
                 )
             )
@@ -2348,19 +2365,19 @@ class BitChatRepository(val dao: BitChatDao) {
             dao.deletePinnedMessage(chatId, targetId)
         }
 
-        if (!serverMessageId.isNullOrBlank()) {
+        if (syncForEveryone && !serverMessageId.isNullOrBlank()) {
             val result = SupabaseService.updateMessagePinnedStatus(serverMessageId, newPinned)
             if (!result.isSuccess) {
                 android.util.Log.w("BitChatRepo", "Remote pin persistence failed for $serverMessageId")
             }
-            if (broadcastToOthers && local != null) {
+            if (local != null) {
                 SupabaseRealtimeManager.broadcastMessageMutation(
                     SupabaseMessage(
                         id = serverMessageId,
                         chatId = chatId,
                         senderId = currentUid,
                         senderName = currentIdentity?.fullName?.ifBlank { currentIdentity.username } ?: local.senderName,
-                        receiverId = if (chatId.startsWith("group_", ignoreCase = true)) "all" else local.receiverUid,
+                        receiverId = if (chatId.startsWith("group_", ignoreCase = true)) "all" else resolveMutationReceiver(local, currentUid),
                         text = local.text,
                         timestamp = now,
                         status = local.deliveryState.ifBlank { "SENT" },
