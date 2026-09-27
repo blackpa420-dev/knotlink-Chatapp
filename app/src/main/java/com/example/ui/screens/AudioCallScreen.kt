@@ -79,9 +79,6 @@ fun AudioCallScreen(
 ) {
     val context = LocalContext.current
 
-    BackHandler {
-        onBackClick()
-    }
     var isMuted by remember { mutableStateOf(false) }
     var isSpeakerOn by remember { mutableStateOf(false) }
 
