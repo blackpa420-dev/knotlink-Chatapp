@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -201,29 +202,29 @@ class MainActivity : FragmentActivity() {
                   modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .clickable {
+                      try {
+                        startActivity(
+                          Intent(this@MainActivity, CallActivity::class.java).apply {
+                            addFlags(
+                              Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            )
+                            putExtra("call_id", engineState.activeCallId ?: "")
+                            putExtra("caller_id", engineState.peerId)
+                            putExtra("caller_name", engineState.peerName.ifBlank { "Active call" })
+                            putExtra("call_type", "AUDIO")
+                          }
+                        )
+                      } catch (e: Throwable) {
+                        Log.w("BitChat_Debug", "Could not reopen audio call: " + e.message)
+                      }
+                    },
                   shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
                   color = androidx.compose.ui.graphics.Color(0xFF151A24),
-                  shadowElevation = 8.dp,
-                  onClick = {
-                    try {
-                      startActivity(
-                        Intent(this@MainActivity, CallActivity::class.java).apply {
-                          addFlags(
-                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                              Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                              Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                          )
-                          putExtra("call_id", engineState.activeCallId ?: "")
-                          putExtra("caller_id", engineState.peerId)
-                          putExtra("caller_name", engineState.peerName.ifBlank { "Active call" })
-                          putExtra("call_type", "AUDIO")
-                        }
-                      )
-                    } catch (e: Throwable) {
-                      Log.w("BitChat_Debug", "Could not reopen audio call: " + e.message)
-                    }
-                  }
+                  shadowElevation = 8.dp
                 ) {
                   Row(
                     modifier = Modifier
