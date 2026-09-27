@@ -2068,7 +2068,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             callId = call.id,
             isCaller = false,
             callType = call.callType,
-            isVideo = isVideo
+            isVideo = isVideo,
+            peerId = call.callerId,
+            peerName = callerName
         )
         _activeCall.value = ActiveCallState(
             isActive = true,
@@ -2328,7 +2330,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                callEngine.startCall(callId = callId, isCaller = true, callType = callType, isVideo = isVideo)
+                callEngine.startCall(
+                    callId = callId,
+                    isCaller = true,
+                    callType = callType,
+                    isVideo = isVideo,
+                    peerId = resolvedReceiverId,
+                    peerName = contactName
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
