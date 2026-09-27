@@ -284,6 +284,12 @@ fun BitChatNavHost(
     }
 
     val openActiveAudioCall = {
+        // Rehydrate the existing process-local WebRTC call first. This prevents
+        // AudioCallScreen from interpreting the bulletin tap as a brand-new call.
+        if (!activeCallState.isActive) {
+            bitChatViewModel.resumeActiveCallFromBridge()
+        }
+
         val contactId = if (activeCallState.isActive) {
             activeCallState.contactId
         } else {
@@ -576,6 +582,10 @@ fun BitChatNavHost(
 
         composable(
             route = BitChatRoutes.AUDIO_CALL,
+            enterTransition = { androidx.compose.animation.EnterTransition.None },
+            exitTransition = { androidx.compose.animation.ExitTransition.None },
+            popEnterTransition = { androidx.compose.animation.EnterTransition.None },
+            popExitTransition = { androidx.compose.animation.ExitTransition.None },
             arguments = listOf(
                 navArgument("contactId") { type = NavType.StringType },
                 navArgument("contactName") {
