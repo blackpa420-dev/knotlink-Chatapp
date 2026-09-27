@@ -265,6 +265,16 @@ fun BitChatNavHost(
         }
     }
 
+    // Central call-route Back handler. Keeping this at the NavHost level avoids
+    // competing nested handlers from the WebRTC renderer/call screen on some devices.
+    BackHandler(enabled = isCallScreenVisible) {
+        if (navController.previousBackStackEntry != null) {
+            navController.popBackStack()
+        } else {
+            (context as? Activity)?.moveTaskToBack(true)
+        }
+    }
+
     // Double Back To Exit app on root screens (Welcome, Chats home tab, or root)
     val isRootDestination = currentRoute == BitChatRoutes.CHATS ||
             currentRoute == BitChatRoutes.WELCOME ||
