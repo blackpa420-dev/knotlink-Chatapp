@@ -2,7 +2,6 @@ package com.example.ui.screens
 
 import android.Manifest
 import android.content.pm.PackageManager
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -69,10 +68,7 @@ fun VideoCallScreen(
 ) {
     val context = LocalContext.current
 
-    // Back gesture minimizes call and navigates to chat
-    BackHandler {
-        onBackClick()
-    }
+    // Back navigation is handled centrally by BitChatNavHost for call routes.
 
     val callEngineState by (viewModel?.callEngineState ?: remember { MutableStateFlow(CallEngineState()) }).collectAsState()
     val activeCall by (viewModel?.activeCall ?: remember { MutableStateFlow(ActiveCallState()) }).collectAsState()
