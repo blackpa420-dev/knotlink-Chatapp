@@ -114,8 +114,8 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         try {
             initWebRtcInternal()
             val audioDeviceModule = JavaAudioDeviceModule.builder(context)
-                .setUseHardwareAcousticEchoCanceler(true)
-                .setUseHardwareNoiseSuppressor(true)
+                .setUseHardwareAcousticEchoCanceler(false)
+                .setUseHardwareNoiseSuppressor(false)
                 .createAudioDeviceModule()
 
             val builder = PeerConnectionFactory.builder()
