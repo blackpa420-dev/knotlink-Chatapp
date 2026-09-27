@@ -840,6 +840,57 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.updateMessageReadStatus(messageId, !currentIsRead)
     }
 
+    suspend fun syncCallHistory(myUid: String, myUsername: String = "") {
+        if (myUid.isBlank()) return
+        try {
+            val identity = dao.getUserIdentity().firstOrNull()
+            val calls = SupabaseService.getUserCallHistory(
+                userId = myUid,
+                username = myUsername.takeIf { it.isNotBlank() && it != myUid },
+                email = identity?.email?.takeIf { !it.isNullOrBlank() && it != myUid && it != myUsername },
+                limit = 100
+            ).getOrNull().orEmpty()
+
+            for (call in calls) {
+                val incoming = call.receiverId.equals(myUid, ignoreCase = true) ||
+                    call.receiverId.equals(myUsername, ignoreCase = true)
+
+                val otherId = if (incoming) call.callerId else call.receiverId
+                val existingChat = dao.getAllChatsList().firstOrNull { chat ->
+                    chat.participantUids.split(",").map { it.trim() }.any { it.equals(otherId, ignoreCase = true) }
+                }
+
+                val contactName = if (incoming) {
+                    call.callerName.ifBlank { existingChat?.name ?: "Caller" }
+                } else {
+                    existingChat?.name ?: "Call"
+                }
+
+                val ts = call.startedAt
+                val duration = if (call.connectedAt != null && call.endedAt != null) {
+                    ((call.endedAt - call.connectedAt).coerceAtLeast(0L) / 1000L).toInt()
+                } else 0
+
+                val logId = "remote_call_" + call.id
+                dao.insertCallLog(
+                    com.example.data.local.CallLogEntity(
+                        id = logId,
+                        contactId = otherId.ifBlank { call.id },
+                        contactName = contactName,
+                        callType = if (call.callType.equals("video", true)) "VIDEO" else "AUDIO",
+                        direction = if (incoming) "INCOMING" else "OUTGOING",
+                        timestampMillis = ts,
+                        timeString = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(ts)),
+                        durationSeconds = duration,
+                        avatarType = call.callerAvatar?.ifBlank { null } ?: existingChat?.avatarType ?: "default"
+                    )
+                )
+            }
+        } catch (e: Throwable) {
+            android.util.Log.w("BitChatRepo", "Call history sync error: " + e.message)
+        }
+    }
+
     suspend fun prepopulateIfEmpty() {
         val chats = dao.getAllChats().firstOrNull() ?: emptyList()
         val assistantChat = chats.find { it.id == "bitassistant" }
