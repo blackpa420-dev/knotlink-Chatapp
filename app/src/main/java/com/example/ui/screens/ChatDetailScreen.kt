@@ -2187,7 +2187,7 @@ fun ChatDetailScreen(
                                         awaitPointerEventScope {
                                             while (true) {
                                                 val down = awaitFirstDown(requireUnconsumed = false)
-                                                if (System.currentTimeMillis() - lastRecordingFinishedTime < 1500L) {
+                                                if (System.currentTimeMillis() - lastRecordingFinishedTime < 450L) {
                                                     try {
                                                          while (true) {
                                                              val ev = awaitPointerEvent()
@@ -2214,7 +2214,7 @@ fun ChatDetailScreen(
                                                 try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
 
                                                 val holdJob = coroutineScope.launch {
-                                                    delay(90L)
+                                                    delay(75L)
                                                     isHeldRecording = true
                                                     isRecording = true
                                                     isRecordingLocked = false
