@@ -1170,7 +1170,7 @@ fun ChatDetailScreen(
                                     },
                                     // Read state is server-driven; tapping a bubble must
                                     // never toggle the sent-message status by itself.
-                                    onToggleReadStatus = { _, _ -> },
+                                    onToggleReadStatus = null,
                                     onLongClick = {
                                         selectedMessageForAction = msg
                                     },
@@ -2953,7 +2953,7 @@ fun ChatDetailScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.togglePinMessage(chatId, msgToPin)
+                            viewModel.togglePinMessage(chatId, msgToPin, forEveryone = alsoPinForOpponent)
                             if (alsoPinForOpponent) {
                                 val act = if (isUnpinning) "unpinned" else "pinned"
                                 viewModel.sendSystemEvent(chatId, "MESSAGE_PINNED", "📌 A message was $act")
