@@ -2020,7 +2020,7 @@ fun ChatDetailScreen(
                                     isViewOnce = false
                                     recordSeconds = 0
                                     recordDragOffsetX = 0f
-                                    Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                    
                                 },
                                 modifier = Modifier.size(44.dp)
                             ) {
@@ -2299,7 +2299,7 @@ fun ChatDetailScreen(
                                                             isButtonHolding = false
                                                             recordSeconds = 0
                                                             recordDragOffsetX = 0f
-                                                            Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                                            
                                                             break
                                                         }
                                                     }
@@ -2333,7 +2333,7 @@ fun ChatDetailScreen(
                                                             }
                                                             vibrator?.vibrate(android.os.VibrationEffect.createOneShot(80, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
                                                         } catch (_: Exception) {}
-                                                        Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                                        
                                                     } else {
                                                         val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
                                                         if (recFile != null && recFile.exists() && secs >= 1) {
@@ -2343,13 +2343,13 @@ fun ChatDetailScreen(
                                                             }.getOrNull()
                                                             if (!audioUrl.isNullOrBlank()) {
                                                                 val textToSend = if (isViewOnce) {
-                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
                                                                 } else {
                                                                     "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                                                 }
                                                                 viewModel.sendMessage(chatId, textToSend)
                                                             }
-                                                            Toast.makeText(localContext, if (isViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
+                                                            
                                                         } else {
                                                             com.example.util.AudioRecorderManager.cancelRecording()
                                                             if (secs > 0 || holdDuration > 800L) {
@@ -3550,7 +3550,7 @@ fun ChatDetailScreen(
                         IconButton(
                             onClick = {
                                 com.example.util.AudioRecorderManager.cancelRecording()
-                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                
                                 showVoiceRecorderBottomSheet = false
                             },
                             modifier = Modifier
@@ -3622,7 +3622,7 @@ fun ChatDetailScreen(
                                     }.getOrNull()
                                     if (!audioUrl.isNullOrBlank()) {
                                         val textToSend = if (isViewOnce) {
-                                            "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                            "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
                                         } else {
                                             "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                         }
