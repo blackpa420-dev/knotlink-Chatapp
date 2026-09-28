@@ -1975,9 +1975,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 it.status.uppercase() == "RINGING" || it.status.uppercase() == "ACCEPTED"
             }
 
-            // Never fabricate a non-existent session when a real call id was supplied.
-            if (callId.isNotBlank() && liveSession == null) {
-                Log.w("BitChatViewModel", "Notification accept could not resolve live call session: $callId")
+            if (callId.isBlank()) {
+                _incomingCallSession.value = null
+                return@launch
+            }
+
+            // Never revive a terminal/non-existent session from a stale notification.
+            if (liveSession == null) {
+                _incomingCallSession.value = null
+                NotificationHelper.cancelCallNotification(
+                    getApplication<Application>(),
+                    callerName,
+                    callId
+                )
+                Log.w("BitChatViewModel", "Ignoring stale or already-ended call session: $callId")
                 return@launch
             }
 
@@ -2459,30 +2470,46 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         val bridge = ActiveCallBridge.state.value ?: return false
         if (bridge.callId.isBlank() || !bridge.isConnected) return false
 
-        // If this ViewModel already owns the call, do not create or replace a session.
         if (_activeCall.value.isActive && activeCallSessionId == bridge.callId) return true
-
-        // The WebRTC engine is a process singleton, so the media session can remain
-        // alive while CallActivity is replaced by MainActivity. Rehydrate only the
-        // UI/session state; never call startCall() here.
         if (!callEngine.engineState.value.isCallActive) return false
 
-        activeCallSessionId = bridge.callId
-        _activeCall.value = ActiveCallState(
-            isActive = true,
-            isConnected = true,
-            contactId = bridge.peerId,
-            contactName = bridge.peerName,
-            contactAvatar = bridge.peerAvatar,
-            callType = bridge.callType,
-            secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
-                .coerceAtLeast(0L) / 1000L).toInt(),
-            isMuted = false,
-            isSpeaker = callEngine.engineState.value.isSpeakerOn,
-            callStatus = "CONNECTED"
-        )
-        startActiveCallStatusSync(bridge.callId)
-        startCallTimer(bridge.startedAt)
+        // A process/task recreation can leave the local bridge alive while the
+        // remote peer has already ended the call. Never resurrect a terminal
+        // Supabase session as an active UI call.
+        viewModelScope.launch(Dispatchers.IO) {
+            val session = SupabaseService.getCallSession(bridge.callId).getOrNull()
+            val status = session?.status?.uppercase().orEmpty()
+            if (status == "ENDED" || status == "CANCELLED" || status == "DECLINED" || session == null) {
+                ActiveCallBridge.clear(bridge.callId)
+                withContext(Dispatchers.Main.immediate) {
+                    if (activeCallSessionId == bridge.callId) {
+                        activeCallSessionId = null
+                        _activeCall.value = ActiveCallState(isActive = false)
+                    }
+                }
+                return@launch
+            }
+
+            withContext(Dispatchers.Main.immediate) {
+                if (!callEngine.engineState.value.isCallActive) return@withContext
+                activeCallSessionId = bridge.callId
+                _activeCall.value = ActiveCallState(
+                    isActive = true,
+                    isConnected = true,
+                    contactId = bridge.peerId,
+                    contactName = bridge.peerName,
+                    contactAvatar = bridge.peerAvatar,
+                    callType = bridge.callType,
+                    secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
+                        .coerceAtLeast(0L) / 1000L).toInt(),
+                    isMuted = false,
+                    isSpeaker = callEngine.engineState.value.isSpeakerOn,
+                    callStatus = "CONNECTED"
+                )
+                startActiveCallStatusSync(bridge.callId)
+                startCallTimer(bridge.startedAt)
+            }
+        }
         return true
     }
 
