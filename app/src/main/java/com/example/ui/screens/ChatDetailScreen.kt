@@ -7296,14 +7296,17 @@ fun ChatProfileDetailsPage(
                                     else -> Regex("(content://\\S+|file://\\S+|https?://\\S+\\.(?:png|jpe?g|webp)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
                                 }
                                 "Videos" -> when {
-                                    text.contains("[VIDEO_FILE|") -> listOf(text.substringAfter("[VIDEO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
+                                    text.contains("[VIDEO_FILE|") -> listOf(text.substringAfter("[VIDEO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
                                     text.contains("[VIDEO_URL|") -> listOf(text.substringAfter("[VIDEO_URL|").substringBefore("]").trim()).filter { it.isNotBlank() }
-                                    else -> Regex("(https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
+                                    text.contains("[VIDEO_BASE64|") -> listOf(text.substringAfter("[VIDEO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
+                                    else -> Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
                                 }
                                 "Audios" -> when {
-                                    text.contains("[AUDIO_FILE|") -> listOf(text.substringAfter("[AUDIO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
-                                    text.contains("[VIEW_ONCE_AUDIO_FILE|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
-                                    else -> Regex("(https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
+                                    text.contains("[AUDIO_FILE|") -> listOf(text.substringAfter("[AUDIO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
+                                    text.contains("[VIEW_ONCE_AUDIO_FILE|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
+                                    text.contains("[AUDIO_BASE64|") -> listOf(text.substringAfter("[AUDIO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
+                                    text.contains("[VIEW_ONCE_AUDIO_BASE64|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
+                                    else -> Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
                                 }
                                 else -> emptyList()
                             }
