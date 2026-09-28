@@ -2097,20 +2097,22 @@ fun ChatDetailScreen(
                                 onClick = {
                                     try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
                                     val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
+                                    val viewOnceMode = isViewOnce
                                     if (recFile != null && recFile.exists() && secs >= 1) {
                                         val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                        val audioUrl = runCatching {
-                                            viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                        }.getOrNull()
-                                        if (!audioUrl.isNullOrBlank()) {
-                                            val textToSend = if (isViewOnce) {
-                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
-                                            } else {
-                                                "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
+                                        coroutineScope.launch {
+                                            val audioUrl = runCatching {
+                                                viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                            }.getOrNull()
+                                            if (!audioUrl.isNullOrBlank()) {
+                                                val textToSend = if (viewOnceMode) {
+                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                } else {
+                                                    "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
+                                                }
+                                                viewModel.sendMessage(chatId, textToSend)
                                             }
-                                            viewModel.sendMessage(chatId, textToSend)
                                         }
-                                        
                                     } else {
                                         com.example.util.AudioRecorderManager.cancelRecording()
                                         
@@ -2347,20 +2349,22 @@ fun ChatDetailScreen(
                                                         
                                                     } else {
                                                         val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
+                                                        val viewOnceMode = isViewOnce
                                                         if (recFile != null && recFile.exists() && secs >= 1) {
                                                             val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                                            val audioUrl = runCatching {
-                                                                viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                                            }.getOrNull()
-                                                            if (!audioUrl.isNullOrBlank()) {
-                                                                val textToSend = if (isViewOnce) {
-                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
-                                                                } else {
-                                                                    "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
+                                                            coroutineScope.launch {
+                                                                val audioUrl = runCatching {
+                                                                    viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                                                }.getOrNull()
+                                                                if (!audioUrl.isNullOrBlank()) {
+                                                                    val textToSend = if (viewOnceMode) {
+                                                                        "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                                    } else {
+                                                                        "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
+                                                                    }
+                                                                    viewModel.sendMessage(chatId, textToSend)
                                                                 }
-                                                                viewModel.sendMessage(chatId, textToSend)
                                                             }
-                                                            
                                                         } else {
                                                             com.example.util.AudioRecorderManager.cancelRecording()
                                                             if (secs > 0 || holdDuration > 800L) {
@@ -3626,20 +3630,22 @@ fun ChatDetailScreen(
                         IconButton(
                             onClick = {
                                 val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
+                                val viewOnceMode = sheetIsViewOnce
                                 if (recFile != null && recFile.exists() && secs >= 1) {
                                     val formattedDur = String.format("%02d:%02d", secs / 60, secs % 60)
-                                    val audioUrl = runCatching {
-                                        viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                    }.getOrNull()
-                                    if (!audioUrl.isNullOrBlank()) {
-                                        val textToSend = if (isViewOnce) {
-                                            "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
-                                        } else {
-                                            "[AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ Voice Note ($formattedDur)"
+                                    coroutineScope.launch {
+                                        val audioUrl = runCatching {
+                                            viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                        }.getOrNull()
+                                        if (!audioUrl.isNullOrBlank()) {
+                                            val textToSend = if (viewOnceMode) {
+                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                            } else {
+                                                "[AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ Voice Note ($formattedDur)"
+                                            }
+                                            viewModel.sendMessage(chatId, textToSend)
                                         }
-                                        viewModel.sendMessage(chatId, textToSend)
                                     }
-                                    
                                 } else {
                                     com.example.util.AudioRecorderManager.cancelRecording()
                                     
@@ -5966,23 +5972,23 @@ fun InteractiveCallDialog(
 @androidx.compose.runtime.Composable
 private fun rememberProfileMediaUrl(raw: String, kind: String): String {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val value = raw.trim()
+    val trimmedRaw = raw.trim()
 
-    if (value.startsWith("content://") || value.startsWith("file://") ||
-        value.startsWith("/") || value.startsWith("http://") || value.startsWith("https://") ||
-        value.length < 128
-    ) return value
+    if (trimmedRaw.startsWith("content://") || trimmedRaw.startsWith("file://") ||
+        trimmedRaw.startsWith("/") || trimmedRaw.startsWith("http://") || trimmedRaw.startsWith("https://") ||
+        trimmedRaw.length < 128
+    ) return trimmedRaw
 
     val resolved by androidx.compose.runtime.produceState(
-        initialValue = value,
-        key1 = value,
+        initialValue = trimmedRaw,
+        key1 = trimmedRaw,
         key2 = kind
     ) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        this.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val encoded = if (value.startsWith("data:") && value.contains(",")) {
-                    value.substringAfter(",")
-                } else value
+                val encoded = if (trimmedRaw.startsWith("data:") && trimmedRaw.contains(",")) {
+                    trimmedRaw.substringAfter(",")
+                } else trimmedRaw
                 val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
                 val extension = when (kind) {
                     "Videos" -> "mp4"
@@ -5999,7 +6005,7 @@ private fun rememberProfileMediaUrl(raw: String, kind: String): String {
                 file.absolutePath
             } catch (e: Throwable) {
                 android.util.Log.w("ChatProfileMedia", "Failed to materialize profile media: ${e.message}")
-                value
+                trimmedRaw
             }
         }
     }
