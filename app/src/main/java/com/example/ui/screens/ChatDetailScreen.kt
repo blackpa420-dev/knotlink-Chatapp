@@ -904,7 +904,7 @@ fun ChatDetailScreen(
                                 color = Color.Transparent,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(42.dp)
                                     .graphicsLayer {
                                         scaleX = audioScale
                                         scaleY = audioScale
@@ -3286,7 +3286,10 @@ fun ChatDetailScreen(
                         }
 
                         Surface(
-                            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding(),
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .windowInsetsPadding(WindowInsets.navigationBars)
+                                .padding(bottom = 6.dp),
                             color = if (isNightMode) Color(0xFF11131A) else Color.White,
                             shadowElevation = 14.dp,
                             border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0))
@@ -4707,15 +4710,6 @@ fun FigmaMessageBubbleRow(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace
                     )
-
-                    if (message.isEdited) {
-                        Text(
-                            text = " • edited",
-                            color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
-                            fontSize = 10.sp,
-                            fontStyle = FontStyle.Italic
-                        )
-                    }
 
                     if (isUser) {
                         Spacer(modifier = Modifier.width(6.dp))
