@@ -7383,7 +7383,84 @@ fun ChatProfileDetailsPage(
                                                                 Spacer(modifier = Modifier.height(7.dp))
                                                                 Text("Voice note", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                                             }
-                  selectedMediaEntry?.let { entry ->
+                  
+
+                                          }
+                                                    }
+                                                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                                                        IconButton(onClick = { mediaMenuEntry = entry }, modifier = Modifier.size(34.dp)) {
+                                                            Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
+                                                        }
+                                                        DropdownMenu(
+                                                            expanded = mediaMenuEntry == entry,
+                                                            onDismissRequest = { mediaMenuEntry = null }
+                                                        ) {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Open") },
+                                                                onClick = { mediaMenuEntry = null; selectedMediaEntry = entry },
+                                                                leadingIcon = { Icon(Icons.Default.OpenInNew, null) }
+                                                            )
+                                                            DropdownMenuItem(
+                                                                text = { Text("Forward") },
+                                                                onClick = { mediaMenuEntry = null; mediaForwardEntry = entry },
+                                                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
+                                                            )
+                                                            if (kind == "Photos") {
+                                                                DropdownMenuItem(
+                                                                    text = { Text("Save") },
+                                                                    onClick = {
+                                                                        mediaMenuEntry = null
+                                                                        mediaScope.launch {
+                                                                            val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
+                                                                            Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                                                        }
+                                                                    },
+                                                                    leadingIcon = { Icon(Icons.Default.Download, null) }
+                                                                )
+                                                            }
+                                                            DropdownMenuItem(
+                                                                text = { Text("Info") },
+                                                                onClick = { mediaMenuEntry = null; mediaInfoEntry = entry },
+                                                                leadingIcon = { Icon(Icons.Default.Info, null) }
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = mediaMessage.timestampString,
+                                                        color = Color.White,
+                                                        fontSize = 9.sp,
+                                                        maxLines = 1,
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomStart)
+                                                            .padding(7.dp)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(Color.Black.copy(alpha = 0.48f))
+                                                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    )
+                                                }
+                                            }
+                                            repeat(3 - rowItems.size) {
+                                                Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(100.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+selectedMediaEntry?.let { entry ->
         val kind = entry.first
         val mediaUrl = entry.second
         val mediaMessage = entry.third
@@ -7582,81 +7659,6 @@ fun ChatProfileDetailsPage(
                             Icon(Icons.AutoMirrored.Filled.Forward, null, tint = Color.White)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Forward • ${selectedIds.size}", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-                                          }
-                                                    }
-                                                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                                                        IconButton(onClick = { mediaMenuEntry = entry }, modifier = Modifier.size(34.dp)) {
-                                                            Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
-                                                        }
-                                                        DropdownMenu(
-                                                            expanded = mediaMenuEntry == entry,
-                                                            onDismissRequest = { mediaMenuEntry = null }
-                                                        ) {
-                                                            DropdownMenuItem(
-                                                                text = { Text("Open") },
-                                                                onClick = { mediaMenuEntry = null; selectedMediaEntry = entry },
-                                                                leadingIcon = { Icon(Icons.Default.OpenInNew, null) }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text("Forward") },
-                                                                onClick = { mediaMenuEntry = null; mediaForwardEntry = entry },
-                                                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
-                                                            )
-                                                            if (kind == "Photos") {
-                                                                DropdownMenuItem(
-                                                                    text = { Text("Save") },
-                                                                    onClick = {
-                                                                        mediaMenuEntry = null
-                                                                        mediaScope.launch {
-                                                                            val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
-                                                                            Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
-                                                                        }
-                                                                    },
-                                                                    leadingIcon = { Icon(Icons.Default.Download, null) }
-                                                                )
-                                                            }
-                                                            DropdownMenuItem(
-                                                                text = { Text("Info") },
-                                                                onClick = { mediaMenuEntry = null; mediaInfoEntry = entry },
-                                                                leadingIcon = { Icon(Icons.Default.Info, null) }
-                                                            )
-                                                        }
-                                                    }
-                                                    Text(
-                                                        text = mediaMessage.timestampString,
-                                                        color = Color.White,
-                                                        fontSize = 9.sp,
-                                                        maxLines = 1,
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomStart)
-                                                            .padding(7.dp)
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(Color.Black.copy(alpha = 0.48f))
-                                                            .padding(horizontal = 6.dp, vertical = 3.dp)
-                                                    )
-                                                }
-                                            }
-                                            repeat(3 - rowItems.size) {
-                                                Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().height(100.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                            }
                         }
                     }
                 }
