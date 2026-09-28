@@ -28,6 +28,7 @@ object NotificationHelper {
     var activeChatId: String? = null
 
     private val recentlyShownMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val ongoingCallAvatarCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
 
     fun isRecentlyShown(key: String?): Boolean {
         if (key.isNullOrBlank()) return false
