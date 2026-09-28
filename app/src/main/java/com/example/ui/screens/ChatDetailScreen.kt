@@ -1913,31 +1913,41 @@ fun ChatDetailScreen(
                                             fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         )
-                                        Row(
-                                            modifier = Modifier.weight(1f),
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            for (index in 0 until 18) {
-                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72)).toFloat()
-                                                val speaking = recordingAmplitude > 0.035f
-                                                val h = if (speaking) {
-                                                    (5f + (recordingAmplitude * 24f * (0.35f + phase))).coerceIn(5f, 28f)
-                                                } else 5f
-                                                Box(
-                                                    modifier = Modifier
-                                                        .width(3.dp)
-                                                        .height(h.dp)
-                                                        .clip(CircleShape)
-                                                        .background(
-                                                            if (recordDragOffsetX < -120f) Color(0xFFEF4444)
-                                                            else Color(0xFF2563EB).copy(alpha = 0.9f)
-                                                        )
-                                                )
-                                            }
-                                        }
-                                        Text(
-                                            text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
+                                         val waveTransition = rememberInfiniteTransition(label = "record_ecg")
+                                         val wavePhase by waveTransition.animateFloat(
+                                             initialValue = 0f,
+                                             targetValue = 1f,
+                                             animationSpec = infiniteRepeatable(
+                                                 animation = tween(1200, easing = LinearEasing),
+                                                 repeatMode = RepeatMode.Restart
+                                             ),
+                                             label = "record_ecg_phase"
+                                         )
+                                         androidx.compose.foundation.Canvas(
+                                             modifier = Modifier
+                                                 .weight(1f)
+                                                 .height(34.dp)
+                                         ) {
+                                             val path = androidx.compose.ui.graphics.Path()
+                                             val centerY = size.height / 2f
+                                             val strength = if (recordingAmplitude > 0.02f) recordingAmplitude else 0.08f
+                                             val samples = 64
+                                             for (i in 0 until samples) {
+                                                 val t = i / (samples - 1f)
+                                                 val x = t * size.width
+                                                 val phase = t * 3.2f * 6.2831853f + wavePhase * 6.2831853f
+                                                 val pulse = kotlin.math.sin(phase * 2f) * kotlin.math.pow(kotlin.math.abs(kotlin.math.sin(phase)), 3.0).toFloat()
+                                                 val y = centerY - pulse * (4f + strength * 16f)
+                                                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                             }
+                                             drawPath(
+                                                 path = path,
+                                                 brush = Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFDC2626))),
+                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2.dp.toPx())
+                                             )
+                                         }
+                                         Text(
+                                             text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
                                             color = if (recordDragOffsetX < -120f) Color(0xFFEF4444) else animSubTextColor,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
