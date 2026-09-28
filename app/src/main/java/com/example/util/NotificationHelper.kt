@@ -317,7 +317,7 @@ object NotificationHelper {
 
             // Create bulletproof high-priority notification builder
             val builder = NotificationCompat.Builder(context, MSG_CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_stat_knotlink)
                 .setContentTitle(visibleSenderName)
                 .setContentText(cleanPreview)
                 .setColor(0xFF00A884.toInt()) // KnotLink Teal accent
@@ -512,7 +512,7 @@ object NotificationHelper {
         val callSoundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_RINGTONE)
 
         val builder = NotificationCompat.Builder(context, CALL_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_knotlink)
             .setLargeIcon(profileBitmap)
             .setContentTitle(callLabel)
             .setContentText("$callerName • $callLabel")
@@ -678,7 +678,7 @@ object NotificationHelper {
         }
 
         val builder = NotificationCompat.Builder(context, ONGOING_CALL_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_knotlink)
             .setLargeIcon(profileBitmap)
             .setContentTitle(callerName)
             .setContentText(stateText)
