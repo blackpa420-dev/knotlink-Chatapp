@@ -548,9 +548,15 @@ fun ChatsScreen(
                         .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 6.dp)
                         .clip(RoundedCornerShape(22.dp))
                         .background(if (isNightMode) Color(0xFF1B1B1E) else Color(0xFFF1F5F9))
+                        .shadow(
+                            elevation = if (isNightMode) 5.dp else 7.dp,
+                            shape = RoundedCornerShape(22.dp),
+                            ambientColor = if (isNightMode) Color.Black.copy(alpha = 0.22f) else Color(0x220F172A),
+                            spotColor = if (isNightMode) Color.Black.copy(alpha = 0.22f) else Color(0x220F172A)
+                        )
                         .border(
-                            width = 1.5.dp,
-                            color = if (isNightMode) Color(0xFF27272A) else Color(0xFF2563EB),
+                            width = 1.dp,
+                            color = if (isNightMode) Color(0xFF2A2D35) else Color(0xFFD7DEE8),
                             shape = RoundedCornerShape(22.dp)
                         )
                         .clickable { isSearchActive = true }
