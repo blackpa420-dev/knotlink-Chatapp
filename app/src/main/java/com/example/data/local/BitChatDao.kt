@@ -85,6 +85,9 @@ interface BitChatDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC, id ASC")
     fun getMessagesForChat(chatId: String): Flow<List<MessageEntity>>
 
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isDeletedForMe = 0 AND isDeletedForEveryone = 0 ORDER BY timestamp DESC, id DESC LIMIT 1")
+    suspend fun getLatestMessageForChat(chatId: String): MessageEntity?
+
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND text = :text AND timestampString = :timestampString LIMIT 1")
     suspend fun findExistingMessage(chatId: String, text: String, timestampString: String): MessageEntity?
 
