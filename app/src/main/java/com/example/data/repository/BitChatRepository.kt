@@ -1476,12 +1476,11 @@ class BitChatRepository(val dao: BitChatDao) {
             (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
         )
 
-        val existingChatById = dao.getChatById(supaMsg.chatId)
-        val isChatParticipant = existingChatById != null ||
-            (supaMsg.senderId.isNotBlank() && dao.getAllContactsList().any { it.id == supaMsg.senderId || it.name.equals(supaMsg.senderName, ignoreCase = true) })
-
-        if (!isGroupOrBroadcast && !isDirectRecipient && !isChatParticipant) {
-            Log.d("BitChatRepo", "Ignoring 3rd party message not addressed to me: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
+        // Direct messages must pass the recipient check above. Merely having the
+        // chat_id/contact locally is NOT authorization: a malicious or unrelated
+        // message can reuse a known chat_id. Never accept such a message.
+        if (!isGroupOrBroadcast && !isDirectRecipient) {
+            Log.d("BitChatRepo", "Ignoring message not addressed to current user: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
             return MessageEntity(
                 id = 0L,
                 chatId = supaMsg.chatId,
@@ -1720,8 +1719,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
                         (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
                         (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
-                        existingChatMap.containsKey(supaMsg.chatId)
+                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
 
                 if (!isSentByMe && !isReceivedByMe) continue
 
