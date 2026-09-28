@@ -962,8 +962,7 @@ fun PollCreatorDialog(
                 modifier = Modifier
                     .fillMaxSize()
                     .imePadding()
-                    .navigationBarsPadding()
-                    .verticalScroll(pollScrollState)
+                        .verticalScroll(pollScrollState)
                     .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -1521,7 +1520,6 @@ fun ChecklistCreatorDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
-                .navigationBarsPadding()
                 .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
