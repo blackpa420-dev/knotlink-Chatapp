@@ -575,9 +575,47 @@ object NotificationHelper {
         callType: String = "AUDIO",
         peerId: String = "",
         isConnected: Boolean = true,
-        callerAvatarBitmap: android.graphics.Bitmap? = null
+        callerAvatarBitmap: android.graphics.Bitmap? = null,
+        callerAvatarUrl: String = ""
     ) {
         createNotificationChannels(context)
+
+        // Resolve remote profile artwork in the background and update the same
+        // native notification once the bitmap is available.
+        if (callerAvatarBitmap == null &&
+            callerAvatarUrl.startsWith("http", ignoreCase = true) &&
+            callId.isNotBlank()
+        ) {
+            Thread {
+                try {
+                    val connection = (java.net.URL(callerAvatarUrl).openConnection() as java.net.HttpURLConnection).apply {
+                        connectTimeout = 4000
+                        readTimeout = 4000
+                        instanceFollowRedirects = true
+                    }
+                    connection.connect()
+                    val bitmap = connection.inputStream.use {
+                        android.graphics.BitmapFactory.decodeStream(it)
+                    }
+                    connection.disconnect()
+                    if (bitmap != null) {
+                        ongoingCallAvatarCache[callId] = bitmap
+                        showOngoingAudioCallNotification(
+                            context = context,
+                            callerName = callerName,
+                            secondsElapsed = secondsElapsed,
+                            callId = callId,
+                            callType = callType,
+                            peerId = peerId,
+                            isConnected = isConnected,
+                            callerAvatarBitmap = bitmap
+                        )
+                    }
+                } catch (_: Throwable) {
+                    // Keep the already-visible notification with its fallback avatar.
+                }
+            }.start()
+        }
 
         val intent = Intent(context, com.example.CallActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
