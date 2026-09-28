@@ -2093,7 +2093,7 @@ fun ChatDetailScreen(
                                         }.getOrNull()
                                         if (!audioUrl.isNullOrBlank()) {
                                             val textToSend = if (isViewOnce) {
-                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
                                             } else {
                                                 "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                             }
@@ -2343,7 +2343,7 @@ fun ChatDetailScreen(
                                                             }.getOrNull()
                                                             if (!audioUrl.isNullOrBlank()) {
                                                                 val textToSend = if (isViewOnce) {
-                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
                                                                 } else {
                                                                     "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                                                 }
@@ -3624,7 +3624,7 @@ fun ChatDetailScreen(
                                         val textToSend = if (isViewOnce) {
                                             "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
                                         } else {
-                                            "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
+                                            "[AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ Voice Note ($formattedDur)"
                                         }
                                         viewModel.sendMessage(chatId, textToSend)
                                     }
