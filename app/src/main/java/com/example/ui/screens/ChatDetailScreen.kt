@@ -39,6 +39,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -6006,7 +6007,7 @@ fun InteractiveCallDialog(
                                 text = "$chatName is currently disconnected from the KnotLink network.",
                                 color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
                                 fontSize = 12.sp,
-                                textAlign = androidx.compose.ui.text.style.androidx.compose.ui.text.style.TextAlign.Center
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
 
                             Row(
@@ -7100,7 +7101,7 @@ fun ChatProfileDetailsPage(
                                 text = "Leaving will remove you from this group's encrypted channel.",
                                 color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
                                 fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.androidx.compose.ui.text.style.TextAlign.Center
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
