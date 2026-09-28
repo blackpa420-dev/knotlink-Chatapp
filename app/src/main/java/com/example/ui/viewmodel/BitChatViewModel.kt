@@ -3119,6 +3119,7 @@ data class ScannedUser(
     val username: String,
     val bio: String,
     val profession: String,
+    val joinedDate: String = "",
     val mutualGroups: List<String> = emptyList(),
     val avatarType: String = "default",
     val uid: String = ""
