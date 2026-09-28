@@ -447,8 +447,8 @@ object SupabaseRealtimeManager {
 
         // Bound memory for long-running app processes.
         if (processedMessageIds.size > 5000) {
-            val iterator = processedMessageIds.iterator()
-            repeat(1000) { if (iterator.hasNext()) { iterator.next(); iterator.remove() } }
+            val snapshot = processedMessageIds.take(1000)
+            snapshot.forEach { processedMessageIds.remove(it) }
         }
         return false
     }
