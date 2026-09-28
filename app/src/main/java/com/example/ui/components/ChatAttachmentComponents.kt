@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -76,6 +78,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -1471,175 +1475,193 @@ fun ChecklistCreatorDialog(
     val items = remember { mutableStateListOf("Task 1", "Task 2") }
     var newItemText by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val scrollState = rememberScrollState()
 
-    androidx.compose.ui.window.Dialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        sheetState = sheetState,
+        modifier = Modifier.fillMaxHeight(0.92f),
+        containerColor = if (isNightMode) Color(0xFF151821) else Color(0xFFF8FAFC),
+        scrimColor = Color.Black.copy(alpha = 0.48f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
-        Surface(
-            shape = RoundedCornerShape(26.dp),
-            color = if (isNightMode) Color(0xFF1E202B) else Color.White,
-            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.12f) else Color(0xFFE2E8F0)),
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.88f)
+                .fillMaxWidth()
+                .verticalScroll(scrollState)
                 .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .widthIn(max = 44.dp)
+                    .height(5.dp)
+                    .clip(CircleShape)
+                    .background(if (isNightMode) Color.White.copy(alpha = 0.18f) else Color(0xFFD1D9E3))
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "📋 Create Checklist",
-                        fontSize = 18.sp,
+                        "Create Checklist",
+                        fontSize = 21.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isNightMode) Color.White else Color(0xFF0F172A)
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = if (isNightMode) Color.White.copy(0.6f) else Color.Black.copy(0.6f)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Checklist Title") },
-                    placeholder = { Text("e.g. Project Deliverables, Groceries...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF06B6D4),
-                        unfocusedBorderColor = if (isNightMode) Color.White.copy(0.2f) else Color(0xFFCBD5E1),
-                        focusedLabelColor = Color(0xFF06B6D4),
-                        unfocusedLabelColor = if (isNightMode) Color.White.copy(0.6f) else Color(0xFF64748B)
+                    Text(
+                        "Build a shared list everyone can tick off",
+                        fontSize = 12.sp,
+                        color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
+                        modifier = Modifier.padding(top = 3.dp)
                     )
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Items (${items.size}/50)",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isNightMode) Color.White.copy(0.7f) else Color(0xFF64748B),
-                    modifier = Modifier.align(Alignment.Start)
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 220.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(items.size) { idx ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "•",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF06B6D4)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = items[idx],
-                                color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                fontSize = 14.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = { items.removeAt(idx) },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Remove",
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
                 }
-
-                if (items.size < 50) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = newItemText,
-                            onValueChange = { newItemText = it },
-                            placeholder = { Text("Add item...") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF06B6D4),
-                                unfocusedBorderColor = if (isNightMode) Color.White.copy(0.2f) else Color(0xFFCBD5E1)
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(
-                            onClick = {
-                                if (newItemText.isNotBlank()) {
-                                    items.add(newItemText.trim())
-                                    newItemText = ""
-                                }
-                            },
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add Item",
-                                tint = Color(0xFF06B6D4)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                Button(
-                    onClick = {
-                        if (title.isBlank()) {
-                            Toast.makeText(context, "Please enter a checklist title", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        if (items.isEmpty()) {
-                            Toast.makeText(context, "Add at least 1 item", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        val itemsJsonArray = items.mapIndexed { i, txt ->
-                            """{"id":"$i","text":"${txt.replace("\"", "\\\"")}","checked":false,"checkedBy":"","avatar":""}"""
-                        }.joinToString(",")
-                        val payload = """[CHECKLIST_JSON|{"title":"${title.replace("\"", "\\\"")}","items":[$itemsJsonArray]}]"""
-                        onCreateChecklist(payload)
-                    },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF06B6D4)
-                    )
-                ) {
-                    Text("Send Checklist 📋", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, "Close", tint = if (isNightMode) Color.White else Color(0xFF475569))
                 }
             }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Checklist title") },
+                placeholder = { Text("e.g. Groceries, Project tasks…") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF06B6D4),
+                    unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.16f) else Color(0xFFD3DAE4),
+                    focusedLabelColor = Color(0xFF06B6D4),
+                    unfocusedLabelColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
+                    focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White
+                )
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Items", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isNightMode) Color.White else Color(0xFF0F172A))
+                Text(items.size.toString() + "/50", fontSize = 12.sp, color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            items.forEachIndexed { idx, item ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF)),
+                    shadowElevation = if (isNightMode) 0.dp else 1.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(start = 13.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(RoundedCornerShape(9.dp))
+                                .border(1.5.dp, Color(0xFF06B6D4), RoundedCornerShape(9.dp))
+                                .background(if (isNightMode) Color(0xFF06B6D4).copy(alpha = 0.10f) else Color(0xFFECFEFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text((idx + 1).toString(), color = Color(0xFF06B6D4), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(item, color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { if (items.size > 1) items.removeAt(idx) }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.Close, "Remove", tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
+                        }
+                    }
+                }
+            }
+
+            if (items.size < 50) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = newItemText,
+                        onValueChange = { newItemText = it },
+                        placeholder = { Text("Add another item…") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF06B6D4),
+                            unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFD3DAE4),
+                            focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                            unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = {
+                            val clean = newItemText.trim()
+                            if (clean.isNotEmpty() && items.size < 50) {
+                                items.add(clean)
+                                newItemText = ""
+                            }
+                        },
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Color(0xFF06B6D4))
+                    ) {
+                        Icon(Icons.Default.Add, "Add item", tint = Color.White)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Button(
+                onClick = {
+                    if (title.isBlank()) {
+                        Toast.makeText(context, "Please enter a checklist title", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    if (items.isEmpty()) {
+                        Toast.makeText(context, "Add at least 1 item", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    val itemsJsonArray = items.mapIndexed { i, txt ->
+                        JSONObject().apply {
+                            put("id", i.toString())
+                            put("text", txt)
+                            put("checked", false)
+                            put("checkedBy", "")
+                            put("avatar", "")
+                        }
+                    }
+                    val payloadObject = JSONObject().apply {
+                        put("title", title)
+                        put("items", JSONArray(itemsJsonArray))
+                    }
+                    onCreateChecklist("[CHECKLIST_JSON|$payloadObject]")
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(17.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06B6D4))
+            ) {
+                Icon(Icons.Default.CheckBox, null, tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Send Checklist", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
         }
     }
 }
