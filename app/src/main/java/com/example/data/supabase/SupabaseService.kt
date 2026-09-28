@@ -1023,6 +1023,7 @@ object SupabaseService {
 
     suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             if (chatId.isBlank()) return@withContext Result.success(emptyList())
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
             val request = Request.Builder()
@@ -1052,6 +1053,7 @@ object SupabaseService {
         limit: Int = 200
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val ids = mutableListOf(userId)
             if (!username.isNullOrBlank()) {
                 ids.add(username)
@@ -1086,6 +1088,7 @@ object SupabaseService {
 
     suspend fun fetchMessages(chatId: String, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&order=created_at.desc&limit=$limit&select=*"
             val request = Request.Builder()
                 .url(url)
@@ -1120,6 +1123,7 @@ object SupabaseService {
 
     suspend fun fetchUserMessages(userId: String, username: String? = null, email: String? = null, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
+            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val ids = mutableListOf(userId)
             if (!username.isNullOrBlank()) {
                 ids.add(username)
