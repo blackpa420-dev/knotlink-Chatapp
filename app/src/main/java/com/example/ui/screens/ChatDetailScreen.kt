@@ -5473,225 +5473,143 @@ fun VoiceNoteMessageBubble(
         messageText.contains("VIEW_ONCE_OPENED")
     }
 
-    // Parse real audio file path or Base64 string e.g. [AUDIO_BASE64|data|dur] or [AUDIO_FILE|path|dur]
     val (audioData, isBase64) = remember(messageText) {
-        if (messageText.contains("[AUDIO_BASE64|") || messageText.contains("[VIEW_ONCE_AUDIO_BASE64|")) {
-            val parts = messageText.split("|")
-            if (parts.size >= 2) Pair(parts[1].trim(), true) else Pair(null, false)
-        } else if (messageText.contains("[AUDIO_FILE|") || messageText.contains("[VIEW_ONCE_AUDIO_FILE|")) {
-            val parts = messageText.split("|")
-            if (parts.size >= 2) Pair(parts[1].trim(), false) else Pair(null, false)
-        } else if (messageText.contains("/")) {
-            val idx = messageText.indexOf('/')
-            val endIdx = messageText.indexOf(']', idx).let { if (it == -1) messageText.length else it }
-            if (idx != -1) Pair(messageText.substring(idx, endIdx).trim(), false) else Pair(null, false)
-        } else Pair(null, false)
+        when {
+            messageText.contains("[AUDIO_BASE64|") || messageText.contains("[VIEW_ONCE_AUDIO_BASE64|") -> {
+                val parts = messageText.split("|")
+                if (parts.size >= 2) Pair(parts[1].trim(), true) else Pair(null, false)
+            }
+            messageText.contains("[AUDIO_FILE|") || messageText.contains("[VIEW_ONCE_AUDIO_FILE|") -> {
+                val parts = messageText.split("|")
+                if (parts.size >= 2) Pair(parts[1].trim(), false) else Pair(null, false)
+            }
+            else -> Pair(null, false)
+        }
     }
 
-    val mediaPlayer = remember(audioData) { android.media.MediaPlayer() }
+    val mediaPlayer = remember(audioData) { MediaPlayer() }
 
-    DisposableEffect(audioData) {
-        if (!audioData.isNullOrBlank()) {
-            val targetFile: java.io.File? = if (isBase64) {
-                try {
-                    val bytes = android.util.Base64.decode(audioData, android.util.Base64.NO_WRAP)
-                    val cacheFile = java.io.File(context.cacheDir, "recv_voice_${audioData.hashCode()}.m4a")
-                    if (!cacheFile.exists() || cacheFile.length() == 0L) {
-                        cacheFile.writeBytes(bytes)
-                    }
-                    cacheFile
-                } catch (e: Exception) {
-                    android.util.Log.e("VoiceNoteMessageBubble", "Error decoding audio base64: ${e.message}")
-                    null
-                }
+    DisposableEffect(audioData, isBase64) {
+        val targetFile = if (!audioData.isNullOrBlank()) {
+            if (isBase64) {
+                runCatching {
+                    val bytes = android.util.Base64.decode(audioData, android.util.Base64.DEFAULT)
+                    val file = File(context.cacheDir, "voice_${audioData.hashCode()}.m4a")
+                    if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
+                    file
+                }.getOrNull()
             } else {
-                val file = java.io.File(audioData)
-                if (file.exists()) file else null
+                File(audioData).takeIf { it.exists() }
             }
+        } else null
 
-            if (targetFile != null && targetFile.exists()) {
-                try {
-                    mediaPlayer.reset()
-                    mediaPlayer.setDataSource(targetFile.absolutePath)
-                    mediaPlayer.prepare()
-                    val dur = mediaPlayer.duration.toFloat()
-                    if (dur > 0f) totalDurationMs = dur
-                } catch (e: Exception) {
-                    android.util.Log.e("VoiceNoteMessageBubble", "Error preparing audio: ${e.message}")
-                }
+        if (targetFile != null) {
+            runCatching {
+                mediaPlayer.reset()
+                mediaPlayer.setDataSource(targetFile.absolutePath)
+                mediaPlayer.prepare()
+                if (mediaPlayer.duration > 0) totalDurationMs = mediaPlayer.duration.toFloat()
             }
         }
+
         mediaPlayer.setOnCompletionListener {
             isPlaying = false
             currentPositionMs = 0f
-            if (isViewOnce) {
-                onViewOncePlayed?.invoke()
-            }
+            if (isViewOnce) onViewOncePlayed?.invoke()
         }
+
         onDispose {
-            try {
+            runCatching {
                 if (mediaPlayer.isPlaying) mediaPlayer.stop()
                 mediaPlayer.release()
-            } catch (_: Exception) {}
+            }
         }
     }
 
     LaunchedEffect(isPlaying, isDraggingSlider) {
         if (isPlaying && !isDraggingSlider) {
             while (isPlaying) {
-                try {
+                runCatching {
                     if (mediaPlayer.isPlaying) {
                         currentPositionMs = mediaPlayer.currentPosition.toFloat()
-                        val dur = mediaPlayer.duration.toFloat()
-                        if (dur > 0f) totalDurationMs = dur
-                    } else {
-                        isPlaying = false
-                    }
-                } catch (_: Exception) {
-                    isPlaying = false
+                        if (mediaPlayer.duration > 0) totalDurationMs = mediaPlayer.duration.toFloat()
+                    } else isPlaying = false
                 }
-                kotlinx.coroutines.delay(100L)
+                kotlinx.coroutines.delay(80L)
             }
         }
     }
 
-    val bubbleShape = if (isUser) {
-        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
-    } else {
-        RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
-    }
-
-    val parsedDurationStr = remember(messageText) {
-        if (messageText.contains("|")) {
-            val parts = messageText.split("|")
-            val lastPart = parts.last().substringBefore("]")
-            if (lastPart.contains(":")) lastPart else null
-        } else {
-            null
-        }
+    val parsedDuration = remember(messageText) {
+        messageText.substringAfterLast("|", "").substringBefore("]")
+            .takeIf { it.matches(Regex("\\d{2}:\\d{2}")) }
     }
     val curSecs = (currentPositionMs / 1000f).toInt()
     val totSecs = (totalDurationMs / 1000f).toInt()
-    val curTimeStr = String.format("%02d:%02d", curSecs / 60, curSecs % 60)
-    val totTimeStr = parsedDurationStr ?: String.format("%02d:%02d", totSecs / 60, totSecs % 60)
+    val currentTime = String.format("%02d:%02d", curSecs / 60, curSecs % 60)
+    val totalTime = parsedDuration ?: String.format("%02d:%02d", totSecs / 60, totSecs % 60)
+
+    val bubble = if (isUser) Color(0xFF2563EB) else if (isNightMode) Color(0xFF181C24) else Color.White
+    val primary = if (isUser) Color.White else if (isNightMode) Color(0xFFF4F7FB) else Color(0xFF0F172A)
+    val secondary = if (isUser) Color.White.copy(alpha = 0.72f) else if (isNightMode) Color(0xFF9AA5B5) else Color(0xFF64748B)
+    val playSurface = if (isUser) Color.White.copy(alpha = 0.18f) else Color(0xFF2563EB)
+    val shape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 5.dp)
 
     Surface(
-        shape = bubbleShape,
-        color = if (isUser) Color(0xFF2563EB) else if (isNightMode) Color(0xFF1E202B) else Color(0xFFF1F5F9),
-        border = BorderStroke(
-            1.dp,
-            if (isUser) Color.Transparent else if (isNightMode) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1)
-        ),
-        modifier = Modifier
-            .widthIn(min = 210.dp, max = 270.dp)
-            .padding(vertical = 4.dp)
+        shape = shape,
+        color = bubble,
+        border = if (isUser) null else BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE2E8F0)),
+        shadowElevation = if (isNightMode || isUser) 0.dp else 2.dp,
+        modifier = Modifier.widthIn(min = 232.dp, max = 292.dp).padding(vertical = 3.dp)
     ) {
-        Column {
-            if (isViewOnce) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(if (isUser) Color.White.copy(alpha = 0.35f) else Color(0xFF2563EB)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("1", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
-                    }
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Mic, contentDescription = null, tint = if (isUser) Color.White.copy(alpha = 0.9f) else Color(0xFF2563EB), modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (hasBeenPlayedOnce) {
-                            if (isUser) "Opened" else "Opened • Expired"
-                        } else {
-                            "1-Time Voice Note"
-                        },
-                        color = if (isUser) Color.White.copy(alpha = 0.9f) else (if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569)),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text(text = if (isViewOnce) "1-Time Voice" else "Voice message", color = primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
+                Text("1×", color = secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
-
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Play/Pause Button - prominent circular button
+            Spacer(modifier = Modifier.height(7.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isUser)
-                                Color.White.copy(0.25f)
-                            else if (isNightMode)
-                                Color(0xFF2563EB)
-                            else
-                                Color(0xFF0F172A)
-                        )
-                        .clickable(enabled = !hasBeenPlayedOnce) {
-                            if (isPlaying) {
-                                try {
-                                    mediaPlayer.pause()
-                                } catch (_: Exception) {}
-                                isPlaying = false
-                            } else {
-                                try {
-                                    mediaPlayer.start()
-                                    isPlaying = true
-                                } catch (e: Exception) {
-                                    isPlaying = false
-                                }
-                            }
-                        },
+                    modifier = Modifier.size(42.dp).clip(CircleShape).background(playSurface).clickable(enabled = !hasBeenPlayedOnce) {
+                        runCatching {
+                            if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
+                            else { mediaPlayer.start(); isPlaying = true }
+                        }
+                    },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Play/Pause Voice Note",
+                        contentDescription = if (isPlaying) "Pause" else "Play",
                         tint = Color.White,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .offset(x = if (isPlaying) 0.dp else 1.dp)
+                        modifier = Modifier.size(21.dp).offset(x = if (isPlaying) 0.dp else 1.dp)
                     )
                 }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Waveform Beats Bar in center
+                Spacer(modifier = Modifier.width(9.dp))
                 val progress = if (totalDurationMs > 0f) (currentPositionMs / totalDurationMs).coerceIn(0f, 1f) else 0f
                 TelegramAudioWaveformBeats(
                     progress = progress,
                     isUser = isUser,
                     isNightMode = isNightMode,
-                    onSeekFraction = { frac ->
+                    onSeekFraction = { fraction ->
                         if (!hasBeenPlayedOnce) {
-                            val targetMs = frac * totalDurationMs
-                            currentPositionMs = targetMs
-                            try {
-                                mediaPlayer.seekTo(targetMs.toInt())
-                            } catch (_: Exception) {}
+                            val target = (fraction * totalDurationMs).toInt()
+                            runCatching { mediaPlayer.seekTo(target) }
+                            currentPositionMs = target.toFloat()
                         }
                     },
-                    modifier = Modifier
-                        .weight(1f)
-                        .align(Alignment.CenterVertically)
+                    modifier = Modifier.weight(1f)
                 )
-
                 Spacer(modifier = Modifier.width(8.dp))
-
-                // Time Count display with high contrast
-                Text(
-                    text = if (isPlaying) curTimeStr else totTimeStr,
-                    color = if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.align(Alignment.CenterVertically)
-                )
+                Text(text = if (isPlaying) currentTime else totalTime, color = primary, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+            if (isViewOnce && hasBeenPlayedOnce) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Opened • expired", color = secondary, fontSize = 9.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -7291,26 +7209,52 @@ fun ChatProfileDetailsPage(
                         // Shared Media List for Direct Chat
                         fun extractProfileMediaUrls(text: String, tab: String): List<String> {
                             return when (tab) {
-                                "Photos" -> when {
-                                    text.contains("[IMAGE_ALBUM|") -> text.substringAfter("[IMAGE_ALBUM|").substringBefore("]").split(",").map { it.trim() }.filter { it.isNotBlank() }
-                                    text.contains("[IMAGE_ATTACHMENT|") -> listOf(text.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim()).filter { it.isNotBlank() }
-                                    else -> Regex("(content://\\S+|file://\\S+|https?://\\S+\\.(?:png|jpe?g|webp)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
-                                }
-                                "Videos" -> when {
-                                    text.contains("[VIDEO_FILE|") -> listOf(text.substringAfter("[VIDEO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    text.contains("[VIDEO_URL|") -> listOf(text.substringAfter("[VIDEO_URL|").substringBefore("]").trim()).filter { it.isNotBlank() }
-                                    text.contains("[VIDEO_BASE64|") -> listOf(text.substringAfter("[VIDEO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    else -> Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
-                                }
-                                "Audios" -> when {
-                                    text.contains("[AUDIO_FILE|") -> listOf(text.substringAfter("[AUDIO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    text.contains("[VIEW_ONCE_AUDIO_FILE|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    text.contains("[AUDIO_BASE64|") -> listOf(text.substringAfter("[AUDIO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    text.contains("[VIEW_ONCE_AUDIO_BASE64|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_BASE64|").substringBefore("|").trim()).filter { it.isNotBlank() }
-                                    else -> Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
-                                }
+                                "Photos" -> buildList {
+                                    when {
+                                        text.contains("[IMAGE_ALBUM|") -> addAll(text.substringAfter("[IMAGE_ALBUM|").substringBefore("]").split(",").map { it.trim() })
+                                        text.contains("[IMAGE_ATTACHMENT|") -> add(text.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim())
+                                        text.contains("[IMAGE_BASE64|") -> add(text.substringAfter("[IMAGE_BASE64|").substringBefore("|").trim())
+                                        else -> addAll(Regex("(content://\\S+|file://\\S+|https?://\\S+\\.(?:png|jpe?g|webp)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
+                                    }
+                                }.filter { it.isNotBlank() }
+                                "Videos" -> buildList {
+                                    when {
+                                        text.contains("[VIDEO_FILE|") -> add(text.substringAfter("[VIDEO_FILE|").substringBefore("|").trim())
+                                        text.contains("[VIDEO_URL|") -> add(text.substringAfter("[VIDEO_URL|").substringBefore("]").trim())
+                                        text.contains("[VIDEO_BASE64|") -> add(text.substringAfter("[VIDEO_BASE64|").substringBefore("|").trim())
+                                        else -> addAll(Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
+                                    }
+                                }.filter { it.isNotBlank() }
+                                "Audios" -> buildList {
+                                    when {
+                                        text.contains("[AUDIO_FILE|") -> add(text.substringAfter("[AUDIO_FILE|").substringBefore("|").trim())
+                                        text.contains("[VIEW_ONCE_AUDIO_FILE|") -> add(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").trim())
+                                        text.contains("[AUDIO_BASE64|") -> add(text.substringAfter("[AUDIO_BASE64|").substringBefore("|").trim())
+                                        text.contains("[VIEW_ONCE_AUDIO_BASE64|") -> add(text.substringAfter("[VIEW_ONCE_AUDIO_BASE64|").substringBefore("|").trim())
+                                        else -> addAll(Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
+                                    }
+                                }.filter { it.isNotBlank() }
                                 else -> emptyList()
                             }
+                        }
+
+                        fun materializeProfileMediaUrl(raw: String, kind: String): String {
+                            val value = raw.trim()
+                            if (value.startsWith("content://") || value.startsWith("file://") ||
+                                value.startsWith("/") || value.startsWith("http://") || value.startsWith("https://")) return value
+                            if (value.length < 128) return value
+                            return try {
+                                val encoded = if (value.startsWith("data:") && value.contains(",")) value.substringAfter(",") else value
+                                val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                                val extension = when (kind) {
+                                    "Videos" -> "mp4"
+                                    "Audios" -> "m4a"
+                                    else -> "jpg"
+                                }
+                                val file = File(context.cacheDir, "profile_shared_${kind.lowercase()}_${value.hashCode()}.$extension")
+                                if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
+                                file.absolutePath
+                            } catch (_: Throwable) { value }
                         }
 
                         val directSharedItems = remember(chatMessages, selectedPillTab) {
@@ -7347,6 +7291,9 @@ fun ChatProfileDetailsPage(
                                                 val kind = entry.first
                                                 val mediaUrl = entry.second
                                                 val mediaMessage = entry.third
+                                                val displayMediaUrl = remember(mediaUrl, kind) {
+                                                    materializeProfileMediaUrl(mediaUrl, kind)
+                                                }
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
@@ -7361,7 +7308,7 @@ fun ChatProfileDetailsPage(
                                                 ) {
                                                     when (kind) {
                                                         "Photos" -> AsyncImage(
-                                                            model = if (mediaUrl.startsWith("/")) File(mediaUrl) else mediaUrl,
+                                                            model = if (displayMediaUrl.startsWith("/")) File(displayMediaUrl) else displayMediaUrl,
                                                             contentDescription = "Shared photo",
                                                             contentScale = ContentScale.Crop,
                                                             modifier = Modifier.fillMaxSize()
@@ -7471,6 +7418,9 @@ selectedMediaEntry?.let { entry ->
         val kind = entry.first
         val mediaUrl = entry.second
         val mediaMessage = entry.third
+        val displayMediaUrl = remember(entry) {
+            materializeProfileMediaUrl(mediaUrl, kind)
+        }
         var showMediaMenu by remember(entry) { mutableStateOf(false) }
         var audioReady by remember(entry) { mutableStateOf(false) }
         var audioPlaying by remember(entry) { mutableStateOf(false) }
@@ -7479,7 +7429,7 @@ selectedMediaEntry?.let { entry ->
         DisposableEffect(mediaUrl, kind) {
             if (kind == "Audios" && mediaUrl.isNotBlank()) {
                 runCatching {
-                    val uri = if (mediaUrl.startsWith("/")) Uri.fromFile(File(mediaUrl)) else Uri.parse(mediaUrl)
+                    val uri = if (displayMediaUrl.startsWith("/")) Uri.fromFile(File(displayMediaUrl)) else Uri.parse(displayMediaUrl)
                     audioPlayer.setDataSource(context, uri)
                     audioPlayer.setOnPreparedListener { audioReady = true }
                     audioPlayer.setOnCompletionListener { audioPlaying = false }
@@ -7494,7 +7444,7 @@ selectedMediaEntry?.let { entry ->
                 Box(modifier = Modifier.fillMaxSize()) {
                     when (kind) {
                         "Photos" -> AsyncImage(
-                            model = if (mediaUrl.startsWith("/")) File(mediaUrl) else mediaUrl,
+                            model = if (displayMediaUrl.startsWith("/")) File(displayMediaUrl) else displayMediaUrl,
                             contentDescription = "Shared photo preview",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
@@ -7508,7 +7458,7 @@ selectedMediaEntry?.let { entry ->
                         "Videos" -> AndroidView(
                             factory = { ctx ->
                                 VideoView(ctx).apply {
-                                    setVideoURI(if (mediaUrl.startsWith("/")) Uri.fromFile(File(mediaUrl)) else Uri.parse(mediaUrl))
+                                    setVideoURI(if (displayMediaUrl.startsWith("/")) Uri.fromFile(File(displayMediaUrl)) else Uri.parse(displayMediaUrl))
                                     setOnPreparedListener { player -> player.isLooping = false; start() }
                                 }
                             },
