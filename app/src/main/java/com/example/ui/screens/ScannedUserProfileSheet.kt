@@ -195,7 +195,7 @@ fun ScannedUserProfileSheet(
                 } else {
                     runCatching {
                         val parsed = when {
-                            raw.contains("T") -> java.time.Instant.parse(raw).let { java.util.Date.from(it) }
+                            raw.contains("T") -> java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw.take(19))
                             raw.length >= 10 && raw[4] == '-' -> SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(raw.take(10))
                             else -> SimpleDateFormat("dd MMM yyyy", Locale.US).parse(raw)
                         }
