@@ -556,7 +556,14 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentTime = sdf.format(Date())
         val clientMsgId = existingClientMessageId ?: UUID.randomUUID().toString()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
-        val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
+        // Message routing identity must always be the authenticated Supabase Auth UID.
+        // Never fall back to email/random local identity for a protected message row.
+        val authUid = SupabaseService.getCurrentUserId()?.trim().orEmpty()
+        val currentUid = when {
+            authUid.isNotBlank() && isValidUuid(authUid) -> authUid
+            currentIdentity?.supabaseUid?.isNotBlank() == true && isValidUuid(currentIdentity.supabaseUid) -> currentIdentity.supabaseUid
+            else -> throw IllegalStateException("No authenticated Supabase user for message send")
+        }
         val mySenderName = if (isFromUser) {
             currentIdentity?.fullName?.ifBlank { currentIdentity.username.ifBlank { senderName } } ?: senderName
         } else {
