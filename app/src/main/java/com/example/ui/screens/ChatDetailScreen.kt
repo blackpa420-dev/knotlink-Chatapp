@@ -2093,7 +2093,7 @@ fun ChatDetailScreen(
                                         }.getOrNull()
                                         if (!audioUrl.isNullOrBlank()) {
                                             val textToSend = if (isViewOnce) {
-                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
                                             } else {
                                                 "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                             }
@@ -3628,10 +3628,10 @@ fun ChatDetailScreen(
                                         }
                                         viewModel.sendMessage(chatId, textToSend)
                                     }
-                                    Toast.makeText(localContext, if (sheetIsViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
+                                    
                                 } else {
                                     com.example.util.AudioRecorderManager.cancelRecording()
-                                    Toast.makeText(localContext, "Recording too short ⏱️", Toast.LENGTH_SHORT).show()
+                                    
                                 }
                                 showVoiceRecorderBottomSheet = false
                             },
