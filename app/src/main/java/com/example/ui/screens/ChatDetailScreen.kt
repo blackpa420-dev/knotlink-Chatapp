@@ -58,6 +58,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
@@ -3150,7 +3151,7 @@ fun ChatDetailScreen(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Forward message", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = animTextColor)
                                     Text(
-                                        if (selectedForwardChatIds.isEmpty()) "Choose one or more chats" else "\${selectedForwardChatIds.size} selected",
+                                        if (selectedForwardChatIds.isEmpty()) "Choose one or more chats" else "${selectedForwardChatIds.size} selected",
                                         fontSize = 12.sp,
                                         color = if (selectedForwardChatIds.isNotEmpty()) Color(0xFF2563EB) else animSubTextColor
                                     )
@@ -3295,7 +3296,7 @@ fun ChatDetailScreen(
                                     viewModel.forwardMessage(forwardMsg, selectedForwardChatIds.toList())
                                     showForwardSheet = false
                                     messageToForward = null
-                                    Toast.makeText(localContext, "Forwarded to \${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(localContext, "Forwarded to ${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
                                 },
                                 enabled = selectedForwardChatIds.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).height(52.dp),
@@ -3308,7 +3309,7 @@ fun ChatDetailScreen(
                                 Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    if (selectedForwardChatIds.isEmpty()) "Select chats to forward" else "Forward • \${selectedForwardChatIds.size}",
+                                    if (selectedForwardChatIds.isEmpty()) "Select chats to forward" else "Forward • ${selectedForwardChatIds.size}",
                                     color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
                                 )
                             }
