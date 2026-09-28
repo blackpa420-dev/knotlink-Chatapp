@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Locale
 import com.example.R
 import com.example.ui.viewmodel.ScannedUser
 
@@ -184,82 +186,62 @@ fun ScannedUserProfileSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // User Bio Card
+            // Compact public profile metadata: joined date + designation only.
+            val joinedLabel = remember(scannedUser.joinedDate) {
+                val raw = scannedUser.joinedDate.trim()
+                if (raw.isBlank()) {
+                    "Joined since —"
+                } else {
+                    runCatching {
+                        val normalized = raw.take(10)
+                        val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(normalized)
+                        if (parsed != null) SimpleDateFormat("MMMM yyyy", Locale.US).format(parsed)
+                        else raw
+                    }.getOrElse { raw.take(10) }
+                }
+            }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = if (isNightMode) Color(0xFF272732) else Color(0xFFF1F5F9)
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(18.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Text(
-                        text = "ABOUT & BIO",
+                        text = "JOINED SINCE",
                         color = Color(0xFF0284C7),
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = scannedUser.bio,
+                        text = joinedLabel,
                         color = textColor,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "DESIGNATION",
+                        color = Color(0xFF0284C7),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = scannedUser.profession.ifBlank { "KnotLink Member" },
+                        color = subTextColor,
                         fontSize = 13.sp,
-                        lineHeight = 18.sp
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
 
-            if (scannedUser.mutualGroups.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Mutual Groups Section
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Group,
-                            contentDescription = "Mutual Groups",
-                            tint = Color(0xFF10B981),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "MUTUAL GROUPS (${scannedUser.mutualGroups.size})",
-                            color = subTextColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        scannedUser.mutualGroups.forEach { groupName ->
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(
-                                        if (isNightMode) Color(0xFF064E3B).copy(alpha = 0.4f) else Color(0xFFD1FAE5)
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text(
-                                    text = groupName,
-                                    color = if (isNightMode) Color(0xFF34D399) else Color(0xFF065F46),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Primary Action Button: "Message"
             Button(
@@ -289,63 +271,6 @@ fun ScannedUserProfileSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Secondary Actions Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        Toast.makeText(context, "Added ${scannedUser.name} to KnotLink contacts!", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PersonAdd,
-                        contentDescription = "Add Friend",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Add Friend", fontSize = 11.sp, maxLines = 1)
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        Toast.makeText(context, "${scannedUser.name} blocked.", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Block,
-                        contentDescription = "Block",
-                        tint = Color(0xFFEF4444),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Block", color = Color(0xFFEF4444), fontSize = 11.sp, maxLines = 1)
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        Toast.makeText(context, "Report submitted for ${scannedUser.name}.", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ReportProblem,
-                        contentDescription = "Report",
-                        tint = Color(0xFFF59E0B),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Report", color = Color(0xFFF59E0B), fontSize = 11.sp, maxLines = 1)
-                }
-            }
         }
     }
 }
