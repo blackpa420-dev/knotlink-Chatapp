@@ -327,6 +327,15 @@ class CallActivity : FragmentActivity() {
                     builder.setAutoEnterEnabled(true)
                 }
                 setPictureInPictureParams(builder.build())
+                // Clip the PiP content itself as well as the system PiP window.
+                // This matters on OEMs where Surface/Texture content otherwise paints
+                // square corners inside the rounded PiP container.
+                window.decorView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                        outline.setRoundRect(0, 0, view.width, view.height, 18f * resources.displayMetrics.density)
+                    }
+                }
+                window.decorView.clipToOutline = true
                 inPipMode = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     window.setBackgroundDrawableResource(android.R.color.transparent)
