@@ -758,13 +758,19 @@ class BitChatRepository(val dao: BitChatDao) {
             dao.insertMessage(finalSyncedMessage)
 
             // Only after durable persistence succeeds do we fan out the realtime
-            // broadcast. The same clientMsgId/serverMessageId makes this idempotent.
-            SupabaseRealtimeManager.broadcastNewMessage(
-                supaMsg.copy(
-                    id = finalServerId,
-                    timestamp = finalServerTs
+            // broadcast. Realtime is an acceleration path, not message persistence;
+            // a socket/broadcast failure must never crash the sender or invalidate the
+            // already-persisted message.
+            try {
+                SupabaseRealtimeManager.broadcastNewMessage(
+                    supaMsg.copy(
+                        id = finalServerId,
+                        timestamp = finalServerTs
+                    )
                 )
-            )
+            } catch (e: Throwable) {
+                Log.w("BitChatRepository", "Realtime fan-out failed after durable send: ${e.message}")
+            }
 
             // Trigger FCM High Priority Push Notification to recipient
             if (isFromUser && (otherParticipant.isNotBlank() || chatId.isNotBlank())) {
