@@ -190,7 +190,8 @@ fun VideoCallScreen(
                         setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                         // Fixed-size hardware scaling is documented by WebRTC as potentially
                         // buggy on some devices. Keep the remote renderer dynamically sized.
-                        setEnableHardwareScaler(false)
+                        setEnableHardwareScaler(true)
+                        setFpsReduction(30f)
                         disableFpsReduction()
                         setMirror(false)
                         viewModel.callEngine.attachRemoteVideoSink(this)
