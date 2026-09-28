@@ -993,16 +993,18 @@ fun PollCreatorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                         focusedTextColor = textColor,
-                         unfocusedTextColor = textColor,
-                         focusedContainerColor = fieldBg,
-                         unfocusedContainerColor = fieldBg,
-                         focusedBorderColor = Color(0xFF2563EB),
-                         unfocusedBorderColor = fieldBorder,
-                         focusedLabelColor = Color(0xFF2563EB),
-                         unfocusedLabelColor = subTextColor,
-                         cursorColor = Color(0xFF2563EB)
-                     )
+                        focusedTextColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedContainerColor = fieldBg,
+                        unfocusedContainerColor = fieldBg,
+                        focusedBorderColor = Color(0xFF2563EB),
+                        unfocusedBorderColor = fieldBorder,
+                        focusedLabelColor = Color(0xFF2563EB),
+                        unfocusedLabelColor = subTextColor,
+                        cursorColor = Color(0xFF2563EB)
+                    )
+                )
+
                         Switch(
                             checked = allowMultipleChoices,
                             onCheckedChange = { allowMultipleChoices = it },
@@ -1550,16 +1552,43 @@ fun ChecklistCreatorDialog(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                     focusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                     unfocusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                     focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                     unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                     focusedBorderColor = Color(0xFF06B6D4),
-                     unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.16f) else Color(0xFFD3DAE4),
-                     focusedLabelColor = Color(0xFF06B6D4),
-                     unfocusedLabelColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
-                     cursorColor = Color(0xFF06B6D4)
-                 ) {
+                    focusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
+                    unfocusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
+                    focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    focusedBorderColor = Color(0xFF06B6D4),
+                    unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.16f) else Color(0xFFD3DAE4),
+                    focusedLabelColor = Color(0xFF06B6D4),
+                    unfocusedLabelColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
+                    cursorColor = Color(0xFF06B6D4)
+                )
+            )
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Items", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isNightMode) Color.White else Color(0xFF0F172A))
+                Text(items.size.toString() + "/50", fontSize = 12.sp, color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (items.isEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF)),
+                    shadowElevation = 0.dp
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Icon(Icons.Default.CheckBoxOutlineBlank, contentDescription = null, tint = Color(0xFF06B6D4), modifier = Modifier.size(26.dp))
                         Spacer(modifier = Modifier.height(6.dp))
                         Text("No items yet", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
