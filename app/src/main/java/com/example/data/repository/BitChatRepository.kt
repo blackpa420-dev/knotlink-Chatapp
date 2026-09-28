@@ -1402,12 +1402,14 @@ class BitChatRepository(val dao: BitChatDao) {
                 opponentName = resolvedOpponentName.ifBlank { supaMsg.receiverId },
                 opponentAvatar = resolvedOpponentAvatar
             )
-            val updatedChat = chat.copy(
-                lastMessage = msgText,
-                timeString = timeStr,
-                lastUpdated = supaMsg.timestamp
-            )
-            dao.insertChats(listOf(updatedChat))
+            if (supaMsg.timestamp >= chat.lastUpdated) {
+                val updatedChat = chat.copy(
+                    lastMessage = msgText,
+                    timeString = timeStr,
+                    lastUpdated = supaMsg.timestamp
+                )
+                dao.insertChats(listOf(updatedChat))
+            }
             return updatedEntity
         }
 
@@ -1568,15 +1570,17 @@ class BitChatRepository(val dao: BitChatDao) {
             } catch (_: Exception) {}
         }
 
-        val updatedChat = targetChat.copy(
-            name = if (resolvedSenderName.isNotBlank() && resolvedSenderName != "Contact" && resolvedSenderName != "User") resolvedSenderName else targetChat.name,
-            avatarType = if (resolvedSenderAvatar.isNotBlank() && resolvedSenderAvatar != "default") resolvedSenderAvatar else targetChat.avatarType,
-            lastMessage = msgText,
-            timeString = timeStr,
-            unreadCount = if (isChatOpen) 0 else targetChat.unreadCount + 1,
-            lastUpdated = supaMsg.timestamp
-        )
-        dao.insertChats(listOf(updatedChat))
+        if (supaMsg.timestamp >= targetChat.lastUpdated) {
+            val updatedChat = targetChat.copy(
+                name = if (resolvedSenderName.isNotBlank() && resolvedSenderName != "Contact" && resolvedSenderName != "User") resolvedSenderName else targetChat.name,
+                avatarType = if (resolvedSenderAvatar.isNotBlank() && resolvedSenderAvatar != "default") resolvedSenderAvatar else targetChat.avatarType,
+                lastMessage = msgText,
+                timeString = timeStr,
+                unreadCount = if (isChatOpen) 0 else targetChat.unreadCount + 1,
+                lastUpdated = supaMsg.timestamp
+            )
+            dao.insertChats(listOf(updatedChat))
+        }
 
         return savedEntity
     }
