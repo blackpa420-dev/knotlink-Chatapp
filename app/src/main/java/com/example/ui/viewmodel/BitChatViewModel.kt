@@ -2320,17 +2320,35 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
 
-                var resolvedAvatar = currentIdentity?.avatarPath ?: ""
-                val resolvedReceiverId = if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
+                // IMPORTANT: this avatar belongs to the REMOTE PEER, never the
+                // current user. Do not fall back to my own avatar here, otherwise
+                // both devices can show the caller's photo in the native notification.
+                var resolvedAvatar = ""
+                var resolvedReceiverId = contactId
+
+                if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
                     val chat = repository.getChatById(contactId)
-                    val uids = chat?.participantUids?.split(",")?.map { it.trim() }?.filter { it != myUid && it.isNotBlank() }
-                    uids?.firstOrNull() ?: contactId
+                    val remoteUid = chat?.participantUids
+                        ?.split(",")
+                        ?.map { it.trim() }
+                        ?.firstOrNull { it != myUid && it.isNotBlank() }
+
+                    if (!remoteUid.isNullOrBlank()) {
+                        resolvedReceiverId = remoteUid
+                        resolvedAvatar = SupabaseService.getProfile(remoteUid)
+                            .getOrNull()
+                            ?.avatarUrl
+                            .orEmpty()
+                    }
                 } else {
                     val prof = SupabaseService.getProfile(contactId).getOrNull()
                         ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
                         ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
-                    if (prof != null) resolvedAvatar = prof.avatarUrl ?: resolvedAvatar
-                    prof?.id?.ifBlank { contactId } ?: contactId
+
+                    if (prof != null) {
+                        resolvedReceiverId = prof.id.ifBlank { contactId }
+                        resolvedAvatar = prof.avatarUrl.orEmpty()
+                    }
                 }
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
