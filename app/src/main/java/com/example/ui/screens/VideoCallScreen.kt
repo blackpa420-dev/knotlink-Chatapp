@@ -212,7 +212,8 @@ fun VideoCallScreen(
                             init(eglCtx, null)
                         }
                         setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        setEnableHardwareScaler(false)
+                        setEnableHardwareScaler(true)
+                        setFpsReduction(30f)
                         disableFpsReduction()
                         setMirror(isFrontCamera)
                         viewModel.callEngine.attachLocalVideoSink(this)
