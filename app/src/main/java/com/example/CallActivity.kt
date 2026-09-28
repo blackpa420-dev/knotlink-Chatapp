@@ -43,6 +43,20 @@ import com.example.util.PermissionUtils
  */
 class CallActivity : FragmentActivity() {
 
+    private val remoteCallEndedReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val endedId = intent?.getStringExtra("call_id") ?: intent?.getStringExtra("chat_id")
+            if (endedId.isNullOrBlank() || endedId == callId) {
+                if (::viewModel.isInitialized) {
+                    viewModel.handleRemoteCallEnded(
+                        callerName = intent?.getStringExtra("caller_name"),
+                        callId = endedId
+                    )
+                }
+            }
+        }
+    }
+
     private lateinit var viewModel: BitChatViewModel
 
     private var callId: String = ""
@@ -121,6 +135,10 @@ class CallActivity : FragmentActivity() {
             "AUDIO"
         }
 
+        if (callType == "VIDEO") {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+
         try {
             SupabaseService.init(this)
             NotificationHelper.createNotificationChannels(this)
@@ -128,6 +146,16 @@ class CallActivity : FragmentActivity() {
         }
 
         viewModel = ViewModelProvider(this)[BitChatViewModel::class.java]
+
+        try {
+            val filter = android.content.IntentFilter("com.knotlink.CALL_ENDED")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(remoteCallEndedReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(remoteCallEndedReceiver, filter)
+            }
+        } catch (_: Throwable) {}
 
         setContent {
             val activeCall by viewModel.activeCall.collectAsState()
@@ -277,6 +305,11 @@ class CallActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+    }
+
+    override fun onDestroy() {
+        try { unregisterReceiver(remoteCallEndedReceiver) } catch (_: Throwable) {}
+        super.onDestroy()
     }
 
     private fun enterVideoPipOrBackground() {
