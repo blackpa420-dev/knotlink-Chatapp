@@ -229,11 +229,14 @@ object SupabaseRealtimeManager {
                         val payload = json.optJSONObject("payload")
 
                         // 1. Handle Broadcast typing & instant new_message events
-                        val isBroadcast = event == "broadcast" || event == "typing" || event == "new_message" || event == "message_mutation" ||
-                            (payload != null && (payload.optString("type") == "broadcast" ||
+                        // Message content is delivered only through RLS-gated
+                        // postgres_changes/polling. Public broadcasts are limited to
+                        // non-sensitive typing state.
+                        val isBroadcast = event == "typing" ||
+                            (payload != null && (
                                 payload.optString("event") == "typing" ||
-                                payload.optString("event") == "new_message" ||
-                                payload.optString("event") == "message_mutation"))
+                                payload.optString("type") == "typing"
+                            ))
 
                         if (isBroadcast) {
                             val innerPayload = payload?.optJSONObject("payload") ?: payload ?: json
@@ -550,41 +553,10 @@ object SupabaseRealtimeManager {
     }
 
     fun broadcastMessageMutation(msg: SupabaseMessage, mutation: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) connectWebSocket()
-
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "message_mutation")
-                    put("payload", JSONObject().apply {
-                        put("mutation", mutation)
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("status", msg.status)
-                        put("message_type", msg.messageType)
-                        put("is_edited", msg.isEdited)
-                        put("is_deleted_for_everyone", msg.isDeletedForEveryone)
-                        put("is_pinned", msg.isPinned)
-                        put("client_msg_id", msg.clientMsgId ?: "")
-                    })
-                }
-                val packet = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", "mutation_${System.currentTimeMillis()}")
-                }
-                webSocket?.send(packet.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending message mutation broadcast: ${e.message}")
-            }
-        }
+        // Message mutations (READ/EDIT/PIN/DELETE) are persisted in Postgres and
+        // delivered through the same RLS-gated postgres_changes path. Never put
+        // message metadata/content onto a public broadcast topic.
+        Log.d(TAG, "Skipping public message mutation broadcast for ${msg.id} (${mutation})")
     }
 
     fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {
