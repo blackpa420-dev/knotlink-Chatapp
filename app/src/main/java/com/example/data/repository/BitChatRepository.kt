@@ -793,7 +793,16 @@ class BitChatRepository(val dao: BitChatDao) {
             val finalSyncedMessage = syncedMessage.copy(
                 serverMessageId = finalServerId
             )
-            dao.insertMessage(finalSyncedMessage)
+            // Re-assert the chat preview after network/realtime reconciliation so the
+            // inbox always reflects the message that was just sent.
+            val refreshedChat = dao.getChatById(targetChatId)
+            if (refreshedChat != null && refreshedChat.lastUpdated <= serverTs) {
+                dao.insertChats(listOf(refreshedChat.copy(
+                    lastMessage = previewText,
+                    timeString = currentTime,
+                    lastUpdated = serverTs
+                )))
+            }
 
             return finalSyncedMessage
         } catch (e: Exception) {
