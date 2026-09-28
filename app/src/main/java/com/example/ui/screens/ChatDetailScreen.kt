@@ -5962,6 +5962,50 @@ fun InteractiveCallDialog(
     }
 }
 
+
+@androidx.compose.runtime.Composable
+private fun rememberProfileMediaUrl(raw: String, kind: String): String {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val value = raw.trim()
+
+    if (value.startsWith("content://") || value.startsWith("file://") ||
+        value.startsWith("/") || value.startsWith("http://") || value.startsWith("https://") ||
+        value.length < 128
+    ) return value
+
+    val resolved by androidx.compose.runtime.produceState(
+        initialValue = value,
+        key1 = value,
+        key2 = kind
+    ) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val encoded = if (value.startsWith("data:") && value.contains(",")) {
+                    value.substringAfter(",")
+                } else value
+                val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                val extension = when (kind) {
+                    "Videos" -> "mp4"
+                    "Audios" -> "m4a"
+                    else -> "jpg"
+                }
+                val file = java.io.File(
+                    context.cacheDir,
+                    "profile_shared_" + kind.lowercase() + "_" + raw.hashCode() + "." + extension
+                )
+                if (!file.exists() || file.length() != bytes.size.toLong()) {
+                    file.outputStream().use { it.write(bytes) }
+                }
+                file.absolutePath
+            } catch (e: Throwable) {
+                android.util.Log.w("ChatProfileMedia", "Failed to materialize profile media: ${e.message}")
+                value
+            }
+        }
+    }
+    return resolved
+}
+
 @Composable
 fun ChatProfileDetailsPage(
     chatId: String,
@@ -5983,24 +6027,6 @@ fun ChatProfileDetailsPage(
     var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
     var mediaResolution by remember { mutableStateOf("Original") }
 
-    fun materializeProfileMediaUrl(raw: String, kind: String): String {
-        val value = raw.trim()
-        if (value.startsWith("content://") || value.startsWith("file://") ||
-            value.startsWith("/") || value.startsWith("http://") || value.startsWith("https://")) return value
-        if (value.length < 128) return value
-        return try {
-            val encoded = if (value.startsWith("data:") && value.contains(",")) value.substringAfter(",") else value
-            val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-            val extension = when (kind) {
-                "Videos" -> "mp4"
-                "Audios" -> "m4a"
-                else -> "jpg"
-            }
-            val file = File(context.cacheDir, "profile_shared_${kind.lowercase()}_${value.hashCode()}.$extension")
-            if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
-            file.absolutePath
-        } catch (_: Throwable) { value }
-    }
     val isGroupChat = chatName.contains("[Group]", ignoreCase = true) || chatId.startsWith("group_")
 
     val groupAvatarMap by viewModel.groupAvatarMap.collectAsState()
