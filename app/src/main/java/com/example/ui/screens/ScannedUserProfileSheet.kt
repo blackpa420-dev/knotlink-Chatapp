@@ -191,13 +191,15 @@ fun ScannedUserProfileSheet(
             val joinedLabel = remember(scannedUser.joinedDate) {
                 val raw = scannedUser.joinedDate.trim()
                 if (raw.isBlank()) {
-                    "Joined since —"
+                    "—"
                 } else {
                     runCatching {
-                        val normalized = raw.take(10)
-                        val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(normalized)
-                        if (parsed != null) SimpleDateFormat("MMMM yyyy", Locale.US).format(parsed)
-                        else raw
+                        val parsed = when {
+                            raw.contains("T") -> java.time.Instant.parse(raw).let { java.util.Date.from(it) }
+                            raw.length >= 10 && raw[4] == '-' -> SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(raw.take(10))
+                            else -> SimpleDateFormat("dd MMM yyyy", Locale.US).parse(raw)
+                        }
+                        if (parsed != null) SimpleDateFormat("dd/MM/yyyy", Locale.US).format(parsed) else raw.take(10)
                     }.getOrElse { raw.take(10) }
                 }
             }
@@ -211,7 +213,7 @@ fun ScannedUserProfileSheet(
             ) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Text(
-                        text = "JOINED SINCE",
+                        text = "MEMBER SINCE",
                         color = Color(0xFF0284C7),
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
