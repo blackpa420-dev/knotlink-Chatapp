@@ -1462,18 +1462,19 @@ class BitChatRepository(val dao: BitChatDao) {
         val isGroupOrBroadcast = supaMsg.receiverId.equals("all", ignoreCase = true) ||
             supaMsg.receiverId.equals("group", ignoreCase = true) ||
             supaMsg.chatId == "global" ||
-            supaMsg.chatId.startsWith("group_") ||
-            supaMsg.messageType == "SYSTEM_EVENT"
+            supaMsg.chatId.startsWith("group_")
 
         val myFullName = currentIdentity?.fullName?.trim()?.lowercase() ?: ""
 
         val isDirectRecipient = (
-            supaMsg.receiverId.isBlank() ||
+            supaMsg.receiverId.isNotBlank() &&
+            (
             supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
             (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
             (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
             (myFullName.isNotBlank() && supaMsg.receiverId.equals(myFullName, ignoreCase = true)) ||
             (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
+            )
         )
 
         // Direct messages must pass the recipient check above. Merely having the
