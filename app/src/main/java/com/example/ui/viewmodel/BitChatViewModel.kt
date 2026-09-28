@@ -3127,15 +3127,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     ) {
         repository.reportMemberOrGroup(chatId, targetUid, reason, details)
     }
-
-    suspend fun uploadMedia(
-        chatId: String,
-        fileUri: android.net.Uri,
-        mimeType: String,
-        context: android.content.Context
-    ): String {
-        return repository.uploadMedia(chatId, fileUri, mimeType, context = context)
-    }
 }
 
 sealed interface ScannedUserResult {
