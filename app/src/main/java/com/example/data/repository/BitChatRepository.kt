@@ -2133,7 +2133,15 @@ class BitChatRepository(val dao: BitChatDao) {
     ): String {
         val bytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("Cannot read file")
-        val ext = if (mimeType.contains("png")) "png" else "jpg"
+        val ext = when {
+            mimeType.contains("png", ignoreCase = true) -> "png"
+            mimeType.contains("webp", ignoreCase = true) -> "webp"
+            mimeType.contains("mp4", ignoreCase = true) -> "mp4"
+            mimeType.contains("quicktime", ignoreCase = true) -> "mov"
+            mimeType.contains("audio", ignoreCase = true) || mimeType.contains("m4a", ignoreCase = true) -> "m4a"
+            mimeType.contains("pdf", ignoreCase = true) -> "pdf"
+            else -> "bin"
+        }
         val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.$ext"
         return SupabaseService.uploadChatMedia(fileName, bytes, mimeType).getOrThrow()
     }
