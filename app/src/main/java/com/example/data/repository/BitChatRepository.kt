@@ -715,7 +715,7 @@ class BitChatRepository(val dao: BitChatDao) {
 
             val supaMsg = SupabaseMessage(
                 id = serverMsgId,
-                chatId = chatId,
+                chatId = targetChatId,
                 senderId = currentUid,
                 senderName = mySenderName,
                 receiverId = otherParticipant,
@@ -1213,8 +1213,39 @@ class BitChatRepository(val dao: BitChatDao) {
         return newChat
     }
 
+    /** Rebuild persisted inbox previews from the actual newest Room message. */
+    private suspend fun refreshAllDirectChatPreviews() {
+        val chats = dao.getAllChatsList()
+        val updates = mutableListOf<ChatEntity>()
+        for (chat in chats) {
+            if (chat.chatType == "GROUP" || chat.category == "Group" || chat.id.startsWith("group_")) continue
+            val latest = dao.getLatestMessageForChat(chat.id) ?: continue
+            val latestPreview = when {
+                latest.messageType == "SYSTEM_EVENT" -> latest.text
+                latest.text.contains("[AUDIO_BASE64|") || latest.text.contains("[AUDIO_FILE|") || latest.text.contains("[VIEW_ONCE_AUDIO") -> "🎙️ Voice message"
+                latest.text.contains("[IMAGE_ATTACHMENT|") || latest.text.contains("[IMAGE_ALBUM|") || latest.text.contains("[IMAGE_BASE64|") -> "🖼️ Photo"
+                latest.text.contains("[VIDEO_FILE|") || latest.text.contains("[VIDEO_URL|") || latest.text.contains("[VIDEO_BASE64|") -> "🎥 Video"
+                latest.text.contains("[DOCUMENT_FILE|") -> "📄 Document"
+                else -> latest.text
+            }
+            val latestTime = if (latest.timestamp > 0L) {
+                SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(latest.timestamp))
+            } else chat.timeString
+            val corrected = chat.copy(
+                lastMessage = latestPreview,
+                timeString = latestTime,
+                lastUpdated = maxOf(chat.lastUpdated, latest.timestamp)
+            )
+            if (corrected.lastMessage != chat.lastMessage || corrected.timeString != chat.timeString || corrected.lastUpdated != chat.lastUpdated) {
+                updates += corrected
+            }
+        }
+        if (updates.isNotEmpty()) dao.insertChats(updates)
+    }
+
     suspend fun deduplicateCopyChats() = withContext(Dispatchers.IO) {
         try {
+            refreshAllDirectChatPreviews()
             val allChats = dao.getAllChatsList()
             if (allChats.size <= 1) return@withContext
 
