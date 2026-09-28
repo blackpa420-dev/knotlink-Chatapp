@@ -7216,7 +7216,21 @@ fun ChatProfileDetailsPage(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium
                                         )
-                                        val joinedDateStr = if (partnerProfile?.joinedDate?.isNotBlank() == true) partnerProfile!!.joinedDate else "2026"
+                                        val joinedDateStr = remember(partnerProfile?.joinedDate) {
+                                            val raw = partnerProfile?.joinedDate?.trim().orEmpty()
+                                            if (raw.isBlank()) {
+                                                "—"
+                                            } else {
+                                                runCatching {
+                                                    val parsed = when {
+                                                        raw.contains("T") -> java.time.Instant.parse(raw).let { java.util.Date.from(it) }
+                                                        raw.length >= 10 && raw[4] == '-' -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(raw.take(10))
+                                                        else -> java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).parse(raw)
+                                                    }
+                                                    if (parsed != null) java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.US).format(parsed) else raw.take(10)
+                                                }.getOrElse { raw.take(10) }
+                                            }
+                                        }
                                         Text(
                                             text = joinedDateStr,
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
