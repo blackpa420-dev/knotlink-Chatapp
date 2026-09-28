@@ -61,15 +61,8 @@ object SupabaseService {
         .addInterceptor { chain ->
             val request = chain.request()
             var response = chain.proceed(request)
-            // If response is 401 Unauthorized (e.g. expired JWT), retry with ANON_KEY
-            if (response.code == 401) {
-                response.close()
-                val retryRequest = request.newBuilder()
-                    .removeHeader("Authorization")
-                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                    .build()
-                response = chain.proceed(retryRequest)
-            }
+            // Never downgrade an authenticated request to the public anon role.
+            // Protected tables (messages) must fail closed when the JWT is invalid.
             response
         }
         .build()
