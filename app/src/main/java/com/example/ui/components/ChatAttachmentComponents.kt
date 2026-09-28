@@ -1005,6 +1005,25 @@ fun PollCreatorDialog(
                     )
                 )
 
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isNightMode) Color(0xFF272732) else Color(0xFFF1F5F9),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { allowMultipleChoices = !allowMultipleChoices }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Multiple choices",
+                            color = textColor,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                         Switch(
                             checked = allowMultipleChoices,
                             onCheckedChange = { allowMultipleChoices = it },
