@@ -692,19 +692,12 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         try {
+            // The REST insert is the durable source of truth. Never broadcast or
+            // notify before persistence succeeds, otherwise an offline receiver can
+            // permanently miss a message when the database write fails.
             val serverMsgId = "msg_" + UUID.randomUUID().toString().take(8)
-            val serverTs = System.currentTimeMillis()
+            val localServerTs = System.currentTimeMillis()
 
-            val syncedMessage = message.copy(
-                id = localRowId,
-                serverMessageId = serverMsgId,
-                serverTimestamp = serverTs,
-                syncStatus = "SYNCED",
-                deliveryState = "SENT"
-            )
-            dao.insertMessage(syncedMessage)
-
-            // Send to Supabase REST
             val remoteText = if (!replySnippet.isNullOrBlank() || !replySenderName.isNullOrBlank()) {
                 val encSender = java.net.URLEncoder.encode(replySenderName ?: "User", "UTF-8")
                 val encSnippet = java.net.URLEncoder.encode(replySnippet ?: "", "UTF-8")
@@ -720,7 +713,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 senderName = mySenderName,
                 receiverId = otherParticipant,
                 text = remoteText,
-                timestamp = serverTs,
+                timestamp = localServerTs,
                 isRead = false,
                 replyToId = replyToMessageId,
                 messageType = messageType,
@@ -729,15 +722,49 @@ class BitChatRepository(val dao: BitChatDao) {
                 clientMsgId = clientMsgId
             )
 
-            // INSTANT DELIVER: Broadcast message directly over WebSocket (<50ms latency)
-            SupabaseRealtimeManager.broadcastNewMessage(supaMsg)
-
-            val sendResult = SupabaseService.sendMessage(supaMsg).getOrNull()
-            val finalServerId = sendResult?.id?.ifBlank { serverMsgId } ?: serverMsgId
-
-            if (finalServerId.isNotBlank()) {
-                dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
+            var persistedMessage: SupabaseMessage? = null
+            var lastSendError: Throwable? = null
+            repeat(3) { attempt ->
+                if (persistedMessage != null) return@repeat
+                try {
+                    val result = SupabaseService.sendMessage(supaMsg)
+                    if (result.isSuccess) {
+                        persistedMessage = result.getOrNull() ?: supaMsg
+                    } else {
+                        lastSendError = result.exceptionOrNull() ?: Exception("Message persistence failed")
+                        if (attempt < 2) kotlinx.coroutines.delay(300L * (attempt + 1))
+                    }
+                } catch (e: Throwable) {
+                    lastSendError = e
+                    if (attempt < 2) kotlinx.coroutines.delay(300L * (attempt + 1))
+                }
             }
+
+            val persisted = persistedMessage
+                ?: throw (lastSendError ?: Exception("Message could not be persisted"))
+
+            val finalServerId = persisted.id.ifBlank { serverMsgId }
+            val finalServerTs = persisted.timestamp.takeIf { it > 0L } ?: localServerTs
+            dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
+
+            val finalSyncedMessage = message.copy(
+                id = localRowId,
+                serverMessageId = finalServerId,
+                serverTimestamp = finalServerTs,
+                timestamp = finalServerTs,
+                syncStatus = "SYNCED",
+                deliveryState = "SENT"
+            )
+            dao.insertMessage(finalSyncedMessage)
+
+            // Only after durable persistence succeeds do we fan out the realtime
+            // broadcast. The same clientMsgId/serverMessageId makes this idempotent.
+            SupabaseRealtimeManager.broadcastNewMessage(
+                supaMsg.copy(
+                    id = finalServerId,
+                    timestamp = finalServerTs
+                )
+            )
 
             // Trigger FCM High Priority Push Notification to recipient
             if (isFromUser && (otherParticipant.isNotBlank() || chatId.isNotBlank())) {
