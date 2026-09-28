@@ -168,6 +168,7 @@ class MainActivity : FragmentActivity() {
         bitChatViewModel = vm
 
         val activeCallState by vm.activeCall.collectAsState()
+        val isNightMode by vm.isNightMode.collectAsState()
         val bridgeCallState by ActiveCallBridge.state.collectAsState()
         androidx.compose.runtime.LaunchedEffect(activeCallState.isActive) {
           updateLockScreenFlags(activeCallState.isActive)
@@ -189,7 +190,7 @@ class MainActivity : FragmentActivity() {
           }
         }
 
-        BitChatTheme {
+        BitChatTheme(darkTheme = isNightMode) {
           Surface(modifier = Modifier.fillMaxSize()) {
             val engineState by vm.callEngineState.collectAsState()
 
