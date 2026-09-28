@@ -139,6 +139,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -7123,6 +7125,12 @@ fun ChatProfileDetailsPage(
                     val chatMessages by remember(chatId) { viewModel.getMessagesForChat(chatId) }.collectAsState(initial = emptyList())
                     var selectedPillTab by remember { mutableStateOf("Photos") }
                     val pills = listOf("Photos", "Videos", "Audios", "Files", "Links")
+                    var selectedMediaEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+                    var mediaMenuEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+                    var mediaInfoEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+                    var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+                    var mediaResolution by remember { mutableStateOf("Original") }
+                    val mediaScope = rememberCoroutineScope()
 
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -7277,113 +7285,376 @@ fun ChatProfileDetailsPage(
                         }
 
                         // Shared Media List for Direct Chat
-                        val directSharedItems = remember(chatMessages, selectedPillTab) {
-                            chatMessages.filter { msg ->
-                                val text = msg.text
-                                when (selectedPillTab) {
-                                    "Photos" -> text.contains("IMAGE_ATTACHMENT") || text.contains("IMAGE_ALBUM") || text.startsWith("🖼️") || text.startsWith("📸") || (text.startsWith("http") && (text.endsWith(".png") || text.endsWith(".jpg") || text.endsWith(".jpeg") || text.endsWith(".webp")))
-                                    "Videos" -> text.contains("[Video]") || text.contains("video_") || text.contains(".mp4")
-                                    "Audios" -> text.contains("Voice Note") || text.startsWith("🎙️") || text.contains("VIEW_ONCE_AUDIO") || text.contains("AUDIO_BASE64") || text.contains("AUDIO_FILE") || text.contains(".mp3")
-                                    "Files" -> text.contains("DOCUMENT_FILE") || text.contains("[Document:") || text.startsWith("📄") || text.contains(".pdf") || text.contains(".zip")
-                                    "Links" -> text.contains("http://") || text.contains("https://")
-                                    else -> false
+                        fun extractProfileMediaUrls(text: String, tab: String): List<String> {
+                            return when (tab) {
+                                "Photos" -> when {
+                                    text.contains("[IMAGE_ALBUM|") -> text.substringAfter("[IMAGE_ALBUM|").substringBefore("]").split(",").map { it.trim() }.filter { it.isNotBlank() }
+                                    text.contains("[IMAGE_ATTACHMENT|") -> listOf(text.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim()).filter { it.isNotBlank() }
+                                    else -> Regex("(content://\\S+|file://\\S+|https?://\\S+\\.(?:png|jpe?g|webp)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
                                 }
+                                "Videos" -> when {
+                                    text.contains("[VIDEO_FILE|") -> listOf(text.substringAfter("[VIDEO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
+                                    text.contains("[VIDEO_URL|") -> listOf(text.substringAfter("[VIDEO_URL|").substringBefore("]").trim()).filter { it.isNotBlank() }
+                                    else -> Regex("(https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
+                                }
+                                "Audios" -> when {
+                                    text.contains("[AUDIO_FILE|") -> listOf(text.substringAfter("[AUDIO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
+                                    text.contains("[VIEW_ONCE_AUDIO_FILE|") -> listOf(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").substringBefore("]").trim()).filter { it.isNotBlank() }
+                                    else -> Regex("(https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value }.toList()
+                                }
+                                else -> emptyList()
                             }
                         }
 
-                        if (directSharedItems.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(120.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No shared $selectedPillTab in this chat",
-                                    color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8),
-                                    fontSize = 13.sp
+                        val directSharedItems = remember(chatMessages, selectedPillTab) {
+                            chatMessages.flatMap { msg ->
+                                extractProfileMediaUrls(msg.text, selectedPillTab).map { url ->
+                                    Triple(selectedPillTab, url, msg)
+                                }
+                            }.take(24)
+                        }
+
+                        if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios") {
+                            if (directSharedItems.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        "No shared $selectedPillTab yet",
+                                        color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8),
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    directSharedItems.chunked(3).forEach { rowItems ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            rowItems.forEach { entry ->
+                                                val kind = entry.first
+                                                val mediaUrl = entry.second
+                                                val mediaMessage = entry.third
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .background(if (isNightMode) Color(0xFF171922) else Color(0xFFEFF3F8))
+                                                        .clickable {
+                                                            selectedMediaEntry = entry
+                                                            mediaMenuEntry = null
+                                                        }
+                                                ) {
+                                                    when (kind) {
+                                                        "Photos" -> AsyncImage(
+                                                            model = if (mediaUrl.startsWith("/")) File(mediaUrl) else mediaUrl,
+                                                            contentDescription = "Shared photo",
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+                                                        "Videos" -> {
+                                                            Box(
+                                                                modifier = Modifier.fillMaxSize().background(Color(0xFF10131A)),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Icon(Icons.Default.Videocam, "Video", tint = Color(0xFF60A5FA), modifier = Modifier.size(38.dp))
+                                                                Box(
+                                                                    modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
+                                                                    contentAlignment = Alignment.Center
+                                                                ) {
+                                                                    Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(24.dp))
+                                                                }
+                                                            }
+                                                        }
+                                                        else -> {
+                                                            Column(
+                                                                modifier = Modifier.fillMaxSize().padding(12.dp),
+                                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                                verticalArrangement = Arrangement.Center
+                                                            ) {
+                                                                Icon(Icons.Default.Mic, "Audio", tint = Color(0xFF2563EB), modifier = Modifier.size(34.dp))
+                                                                Spacer(modifier = Modifier.height(7.dp))
+                                                                Text("Voice note", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                            }
+                  selectedMediaEntry?.let { entry ->
+        val kind = entry.first
+        val mediaUrl = entry.second
+        val mediaMessage = entry.third
+        var showMediaMenu by remember(entry) { mutableStateOf(false) }
+
+        Dialog(onDismissRequest = { selectedMediaEntry = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    when (kind) {
+                        "Photos" -> AsyncImage(
+                            model = if (mediaUrl.startsWith("/")) File(mediaUrl) else mediaUrl,
+                            contentDescription = "Shared photo preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                            onSuccess = { state ->
+                                val drawable = state.result.drawable
+                                if (drawable.intrinsicWidth > 0 && drawable.intrinsicHeight > 0) {
+                                    mediaResolution = "${drawable.intrinsicWidth} × ${drawable.intrinsicHeight}px"
+                                }
+                            }
+                        )
+                        "Videos" -> AndroidView(
+                            factory = { ctx ->
+                                VideoView(ctx).apply {
+                                    setVideoURI(Uri.parse(mediaUrl))
+                                    setOnPreparedListener { player -> player.isLooping = false; start() }
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        else -> Column(
+                            modifier = Modifier.fillMaxSize().padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(Icons.Default.Mic, null, tint = Color(0xFF60A5FA), modifier = Modifier.size(72.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Voice note", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Text(mediaMessage.timestampString, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { selectedMediaEntry = null }, modifier = Modifier.size(42.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)) {
+                            Icon(Icons.Default.Close, "Close", tint = Color.White)
+                        }
+                        Box {
+                            IconButton(onClick = { showMediaMenu = true }, modifier = Modifier.size(42.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)) {
+                                Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
+                            }
+                            DropdownMenu(expanded = showMediaMenu, onDismissRequest = { showMediaMenu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Forward") },
+                                    onClick = { showMediaMenu = false; mediaForwardEntry = entry; selectedMediaEntry = null },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
+                                )
+                                if (kind == "Photos") {
+                                    DropdownMenuItem(
+                                        text = { Text("Save") },
+                                        onClick = {
+                                            showMediaMenu = false
+                                            mediaScope.launch {
+                                                val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
+                                                Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.Download, null) }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("Info") },
+                                    onClick = { showMediaMenu = false; mediaInfoEntry = entry },
+                                    leadingIcon = { Icon(Icons.Default.Info, null) }
                                 )
                             }
-                        } else {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    mediaInfoEntry?.let { entry ->
+        val mediaMessage = entry.third
+        AlertDialog(
+            onDismissRequest = { mediaInfoEntry = null },
+            title = { Text("Media info", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Type: ${entry.first}")
+                    Text("Sent: ${mediaMessage.timestampString}")
+                    Text("Date & time: ${java.text.SimpleDateFormat("dd/MM/yyyy • HH:mm", java.util.Locale.US).format(java.util.Date(mediaMessage.timestamp))}")
+                    Text("Resolution: ${if (entry.first == "Photos") mediaResolution else "Not applicable"}")
+                }
+            },
+            confirmButton = { TextButton(onClick = { mediaInfoEntry = null }) { Text("Close") } }
+        )
+    }
+
+    mediaForwardEntry?.let { entry ->
+        var searchQuery by remember(entry) { mutableStateOf("") }
+        val selectedIds = remember(entry) { mutableStateListOf<String>() }
+        val forwardChats = remember(allChats, searchQuery) {
+            if (searchQuery.isBlank()) allChats else allChats.filter {
+                it.name.contains(searchQuery, ignoreCase = true) || it.category.contains(searchQuery, ignoreCase = true)
+            }
+        }
+        val original = entry.third
+        val forwardText = if (entry.first == "Photos") "[IMAGE_ATTACHMENT|${entry.second}] 🖼️ Photo" else original.text
+        val synthetic = original.copy(
+            text = forwardText,
+            isForwarded = true,
+            forwardedFromMessageId = original.serverMessageId ?: original.clientMessageId
+        )
+
+        Dialog(onDismissRequest = { mediaForwardEntry = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing), color = if (isNightMode) Color(0xFF0D0F14) else Color(0xFFF5F7FA)) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { mediaForwardEntry = null }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = if (isNightMode) Color.White else Color(0xFF0F172A))
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Forward media", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                            Text("${selectedIds.size} selected", color = Color(0xFF2563EB), fontSize = 12.sp)
+                        }
+                    }
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search chats…", color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B)) },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
+                            unfocusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
+                            focusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
+                            unfocusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
+                            focusedBorderColor = Color(0xFF2563EB),
+                            unfocusedBorderColor = if (isNightMode) Color(0xFF30343E) else Color(0xFFD7DEE8)
+                        )
+                    )
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(forwardChats, key = { it.id }) { target ->
+                            val selected = selectedIds.contains(target.id)
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
+                                    if (selected) selectedIds.remove(target.id) else selectedIds.add(target.id)
+                                },
+                                color = if (selected) {
+                                    if (isNightMode) Color(0xFF17233D) else Color(0xFFEAF2FF)
+                                } else {
+                                    if (isNightMode) Color(0xFF151820) else Color.White
+                                },
+                                border = BorderStroke(1.dp, if (selected) Color(0xFF2563EB) else if (isNightMode) Color.White.copy(0.06f) else Color(0xFFE2E8F0))
                             ) {
-                                val limitedDirectItems = directSharedItems.take(20)
-                                limitedDirectItems.forEach { item ->
-                                    Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isNightMode) Color(0xFF161822) else Color.White
-                                        ),
-                                        border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.08f) else Color(0xFFE2E8F0)),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Icon(
-                                                imageVector = when (selectedPillTab) {
-                                                    "Photos" -> Icons.Default.Image
-                                                    "Videos" -> Icons.Default.Videocam
-                                                    "Audios" -> Icons.Default.Mic
-                                                    "Files" -> Icons.Default.AttachFile
-                                                    else -> Icons.Default.Link
-                                                },
-                                                contentDescription = null,
-                                                tint = if (isNightMode) Color.White else Color.Black,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = getCleanMediaPreview(item.text, selectedPillTab),
-                                                    color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    text = "${item.senderName} • ${item.timestampString}",
-                                                    color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
-                                                    fontSize = 11.sp
-                                                )
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(modifier = Modifier.size(46.dp).clip(CircleShape).background(Color(0xFF2563EB)), contentAlignment = Alignment.Center) {
+                                        Text(target.name.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(target.name, color = if (isNightMode) Color.White else Color(0xFF0F172A), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Checkbox(
+                                        checked = selected,
+                                        onCheckedChange = { checked -> if (checked) selectedIds.add(target.id) else selectedIds.remove(target.id) },
+                                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2563EB))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars),
+                        color = if (isNightMode) Color(0xFF11131A) else Color.White,
+                        shadowElevation = 12.dp
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.forwardMessage(synthetic, selectedIds.toList())
+                                mediaForwardEntry = null
+                                Toast.makeText(context, "Media forwarded to ${selectedIds.size} chat(s)", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = selectedIds.isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).height(52.dp),
+                            shape = RoundedCornerShape(17.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Forward, null, tint = Color.White)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Forward • ${selectedIds.size}", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+                                          }
+                                                    }
+                                                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                                                        IconButton(onClick = { mediaMenuEntry = entry }, modifier = Modifier.size(34.dp)) {
+                                                            Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
+                                                        }
+                                                        DropdownMenu(
+                                                            expanded = mediaMenuEntry == entry,
+                                                            onDismissRequest = { mediaMenuEntry = null }
+                                                        ) {
+                                                            DropdownMenuItem(
+                                                                text = { Text("Open") },
+                                                                onClick = { mediaMenuEntry = null; selectedMediaEntry = entry },
+                                                                leadingIcon = { Icon(Icons.Default.OpenInNew, null) }
+                                                            )
+                                                            DropdownMenuItem(
+                                                                text = { Text("Forward") },
+                                                                onClick = { mediaMenuEntry = null; mediaForwardEntry = entry },
+                                                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
+                                                            )
+                                                            if (kind == "Photos") {
+                                                                DropdownMenuItem(
+                                                                    text = { Text("Save") },
+                                                                    onClick = {
+                                                                        mediaMenuEntry = null
+                                                                        mediaScope.launch {
+                                                                            val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
+                                                                            Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                                                        }
+                                                                    },
+                                                                    leadingIcon = { Icon(Icons.Default.Download, null) }
+                                                                )
+                                                            }
+                                                            DropdownMenuItem(
+                                                                text = { Text("Info") },
+                                                                onClick = { mediaMenuEntry = null; mediaInfoEntry = entry },
+                                                                leadingIcon = { Icon(Icons.Default.Info, null) }
+                                                            )
+                                                        }
+                                                    }
+                                                    Text(
+                                                        text = mediaMessage.timestampString,
+                                                        color = Color.White,
+                                                        fontSize = 9.sp,
+                                                        maxLines = 1,
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomStart)
+                                                            .padding(7.dp)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(Color.Black.copy(alpha = 0.48f))
+                                                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    )
+                                                }
                                             }
-                                            if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios" || selectedPillTab == "Files") {
-                                                IconButton(
-                                                    onClick = {
-                                                        Toast.makeText(context, "Downloading item to Downloads...", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    modifier = Modifier.size(36.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Download,
-                                                        contentDescription = "Download",
-                                                        tint = if (isNightMode) Color.White else Color.Black
-                                                    )
-                                                }
-                                            } else if (selectedPillTab == "Links") {
-                                                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-                                                IconButton(
-                                                    onClick = {
-                                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text))
-                                                        Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    modifier = Modifier.size(36.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.ContentCopy,
-                                                        contentDescription = "Copy Link",
-                                                        tint = if (isNightMode) Color.White else Color.Black
-                                                    )
-                                                }
+                                            repeat(3 - rowItems.size) {
+                                                Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
                                             }
                                         }
                                     }
                                 }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(100.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = TextAlign.Center)
                             }
                         }
                     }
