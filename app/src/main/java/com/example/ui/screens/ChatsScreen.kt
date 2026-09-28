@@ -541,22 +541,28 @@ fun ChatsScreen(
                     onExpandClick = onActiveCallBannerClick
                 )
 
-                // Full Width Search Bar pill
+                // Full Width Search Bar pill (clean dark mode without shadow outline artifact)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 6.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(if (isNightMode) Color(0xFF1B1B1E) else Color(0xFFF1F5F9))
-                        .shadow(
-                            elevation = if (isNightMode) 5.dp else 7.dp,
-                            shape = RoundedCornerShape(22.dp),
-                            ambientColor = if (isNightMode) Color.Black.copy(alpha = 0.22f) else Color(0x220F172A),
-                            spotColor = if (isNightMode) Color.Black.copy(alpha = 0.22f) else Color(0x220F172A)
+                        .then(
+                            if (!isNightMode) {
+                                Modifier.shadow(
+                                    elevation = 5.dp,
+                                    shape = RoundedCornerShape(22.dp),
+                                    ambientColor = Color(0x180F172A),
+                                    spotColor = Color(0x180F172A)
+                                )
+                            } else {
+                                Modifier
+                            }
                         )
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(if (isNightMode) Color(0xFF16181E) else Color.White)
                         .border(
                             width = 1.dp,
-                            color = if (isNightMode) Color(0xFF2A2D35) else Color(0xFFD7DEE8),
+                            color = if (isNightMode) Color(0xFF23262F) else Color(0xFFE2E8F0),
                             shape = RoundedCornerShape(22.dp)
                         )
                         .clickable { isSearchActive = true }
