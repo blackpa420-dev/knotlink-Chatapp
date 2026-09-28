@@ -452,9 +452,10 @@ fun ChatDetailScreen(
     val density = LocalDensity.current
     val imeBottomPx = WindowInsets.ime.getBottom(density)
 
-    // Auto-scroll logic: Instant scroll to latest message without visible jump/sliding
-    LaunchedEffect(displayedMessages.size, messages.lastOrNull()?.id) {
-        if (displayedMessages.isNotEmpty()) {
+    // Initial positioning is the only time we force the list to the latest message.
+    // Pagination must preserve the user's current position instead of jumping to the bottom.
+    LaunchedEffect(chatId, displayedMessages.size) {
+        if (!hasInitialScrolled && displayedMessages.isNotEmpty()) {
             kotlinx.coroutines.yield()
             val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
             listState.scrollToItem(lastIndex)
@@ -462,6 +463,16 @@ fun ChatDetailScreen(
             unreadNewMessagesCount = 0
             previousMessageCount = messages.size
         }
+    }
+
+    // New messages only auto-scroll when the user was already at the bottom.
+    LaunchedEffect(messages.lastOrNull()?.id) {
+        if (!hasInitialScrolled || !isUserNearBottom || displayedMessages.isEmpty()) return@LaunchedEffect
+        kotlinx.coroutines.yield()
+        val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+        listState.animateScrollToItem(lastIndex)
+        unreadNewMessagesCount = 0
+        previousMessageCount = messages.size
     }
 
     // Reset unread indicator when user scrolls to bottom
@@ -2769,8 +2780,8 @@ fun ChatDetailScreen(
                 ) {
                     Column(
                         modifier = Modifier
-                            .widthIn(max = 270.dp)
-                            .padding(16.dp)
+                            .widthIn(min = 250.dp, max = 310.dp)
+                            .padding(horizontal = 18.dp, vertical = 14.dp)
                             .clickable(enabled = false) { },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -2799,9 +2810,9 @@ fun ChatDetailScreen(
                         // Telegram Style Menu Card
                         Surface(
                             shape = RoundedCornerShape(18.dp),
-                            color = if (isNightMode) Color(0xFF1E202B).copy(alpha = 0.88f) else Color.White.copy(alpha = 0.88f),
-                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.12f) else Color(0xFFE2E8F0)),
-                            shadowElevation = 8.dp,
+                            color = if (isNightMode) Color(0xFF181A24) else Color.White,
+                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.10f) else Color(0xFFDCE3EC)),
+                            shadowElevation = if (isNightMode) 18.dp else 12.dp,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -3101,7 +3112,7 @@ fun ChatDetailScreen(
             )
         }
 
-        // 3. Full-Page Forward Message Screen
+        // 3. Forward Message — dedicated, scroll-safe full-screen composer
         if (showForwardSheet && messageToForward != null) {
             val forwardMsg = messageToForward!!
             var forwardSearchQuery by remember { mutableStateOf("") }
@@ -3109,7 +3120,7 @@ fun ChatDetailScreen(
                 if (forwardSearchQuery.isBlank()) allChats
                 else allChats.filter {
                     it.name.contains(forwardSearchQuery, ignoreCase = true) ||
-                            it.category.contains(forwardSearchQuery, ignoreCase = true)
+                        it.category.contains(forwardSearchQuery, ignoreCase = true)
                 }
             }
 
@@ -3121,286 +3132,185 @@ fun ChatDetailScreen(
                 properties = DialogProperties(usePlatformDefaultWidth = false)
             ) {
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = if (isNightMode) Color(0xFF0F1015) else Color(0xFFF8FAFC)
+                    modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
+                    color = if (isNightMode) Color(0xFF0D0F14) else Color(0xFFF5F7FA)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .statusBarsPadding()
-                    ) {
-                        // Top App Bar
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = {
-                                showForwardSheet = false
-                                messageToForward = null
-                            }) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = animTextColor
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Forward To",
-                                    fontSize = 19.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = animTextColor
-                                )
-                                Text(
-                                    text = if (selectedForwardChatIds.isNotEmpty()) "${selectedForwardChatIds.size} recipient(s) selected" else "Select one or more chats",
-                                    fontSize = 12.sp,
-                                    color = if (selectedForwardChatIds.isNotEmpty()) Color(0xFF2563EB) else animSubTextColor
-                                )
-                            }
-                            if (selectedForwardChatIds.isNotEmpty()) {
-                                TextButton(onClick = { selectedForwardChatIds.clear() }) {
-                                    Text("Clear", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                }
-                            }
-                        }
-
-                        // Message Preview Card
-                        Surface(
-                            color = if (isNightMode) Color(0xFF181A24) else Color(0xFFEFF6FF),
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFBFDBFE)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                        ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxSize().padding(bottom = 82.dp)) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF2563EB).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.Forward,
-                                        contentDescription = "Forwarding",
-                                        tint = Color(0xFF2563EB),
-                                        modifier = Modifier.size(18.dp)
-                                    )
+                                IconButton(onClick = {
+                                    showForwardSheet = false
+                                    messageToForward = null
+                                }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = animTextColor)
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
+                                    Text("Forward message", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = animTextColor)
                                     Text(
-                                        text = "Forwarding Message",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF2563EB)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = when {
-                                            forwardMsg.text.contains("[DOCUMENT_FILE|") -> {
-                                                val parts = forwardMsg.text.substringAfter("[DOCUMENT_FILE|").substringBefore("]").split("|")
-                                                val docName = parts.getOrNull(0)?.trim()?.ifBlank { "Document" } ?: "Document"
-                                                val docSize = parts.getOrNull(1)?.trim()?.ifBlank { "" } ?: ""
-                                                if (docSize.isNotBlank()) "📄 $docName ($docSize)" else "📄 $docName"
-                                            }
-                                            forwardMsg.text.contains("[IMAGE_BASE64|") || forwardMsg.text.contains("[IMAGE_URL|") -> "🖼️ Photo attachment"
-                                            forwardMsg.text.contains("[AUDIO_BASE64|") || forwardMsg.text.contains("[AUDIO_FILE|") -> "🎙️ Voice message"
-                                            forwardMsg.text.contains("[VIDEO_BASE64|") || forwardMsg.text.contains("[VIDEO_FILE|") -> "📹 Video message"
-                                            forwardMsg.text.startsWith("[POLL_JSON:") -> "📊 Live Poll"
-                                            else -> forwardMsg.text
-                                        },
-                                        color = animTextColor,
-                                        fontSize = 13.sp,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
+                                        if (selectedForwardChatIds.isEmpty()) "Choose one or more chats" else "\${selectedForwardChatIds.size} selected",
+                                        fontSize = 12.sp,
+                                        color = if (selectedForwardChatIds.isNotEmpty()) Color(0xFF2563EB) else animSubTextColor
                                     )
                                 }
-                            }
-                        }
-
-                        // Search Input
-                        OutlinedTextField(
-                            value = forwardSearchQuery,
-                            onValueChange = { forwardSearchQuery = it },
-                            placeholder = { Text("Search conversations...", color = animSubTextColor, fontSize = 14.sp) },
-                            leadingIcon = {
-                                Icon(imageVector = Icons.Default.Search, contentDescription = "Search", tint = animSubTextColor)
-                            },
-                            trailingIcon = {
-                                if (forwardSearchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { forwardSearchQuery = "" }) {
-                                        Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = animSubTextColor)
+                                if (selectedForwardChatIds.isNotEmpty()) {
+                                    TextButton(onClick = { selectedForwardChatIds.clear() }) {
+                                        Text("Clear", color = Color(0xFFEF4444), fontWeight = FontWeight.SemiBold)
                                     }
                                 }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            singleLine = true,
-                            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF2563EB),
-                                unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1)
-                            )
-                        )
+                            }
 
-                        // Full Page Chats List
-                        LazyColumn(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            items(filteredForwardChats, key = { it.id }) { targetChat ->
-                                val isSelected = selectedForwardChatIds.contains(targetChat.id)
-                                val hasCustomAvatar = targetChat.avatarType.isNotBlank() && targetChat.avatarType != "default" && targetChat.avatarType != "assistant"
-                                val isAssistantChat = targetChat.avatarType.equals("assistant", ignoreCase = true) ||
-                                    targetChat.name.equals("KnotLink Assistant", ignoreCase = true)
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            if (isSelected) {
-                                                selectedForwardChatIds.remove(targetChat.id)
-                                            } else {
-                                                selectedForwardChatIds.add(targetChat.id)
-                                            }
-                                        },
-                                    color = if (isSelected) {
-                                        if (isNightMode) Color(0xFF1E2640) else Color(0xFFEFF6FF)
-                                    } else {
-                                        if (isNightMode) Color(0xFF161822) else Color.White
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) Color(0xFF2563EB) else (if (isNightMode) Color.White.copy(alpha = 0.05f) else Color(0xFFE2E8F0))
-                                    ),
-                                    shadowElevation = if (isNightMode) 0.dp else 1.dp
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                            Surface(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = if (isNightMode) Color(0xFF171A22) else Color.White,
+                                border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)),
+                                shadowElevation = if (isNightMode) 0.dp else 3.dp
+                            ) {
+                                Row(modifier = Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF2563EB).copy(alpha = 0.12f)),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        if (hasCustomAvatar) {
-                                            AsyncImage(
-                                                model = if (targetChat.avatarType.startsWith("/")) File(targetChat.avatarType) else targetChat.avatarType,
-                                                contentDescription = targetChat.name,
-                                                modifier = Modifier
-                                                    .size(48.dp)
-                                                    .clip(CircleShape)
-                                                    .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(48.dp)
-                                                    .clip(CircleShape)
-                                                    .background(
-                                                        Brush.linearGradient(
-                                                            if (isAssistantChat)
-                                                                listOf(Color(0xFF2563EB), Color(0xFF7C3AED))
-                                                            else
-                                                                listOf(Color(0xFF0EA5E9), Color(0xFF2563EB))
-                                                        )
-                                                    ),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isAssistantChat) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.SmartToy,
-                                                        contentDescription = "KnotLink Assistant",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(24.dp)
-                                                    )
-                                                } else {
-                                                    Text(
-                                                        text = targetChat.name.take(1).uppercase(),
-                                                        color = Color.White,
-                                                        fontSize = 17.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(14.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = targetChat.name,
-                                                fontSize = 15.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = animTextColor
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = if (targetChat.category.isNotBlank()) targetChat.category else "Conversation",
-                                                fontSize = 12.sp,
-                                                color = animSubTextColor
-                                            )
-                                        }
-                                        Checkbox(
-                                            checked = isSelected,
-                                            onCheckedChange = { checked ->
-                                                if (checked) selectedForwardChatIds.add(targetChat.id)
-                                                else selectedForwardChatIds.remove(targetChat.id)
+                                        Icon(Icons.AutoMirrored.Filled.Forward, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(11.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Forwarding", color = Color(0xFF2563EB), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            when {
+                                                forwardMsg.text.contains("[DOCUMENT_FILE|") -> "📄 Document"
+                                                forwardMsg.text.contains("[IMAGE_BASE64|") || forwardMsg.text.contains("[IMAGE_URL|") -> "🖼️ Photo"
+                                                forwardMsg.text.contains("[AUDIO_BASE64|") || forwardMsg.text.contains("[AUDIO_FILE|") -> "🎙️ Voice message"
+                                                forwardMsg.text.contains("[VIDEO_BASE64|") || forwardMsg.text.contains("[VIDEO_FILE|") -> "📹 Video"
+                                                forwardMsg.text.contains("[POLL_DATA|") || forwardMsg.text.startsWith("[POLL_JSON:") -> "📊 Poll"
+                                                else -> forwardMsg.text.ifBlank { "Attachment" }
                                             },
-                                            colors = CheckboxDefaults.colors(
-                                                checkedColor = Color(0xFF2563EB)
-                                            )
+                                            color = animTextColor, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
                             }
+
+                            OutlinedTextField(
+                                value = forwardSearchQuery,
+                                onValueChange = { forwardSearchQuery = it },
+                                placeholder = { Text("Search chats…", color = animSubTextColor) },
+                                leadingIcon = { Icon(Icons.Default.Search, null, tint = animSubTextColor) },
+                                trailingIcon = {
+                                    if (forwardSearchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { forwardSearchQuery = "" }) {
+                                            Icon(Icons.Default.Close, null, tint = animSubTextColor)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                singleLine = true,
+                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = if (isNightMode) Color(0xFF3B82F6) else Color(0xFFB8C2D1),
+                                    unfocusedBorderColor = if (isNightMode) Color(0xFF30343E) else Color(0xFFD7DEE8),
+                                    focusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
+                                    unfocusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White
+                                )
+                            )
+
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 20.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(filteredForwardChats, key = { it.id }) { targetChat ->
+                                    val isSelected = selectedForwardChatIds.contains(targetChat.id)
+                                    val isAssistantChat = targetChat.avatarType.equals("assistant", true) || targetChat.name.equals("KnotLink Assistant", true)
+                                    val hasCustomAvatar = targetChat.avatarType.isNotBlank() && targetChat.avatarType != "default" && targetChat.avatarType != "assistant"
+
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable {
+                                            if (isSelected) selectedForwardChatIds.remove(targetChat.id) else selectedForwardChatIds.add(targetChat.id)
+                                        },
+                                        color = when {
+                                            isSelected && isNightMode -> Color(0xFF17233D)
+                                            isSelected -> Color(0xFFEAF2FF)
+                                            isNightMode -> Color(0xFF151820)
+                                            else -> Color.White
+                                        },
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSelected) Color(0xFF2563EB) else if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0)
+                                        ),
+                                        shadowElevation = if (isNightMode) 0.dp else 2.dp
+                                    ) {
+                                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            if (hasCustomAvatar) {
+                                                AsyncImage(
+                                                    model = if (targetChat.avatarType.startsWith("/")) File(targetChat.avatarType) else targetChat.avatarType,
+                                                    contentDescription = targetChat.name,
+                                                    modifier = Modifier.size(50.dp).clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier.size(50.dp).clip(CircleShape).background(if (isAssistantChat) Color(0xFF222226) else Color(0xFF2563EB)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isAssistantChat) {
+                                                        Icon(Icons.Default.SmartToy, "KnotLink Assistant", tint = Color.White, modifier = Modifier.size(25.dp))
+                                                    } else {
+                                                        Text(targetChat.name.take(1).uppercase(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(13.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(targetChat.name, color = animTextColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(
+                                                    if (isAssistantChat) "Personal Assistant" else targetChat.category.ifBlank { "Conversation" },
+                                                    color = animSubTextColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            Checkbox(
+                                                checked = isSelected,
+                                                onCheckedChange = { checked ->
+                                                    if (checked) selectedForwardChatIds.add(targetChat.id) else selectedForwardChatIds.remove(targetChat.id)
+                                                },
+                                                colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2563EB))
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        // Bottom Action Forward Button
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = if (isNightMode) Color(0xFF13141B) else Color.White,
-                            shadowElevation = 8.dp
+                            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding(),
+                            color = if (isNightMode) Color(0xFF11131A) else Color.White,
+                            shadowElevation = 14.dp,
+                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0))
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                    .navigationBarsPadding()
+                            Button(
+                                onClick = {
+                                    viewModel.forwardMessage(forwardMsg, selectedForwardChatIds.toList())
+                                    showForwardSheet = false
+                                    messageToForward = null
+                                    Toast.makeText(localContext, "Forwarded to \${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
+                                },
+                                enabled = selectedForwardChatIds.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).height(52.dp),
+                                shape = RoundedCornerShape(17.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF2563EB),
+                                    disabledContainerColor = if (isNightMode) Color(0xFF263044) else Color(0xFFD9E2F0)
+                                )
                             ) {
-                                Button(
-                                    onClick = {
-                                        viewModel.forwardMessage(forwardMsg, selectedForwardChatIds.toList())
-                                        showForwardSheet = false
-                                        messageToForward = null
-                                        Toast.makeText(localContext, "Forwarded to ${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
-                                    },
-                                    enabled = selectedForwardChatIds.isNotEmpty(),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(52.dp),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF2563EB),
-                                        disabledContainerColor = Color(0xFF2563EB).copy(alpha = 0.35f)
-                                    )
-                                ) {
-                                    Icon(imageVector = Icons.AutoMirrored.Filled.Send, contentDescription = null, tint = Color.White)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (selectedForwardChatIds.isNotEmpty()) "Forward (${selectedForwardChatIds.size})" else "Select Chats to Forward",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = Color.White
-                                    )
-                                }
+                                Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    if (selectedForwardChatIds.isEmpty()) "Select chats to forward" else "Forward • \${selectedForwardChatIds.size}",
+                                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
+                                )
                             }
                         }
                     }
