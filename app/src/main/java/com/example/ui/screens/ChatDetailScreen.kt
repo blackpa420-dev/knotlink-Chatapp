@@ -1936,7 +1936,8 @@ fun ChatDetailScreen(
                                                  val t = i / (samples - 1f)
                                                  val x = t * size.width
                                                  val phase = t * 3.2f * 6.2831853f + wavePhase * 6.2831853f
-                                                 val pulse = kotlin.math.sin(phase * 2f) * kotlin.math.pow(kotlin.math.abs(kotlin.math.sin(phase)), 3.0).toFloat()
+                                                 val sine = kotlin.math.sin(phase)
+                                                 val pulse = kotlin.math.sin(phase * 2f) * kotlin.math.abs(sine * sine * sine)
                                                  val y = centerY - pulse * (4f + strength * 16f)
                                                  if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                                              }
