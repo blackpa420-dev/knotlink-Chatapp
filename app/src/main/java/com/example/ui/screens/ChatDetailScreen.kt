@@ -6064,6 +6064,11 @@ fun ChatProfileDetailsPage(
 
     val context = LocalContext.current
     val mediaScope = rememberCoroutineScope()
+    var selectedMediaEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+    var mediaMenuEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+    var mediaInfoEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+    var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
+    var mediaResolution by remember { mutableStateOf("Original") }
     val isGroupChat = chatName.contains("[Group]", ignoreCase = true) || chatId.startsWith("group_")
 
     val groupAvatarMap by viewModel.groupAvatarMap.collectAsState()
@@ -7126,11 +7131,7 @@ fun ChatProfileDetailsPage(
                     val chatMessages by remember(chatId) { viewModel.getMessagesForChat(chatId) }.collectAsState(initial = emptyList())
                     var selectedPillTab by remember { mutableStateOf("Photos") }
                     val pills = listOf("Photos", "Videos", "Audios", "Files", "Links")
-                    var selectedMediaEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-                    var mediaMenuEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-                    var mediaInfoEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-                    var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-                    var mediaResolution by remember { mutableStateOf("Original") }
+
 
 
                     Column(
