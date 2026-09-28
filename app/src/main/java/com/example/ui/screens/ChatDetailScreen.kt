@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.graphics.Bitmap
+import android.media.MediaPlayer
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
@@ -7466,6 +7467,22 @@ selectedMediaEntry?.let { entry ->
         val mediaUrl = entry.second
         val mediaMessage = entry.third
         var showMediaMenu by remember(entry) { mutableStateOf(false) }
+        var audioReady by remember(entry) { mutableStateOf(false) }
+        var audioPlaying by remember(entry) { mutableStateOf(false) }
+        val audioPlayer = remember(entry) { MediaPlayer() }
+
+        DisposableEffect(mediaUrl, kind) {
+            if (kind == "Audios" && mediaUrl.isNotBlank()) {
+                runCatching {
+                    val uri = if (mediaUrl.startsWith("/")) Uri.fromFile(File(mediaUrl)) else Uri.parse(mediaUrl)
+                    audioPlayer.setDataSource(context, uri)
+                    audioPlayer.setOnPreparedListener { audioReady = true }
+                    audioPlayer.setOnCompletionListener { audioPlaying = false }
+                    audioPlayer.prepareAsync()
+                }
+            }
+            onDispose { runCatching { audioPlayer.release() } }
+        }
 
         Dialog(onDismissRequest = { selectedMediaEntry = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
@@ -7486,7 +7503,7 @@ selectedMediaEntry?.let { entry ->
                         "Videos" -> AndroidView(
                             factory = { ctx ->
                                 VideoView(ctx).apply {
-                                    setVideoURI(Uri.parse(mediaUrl))
+                                    setVideoURI(if (mediaUrl.startsWith("/")) Uri.fromFile(File(mediaUrl)) else Uri.parse(mediaUrl))
                                     setOnPreparedListener { player -> player.isLooping = false; start() }
                                 }
                             },
@@ -7501,6 +7518,36 @@ selectedMediaEntry?.let { entry ->
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("Voice note", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             Text(mediaMessage.timestampString, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
+                            Spacer(modifier = Modifier.height(22.dp))
+                            Button(
+                                onClick = {
+                                    if (!audioReady) return@Button
+                                    if (audioPlayer.isPlaying) {
+                                        audioPlayer.pause()
+                                        audioPlaying = false
+                                    } else {
+                                        audioPlayer.start()
+                                        audioPlaying = true
+                                    }
+                                },
+                                enabled = audioReady,
+                                shape = CircleShape,
+                                modifier = Modifier.size(64.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
+                            ) {
+                                Icon(
+                                    if (audioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    if (audioPlaying) "Pause" else "Play",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(30.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                if (audioReady) "Tap to play / pause" else "Preparing audio…",
+                                color = Color.White.copy(alpha = 0.65f),
+                                fontSize = 12.sp
+                            )
                         }
                     }
                     Row(
