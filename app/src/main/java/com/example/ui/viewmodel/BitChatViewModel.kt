@@ -2752,17 +2752,21 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             val senderName = if (fullName.isNotBlank()) fullName else if (username.isNotBlank()) username else "Me"
 
-            repository.sendMessage(
-                chatId = chatId,
-                senderName = senderName,
-                text = text,
-                isFromUser = true,
-                isRead = false,
-                replyToMessageId = replyToMessage?.serverMessageId ?: replyToMessage?.clientMessageId,
-                replySnippet = replyToMessage?.text?.take(80),
-                replySenderName = replyToMessage?.senderName,
-                mentionedUids = mentionedUids?.joinToString(",")
-            )
+            try {
+                repository.sendMessage(
+                    chatId = chatId,
+                    senderName = senderName,
+                    text = text,
+                    isFromUser = true,
+                    isRead = false,
+                    replyToMessageId = replyToMessage?.serverMessageId ?: replyToMessage?.clientMessageId,
+                    replySnippet = replyToMessage?.text?.take(80),
+                    replySenderName = replyToMessage?.senderName,
+                    mentionedUids = mentionedUids?.joinToString(",")
+                )
+            } catch (e: Throwable) {
+                Log.e("BitChatViewModel", "Message send failed without crashing UI", e)
+            }
         }
     }
 
