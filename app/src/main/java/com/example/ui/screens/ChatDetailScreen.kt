@@ -7233,7 +7233,7 @@ fun ChatProfileDetailsPage(
                                             } else {
                                                 runCatching {
                                                     val parsed = when {
-                                                        raw.contains("T") -> java.time.Instant.parse(raw).let { java.util.Date.from(it) }
+                                                        raw.contains("T") -> java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw.take(19))
                                                         raw.length >= 10 && raw[4] == '-' -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(raw.take(10))
                                                         else -> java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).parse(raw)
                                                     }
