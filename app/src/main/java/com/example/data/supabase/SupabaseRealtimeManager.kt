@@ -515,17 +515,15 @@ object SupabaseRealtimeManager {
         if (isDirectRecipient) return true
 
         // 2. Group or Broadcast messages
-        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) || 
-            recUid.equals("group", ignoreCase = true) || 
-            chat == "global" || 
-            chat.startsWith("group_") ||
-            msg.messageType == "SYSTEM_EVENT"
+        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) ||
+            recUid.equals("group", ignoreCase = true) ||
+            chat == "global" ||
+            chat.startsWith("group_")
 
         if (isGroupOrBroadcast) {
-            if (chat == "global") return true
-            if (knownChatIds.contains(chat)) return true
-            // If it's a group/system message and receiver is specifically 'all' or 'group', allow if user is in group
-            return recUid.equals("all", ignoreCase = true)
+            // Group/system messages require an explicit locally known membership/chat.
+            // A generic SYSTEM_EVENT flag is never an authorization signal.
+            return knownChatIds.contains(chat)
         }
 
         // 3. Unaddressed messages (blank receiver and not group) MUST NOT leak to 3rd party users
