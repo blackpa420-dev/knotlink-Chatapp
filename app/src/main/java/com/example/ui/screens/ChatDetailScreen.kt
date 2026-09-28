@@ -7351,6 +7351,7 @@ fun ChatProfileDetailsPage(
                                                         .background(if (isNightMode) Color(0xFF171922) else Color(0xFFEFF3F8))
                                                         .clickable {
                                                             selectedMediaEntry = entry
+                                                            mediaResolution = "Original"
                                                             mediaMenuEntry = null
                                                         }
                                                 ) {
@@ -7399,7 +7400,7 @@ fun ChatProfileDetailsPage(
                                                         ) {
                                                             DropdownMenuItem(
                                                                 text = { Text("Open") },
-                                                                onClick = { mediaMenuEntry = null; selectedMediaEntry = entry },
+                                                                onClick = { mediaMenuEntry = null; mediaResolution = "Original"; selectedMediaEntry = entry },
                                                                 leadingIcon = { Icon(Icons.Default.OpenInNew, null) }
                                                             )
                                                             DropdownMenuItem(
