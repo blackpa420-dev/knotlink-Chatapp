@@ -5467,6 +5467,7 @@ fun VoiceNoteMessageBubble(
     DisposableEffect(audioData, isBase64) {
         val targetFile = if (!audioData.isNullOrBlank()) {
             if (isBase64) {
+                // Legacy messages only. New voice notes are uploaded as URLs.
                 runCatching {
                     val bytes = android.util.Base64.decode(audioData, android.util.Base64.DEFAULT)
                     val file = File(context.cacheDir, "voice_${audioData.hashCode()}.m4a")
@@ -5478,13 +5479,19 @@ fun VoiceNoteMessageBubble(
             }
         } else null
 
-        if (targetFile != null) {
-            runCatching {
-                mediaPlayer.reset()
+        runCatching {
+            mediaPlayer.reset()
+            if (!audioData.isNullOrBlank() && (audioData.startsWith("http://") || audioData.startsWith("https://"))) {
+                mediaPlayer.setDataSource(context, Uri.parse(audioData))
+            } else if (targetFile != null) {
                 mediaPlayer.setDataSource(targetFile.absolutePath)
-                mediaPlayer.prepare()
-                if (mediaPlayer.duration > 0) totalDurationMs = mediaPlayer.duration.toFloat()
+            } else {
+                return@runCatching
             }
+            mediaPlayer.setOnPreparedListener { player ->
+                if (player.duration > 0) totalDurationMs = player.duration.toFloat()
+            }
+            mediaPlayer.prepareAsync()
         }
 
         mediaPlayer.setOnCompletionListener {
