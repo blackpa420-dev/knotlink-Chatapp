@@ -1448,7 +1448,7 @@ class BitChatRepository(val dao: BitChatDao) {
         // Existing message check (to prevent duplicate insertions)
         val clientKey = supaMsg.clientMsgId ?: ""
         val existingIncoming = dao.findMessageByServerId(supaMsg.id)
-            ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
+            ?: clientKey.takeIf { it.isNotBlank() }?.let { dao.getMessageByServerOrClientId(supaMsg.id, it) }
             ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
             ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
             ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
