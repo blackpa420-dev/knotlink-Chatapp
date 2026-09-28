@@ -1781,7 +1781,16 @@ fun InteractiveChecklistBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(
+                            if (item.checked) {
+                                if (isUser) Color.White.copy(alpha = 0.08f)
+                                else Color(0xFF06B6D4).copy(alpha = if (isNightMode) 0.12f else 0.08f)
+                            } else {
+                                if (isUser) Color.White.copy(alpha = 0.03f)
+                                else if (isNightMode) Color.White.copy(alpha = 0.025f) else Color.Black.copy(alpha = 0.015f)
+                            }
+                        )
                         .clickable {
                             val newChecked = !item.checked
                             itemList[index] = item.copy(
@@ -1809,12 +1818,38 @@ fun InteractiveChecklistBubble(
                         }
                         .padding(vertical = 5.dp, horizontal = 2.dp)
                 ) {
-                    Icon(
-                        imageVector = if (item.checked) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                        contentDescription = null,
-                        tint = if (item.checked) (if (isUser) Color.White else Color(0xFF06B6D4)) else (if (isUser) Color.White.copy(0.6f) else Color(0xFF94A3B8)),
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(23.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                if (item.checked) {
+                                    if (isUser) Color.White else Color(0xFF06B6D4)
+                                } else {
+                                    Color.Transparent
+                                }
+                            )
+                            .border(
+                                width = 1.6.dp,
+                                color = if (item.checked) {
+                                    if (isUser) Color.White else Color(0xFF06B6D4)
+                                } else {
+                                    if (isUser) Color.White.copy(alpha = 0.55f)
+                                    else Color(0xFF94A3B8)
+                                },
+                                shape = RoundedCornerShape(7.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (item.checked) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Checked",
+                                tint = if (isUser) Color(0xFF0E7490) else Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = item.text,
