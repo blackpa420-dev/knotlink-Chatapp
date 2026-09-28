@@ -2104,7 +2104,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             callId = call.id,
             callType = call.callType,
             peerId = call.callerId,
-            isConnected = false
+            isConnected = false,
+            callerAvatarUrl = call.callerAvatar.orEmpty()
         )
 
         addCallLog(
@@ -2342,7 +2343,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     secondsElapsed = 0,
                     callId = callId,
                     callType = callType,
-                    peerId = resolvedReceiverId
+                    peerId = resolvedReceiverId,
+                    callerAvatarUrl = resolvedAvatar
                 )
 
                 val callerPublicAvatar = currentIdentity?.avatarPath?.takeIf {
