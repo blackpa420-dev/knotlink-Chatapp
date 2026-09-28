@@ -6063,6 +6063,7 @@ fun ChatProfileDetailsPage(
     }
 
     val context = LocalContext.current
+    val mediaScope = rememberCoroutineScope()
     val isGroupChat = chatName.contains("[Group]", ignoreCase = true) || chatId.startsWith("group_")
 
     val groupAvatarMap by viewModel.groupAvatarMap.collectAsState()
@@ -7130,7 +7131,7 @@ fun ChatProfileDetailsPage(
                     var mediaInfoEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
                     var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
                     var mediaResolution by remember { mutableStateOf("Original") }
-                    val mediaScope = rememberCoroutineScope()
+
 
                     Column(
                         modifier = Modifier.fillMaxWidth(),
