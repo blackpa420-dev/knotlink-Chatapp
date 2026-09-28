@@ -429,26 +429,26 @@ object SupabaseRealtimeManager {
             }
         }
     }
+    /**
+     * Realtime is an at-least-once transport: the same logical message can arrive
+     * from broadcast, Postgres INSERT and the polling safety-net. Deduplicate only
+     * by immutable message identity. Never use text/time buckets because two real
+     * messages may legitimately contain the same text within the same second.
+     */
     private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
-        val cleanText = msg.text.trim().take(40)
-        val timeBucket = msg.timestamp / 10000L // 10-second window
-        val contentBucketKey = "${msg.chatId}_${msg.senderId}_${cleanText}_$timeBucket"
-        val idKey = if (msg.id.isNotBlank() && !msg.id.startsWith("msg_")) "id_${msg.id}" else contentBucketKey
-        val clientKey = if (!msg.clientMsgId.isNullOrBlank()) "client_${msg.clientMsgId}" else null
+        val serverKey = msg.id.trim().takeIf { it.isNotBlank() }?.let { "server:$it" }
+        val clientKey = msg.clientMsgId?.trim()?.takeIf { it.isNotBlank() }?.let { "client:$it" }
 
-        val isAlreadyProcessed = processedMessageIds.contains(contentBucketKey) ||
-            processedMessageIds.contains(idKey) ||
-            (clientKey != null && processedMessageIds.contains(clientKey))
+        val keys = listOfNotNull(serverKey, clientKey)
+        if (keys.isEmpty()) return false
 
-        if (isAlreadyProcessed) {
-            return true
-        }
-        processedMessageIds.add(contentBucketKey)
-        if (idKey != contentBucketKey) {
-            processedMessageIds.add(idKey)
-        }
-        if (clientKey != null) {
-            processedMessageIds.add(clientKey)
+        if (keys.any { processedMessageIds.contains(it) }) return true
+        keys.forEach { processedMessageIds.add(it) }
+
+        // Bound memory for long-running app processes.
+        if (processedMessageIds.size > 5000) {
+            val iterator = processedMessageIds.iterator()
+            repeat(1000) { if (iterator.hasNext()) { iterator.next(); iterator.remove() } }
         }
         return false
     }
