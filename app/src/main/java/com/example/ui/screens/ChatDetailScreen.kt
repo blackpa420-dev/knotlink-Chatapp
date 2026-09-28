@@ -6005,7 +6005,7 @@ fun InteractiveCallDialog(
                                 text = "$chatName is currently disconnected from the KnotLink network.",
                                 color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
                                 fontSize = 12.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                textAlign = androidx.compose.ui.text.style.androidx.compose.ui.text.style.TextAlign.Center
                             )
 
                             Row(
@@ -7093,7 +7093,7 @@ fun ChatProfileDetailsPage(
                                 text = "Leaving will remove you from this group's encrypted channel.",
                                 color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
                                 fontSize = 11.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                textAlign = androidx.compose.ui.text.style.androidx.compose.ui.text.style.TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Button(
@@ -7654,7 +7654,7 @@ fun ChatProfileDetailsPage(
                                 modifier = Modifier.fillMaxWidth().height(100.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = TextAlign.Center)
+                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             }
                         }
                     }
