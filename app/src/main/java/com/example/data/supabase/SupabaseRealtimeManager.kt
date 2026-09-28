@@ -557,6 +557,7 @@ object SupabaseRealtimeManager {
                         put("reply_to_id", msg.replyToId ?: "")
                         put("is_forwarded", msg.isForwarded)
                         put("status", msg.status)
+                        put("client_msg_id", msg.clientMsgId ?: "")
                     })
                 }
                 val broadcastMsg = JSONObject().apply {
