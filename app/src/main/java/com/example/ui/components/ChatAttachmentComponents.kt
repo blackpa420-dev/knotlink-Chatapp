@@ -939,19 +939,32 @@ fun PollCreatorDialog(
     val bgColor = if (isNightMode) Color(0xFF1E1F2B) else Color.White
     val textColor = if (isNightMode) Color.White else Color(0xFF0F172A)
     val subTextColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B)
+    val fieldBg = if (isNightMode) Color(0xFF1B1F2A) else Color.White
+    val fieldBorder = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFD6DEE8)
+    val pollSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val pollScrollState = rememberScrollState()
 
-    Dialog(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = pollSheetState,
+        modifier = Modifier.fillMaxHeight(),
+        containerColor = bgColor,
+        scrimColor = Color.Black.copy(alpha = 0.48f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
             color = bgColor,
-            shadowElevation = 10.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+            shadowElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp),
+                    .fillMaxSize()
+                    .imePadding()
+                    .navigationBarsPadding()
+                    .verticalScroll(pollScrollState)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Header
@@ -1043,7 +1056,18 @@ fun PollCreatorDialog(
                                     .weight(1f)
                                     .focusRequester(requester),
                                 shape = RoundedCornerShape(14.dp),
-                                singleLine = true
+                                singleLine = true,
+                                 colors = OutlinedTextFieldDefaults.colors(
+                                     focusedTextColor = textColor,
+                                     unfocusedTextColor = textColor,
+                                     focusedContainerColor = fieldBg,
+                                     unfocusedContainerColor = fieldBg,
+                                     focusedBorderColor = Color(0xFF2563EB),
+                                     unfocusedBorderColor = fieldBorder,
+                                     focusedLabelColor = Color(0xFF2563EB),
+                                     unfocusedLabelColor = subTextColor,
+                                     cursorColor = Color(0xFF2563EB)
+                                 )
                             )
                             if (optionsList.size > 2) {
                                 IconButton(
@@ -1473,7 +1497,7 @@ fun ChecklistCreatorDialog(
     onCreateChecklist: (String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
-    val items = remember { mutableStateListOf("Task 1", "Task 2") }
+    val items = remember { mutableStateListOf<String>() }
     var newItemText by remember { mutableStateOf("") }
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
@@ -1482,16 +1506,17 @@ fun ChecklistCreatorDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        modifier = Modifier.fillMaxHeight(0.92f),
+        modifier = Modifier.fillMaxHeight(),
         containerColor = if (isNightMode) Color(0xFF151821) else Color(0xFFF8FAFC),
         scrimColor = Color.Black.copy(alpha = 0.48f),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(scrollState)
+                .fillMaxSize()
+                .imePadding()
                 .navigationBarsPadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Box(
@@ -1562,13 +1587,32 @@ fun ChecklistCreatorDialog(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            if (items.isEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
+                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Default.CheckBoxOutlineBlank, contentDescription = null, tint = Color(0xFF06B6D4), modifier = Modifier.size(26.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("No items yet", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Add your first task below", color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B), fontSize = 11.sp)
+                    }
+                }
+            }
+
             items.forEachIndexed { idx, item ->
                 Surface(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     shape = RoundedCornerShape(16.dp),
                     color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
                     border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF)),
-                    shadowElevation = if (isNightMode) 0.dp else 1.dp
+                    shadowElevation = 0.dp
                 ) {
                     Row(
                         modifier = Modifier.padding(start = 13.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
