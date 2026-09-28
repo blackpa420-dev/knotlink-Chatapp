@@ -1351,9 +1351,6 @@ class BitChatRepository(val dao: BitChatDao) {
             val clientKey = supaMsg.clientMsgId ?: ""
             val existingLocal = dao.findMessageByServerId(supaMsg.id)
                 ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
-                ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-                ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
 
             val updatedEntity = if (existingLocal != null) {
                 existingLocal.copy(
@@ -1373,19 +1370,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingLocal.pinnedAt
                 )
             } else {
-                val pendingRecent = dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                if (pendingRecent != null) {
-                    pendingRecent.copy(
-                        serverMessageId = supaMsg.id,
-                        syncStatus = "SYNCED",
-                        deliveryState = when {
-                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
-                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
-                        else -> "SENT"
-                    }
-                    )
-                } else {
-                    MessageEntity(
+                MessageEntity(
                         chatId = supaMsg.chatId,
                         senderName = "You",
                         text = msgText,
@@ -1404,7 +1389,6 @@ class BitChatRepository(val dao: BitChatDao) {
                         replySnippet = replySnippet,
                         replySenderName = replySenderName
                     )
-                }
             }
             dao.insertMessage(updatedEntity)
 
@@ -1482,9 +1466,6 @@ class BitChatRepository(val dao: BitChatDao) {
         val clientKey = supaMsg.clientMsgId ?: ""
         val existingIncoming = dao.findMessageByServerId(supaMsg.id)
             ?: clientKey.takeIf { it.isNotBlank() }?.let { dao.getMessageByServerOrClientId(supaMsg.id, it) }
-            ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-            ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-            ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
 
         if (existingIncoming != null) {
             val updated = existingIncoming.copy(
