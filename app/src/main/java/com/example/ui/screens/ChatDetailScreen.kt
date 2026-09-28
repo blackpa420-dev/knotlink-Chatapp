@@ -924,7 +924,7 @@ fun ChatDetailScreen(
                                         imageVector = Icons.Default.Call,
                                         contentDescription = "Audio Call",
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(21.dp)
                                     )
                                 }
                             }
@@ -945,7 +945,7 @@ fun ChatDetailScreen(
                                 color = Color.Transparent,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(42.dp)
                                     .graphicsLayer {
                                         scaleX = videoScale
                                         scaleY = videoScale
