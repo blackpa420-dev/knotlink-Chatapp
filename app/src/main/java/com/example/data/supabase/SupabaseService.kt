@@ -246,6 +246,7 @@ object SupabaseService {
                 )
             }
             currentSession = session
+            persistSession(session)
             Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error in signUpWithEmail", e)
