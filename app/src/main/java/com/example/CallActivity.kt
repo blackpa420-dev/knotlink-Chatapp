@@ -53,6 +53,12 @@ class CallActivity : FragmentActivity() {
                         callId = endedId
                     )
                 }
+                // The remote caller cancelled/ended the session. Do not leave the
+                // dedicated full-screen CallActivity visible after the signaling
+                // state has become terminal. This is especially important when the
+                // receiver has not answered yet: there is no active WebRTC call,
+                // so the Compose active-call observer alone cannot finish the task.
+                finishCallTask()
             }
         }
     }
