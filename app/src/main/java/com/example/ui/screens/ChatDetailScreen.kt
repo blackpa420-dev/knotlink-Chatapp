@@ -1909,8 +1909,8 @@ fun ChatDetailScreen(
                                         Text(
                                             text = String.format("%02d:%02d", mins, secs),
                                             color = Color(0xFFEF4444),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                             fontWeight = FontWeight.ExtraBold,
                                             fontFamily = FontFamily.Monospace
                                         )
                                          val waveTransition = rememberInfiniteTransition(label = "record_ecg")
