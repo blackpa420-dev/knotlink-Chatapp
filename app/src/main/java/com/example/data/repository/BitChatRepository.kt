@@ -1646,22 +1646,23 @@ class BitChatRepository(val dao: BitChatDao) {
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
             val historyEmail = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername }
 
-            // Always fetch a recent server window when the app returns from a long
-            // background/closed period. This is the recovery path when an FCM data
-            // message was delayed, dropped, or the service process was killed.
-            val recentRes = SupabaseService.fetchUserMessages(
-                userId = myUid,
-                username = historyUsername,
-                email = historyEmail,
-                limit = 500
-            )
-            if (recentRes.isSuccess) {
-                recentRes.getOrNull()?.let { fetchedMessages.addAll(it) }
-            }
-
-            // Also fetch the incremental window with a small overlap so timestamp
-            // boundaries and delayed delivery cannot leave a permanent hole.
-            if (previousSync > 0L) {
+            // Room is the primary history store. Only the first sync for a
+            // completely empty local history downloads the initial server window.
+            // Once a sync checkpoint exists, fetch only messages newer than the
+            // local checkpoint (with a small overlap for timestamp/retry safety).
+            // This prevents reopening the app from repeatedly downloading old
+            // history and keeps Supabase traffic focused on new/missing messages.
+            if (previousSync <= 0L) {
+                val initialRes = SupabaseService.fetchUserMessages(
+                    userId = myUid,
+                    username = historyUsername,
+                    email = historyEmail,
+                    limit = 500
+                )
+                if (initialRes.isSuccess) {
+                    initialRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+                }
+            } else {
                 val sinceRes = SupabaseService.fetchUserMessagesSince(
                     userId = myUid,
                     username = historyUsername,
