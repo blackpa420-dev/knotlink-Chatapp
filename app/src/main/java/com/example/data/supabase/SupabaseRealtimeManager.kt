@@ -163,7 +163,13 @@ object SupabaseRealtimeManager {
             } catch (_: Exception) {}
             webSocket = null
 
-            val url = SupabaseConfig.REALTIME_WS_URL
+            val baseUrl = SupabaseConfig.REALTIME_WS_URL
+            val accessToken = SupabaseService.getAccessToken()
+            val url = if (accessToken.isNotBlank() && accessToken != SupabaseConfig.ANON_KEY) {
+                "$baseUrl&access_token=${java.net.URLEncoder.encode(accessToken, "UTF-8")}"
+            } else {
+                baseUrl
+            }
             val request = Request.Builder().url(url).build()
 
             webSocket = wsClient.newWebSocket(request, object : WebSocketListener() {
@@ -407,16 +413,18 @@ object SupabaseRealtimeManager {
                             }
                         }
 
-                        if (webSocket == null) {
-                            SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
-                            SupabaseService.fetchUserMessages(
-                                userId = uid,
-                                username = uname,
-                                email = currentUserEmail,
-                                limit = 15
-                            ).getOrNull()?.forEach { msg ->
-                                handlePolledMessage(msg, uid, uname)
-                            }
+                        // Realtime is the fast path; polling is the delivery safety-net.
+                        // Do not disable it merely because a WebSocket object exists: a socket
+                        // can be connected while an event is missed due to reconnects, OEM
+                        // background restrictions, or a Realtime subscription/RLS mismatch.
+                        SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
+                        SupabaseService.fetchUserMessages(
+                            userId = uid,
+                            username = uname,
+                            email = currentUserEmail,
+                            limit = 15
+                        ).getOrNull()?.forEach { msg ->
+                            handlePolledMessage(msg, uid, uname)
                         }
                     }
                     loopCounter++
@@ -535,42 +543,12 @@ object SupabaseRealtimeManager {
     }
 
     fun broadcastNewMessage(msg: SupabaseMessage) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) {
-                    connectWebSocket()
-                }
-
-                val msgRef = "bc_msg_${System.currentTimeMillis()}"
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "new_message")
-                    put("payload", JSONObject().apply {
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("message_type", msg.messageType)
-                        put("reply_to_id", msg.replyToId ?: "")
-                        put("is_forwarded", msg.isForwarded)
-                        put("status", msg.status)
-                        put("client_msg_id", msg.clientMsgId ?: "")
-                    })
-                }
-                val broadcastMsg = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", msgRef)
-                }
-                webSocket?.send(broadcastMsg.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending new_message broadcast: ${e.message}")
-            }
-        }
+        // Message bodies are intentionally NOT sent through a public Realtime
+        // broadcast channel. Durable Postgres INSERT + RLS-gated postgres_changes
+        // + the polling safety-net are the only delivery paths for message content.
+        // This prevents an unrelated client from subscribing to a public topic and
+        // receiving another user's message payload.
+        Log.d(TAG, "Skipping public message broadcast; using RLS-gated database delivery for ${msg.id}")
     }
 
     fun broadcastMessageMutation(msg: SupabaseMessage, mutation: String) {
