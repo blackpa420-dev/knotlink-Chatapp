@@ -7310,11 +7310,11 @@ fun ChatProfileDetailsPage(
                         }
 
                         val directSharedItems = remember(chatMessages, selectedPillTab) {
-                            chatMessages.flatMap { msg ->
+                            chatMessages.asReversed().flatMap { msg ->
                                 extractProfileMediaUrls(msg.text, selectedPillTab).map { url ->
                                     Triple(selectedPillTab, url, msg)
                                 }
-                            }.take(24)
+                            }.distinctBy { entry -> entry.second }.take(24)
                         }
 
                         if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios") {
