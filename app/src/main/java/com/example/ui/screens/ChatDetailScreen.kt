@@ -472,7 +472,10 @@ fun ChatDetailScreen(
 
     // New messages only auto-scroll when the user was already at the bottom.
     LaunchedEffect(messages.lastOrNull()?.id) {
-        if (!hasInitialScrolled || !isUserNearBottom || displayedMessages.isEmpty()) return@LaunchedEffect
+         if (!hasInitialScrolled || displayedMessages.isEmpty()) return@LaunchedEffect
+         val newestMessage = messages.lastOrNull()
+         val shouldFollowNewest = isUserNearBottom || newestMessage?.isFromUser == true
+         if (!shouldFollowNewest) return@LaunchedEffect
         kotlinx.coroutines.yield()
         val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
         listState.animateScrollToItem(lastIndex)
@@ -1799,7 +1802,7 @@ fun ChatDetailScreen(
                                 isRecordingLocked = false
                                 recordSeconds = 0
                                 recordDragOffsetX = 0f
-                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
+                                
                             },
                             modifier = Modifier.size(44.dp)
                         ) {
@@ -2085,29 +2088,21 @@ fun ChatDetailScreen(
                                     val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
                                     if (recFile != null && recFile.exists() && secs >= 1) {
                                         val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                        val base64Data = try {
-                                            val bytes = recFile.readBytes()
-                                            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                        } catch (_: Exception) { null }
-
-                                        val textToSend = if (isViewOnce) {
-                                            if (!base64Data.isNullOrBlank()) {
-                                                "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                        val audioUrl = runCatching {
+                                            viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                        }.getOrNull()
+                                        if (!audioUrl.isNullOrBlank()) {
+                                            val textToSend = if (isViewOnce) {
+                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
                                             } else {
-                                                "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                             }
-                                        } else {
-                                            if (!base64Data.isNullOrBlank()) {
-                                                "[AUDIO_BASE64|$base64Data|$durStr] 🎙️ Voice Note ($durStr)"
-                                            } else {
-                                                "[AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ Voice Note ($durStr)"
-                                            }
+                                            viewModel.sendMessage(chatId, textToSend)
                                         }
-                                        viewModel.sendMessage(chatId, textToSend)
-                                        Toast.makeText(localContext, if (isViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
+                                        
                                     } else {
                                         com.example.util.AudioRecorderManager.cancelRecording()
-                                        Toast.makeText(localContext, "Voice note must be at least 1 second ⏱️", Toast.LENGTH_SHORT).show()
+                                        
                                     }
                                     isRecording = false
                                     isRecordingLocked = false
@@ -2284,7 +2279,7 @@ fun ChatDetailScreen(
                                                                 }
                                                                 vibrator?.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
                                                             } catch (_: Exception) {}
-                                                            Toast.makeText(localContext, "Recording locked hands-free 🔒", Toast.LENGTH_SHORT).show()
+                                                            
                                                         }
 
                                                         // Drag left past threshold (-240f) to trigger instant cancellation
@@ -2343,30 +2338,22 @@ fun ChatDetailScreen(
                                                         val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
                                                         if (recFile != null && recFile.exists() && secs >= 1) {
                                                             val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                                            val base64Data = try {
-                                                                val bytes = recFile.readBytes()
-                                                                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                                            } catch (_: Exception) { null }
-
-                                                            val textToSend = if (isViewOnce) {
-                                                                if (!base64Data.isNullOrBlank()) {
-                                                                    "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                            val audioUrl = runCatching {
+                                                                viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                                            }.getOrNull()
+                                                            if (!audioUrl.isNullOrBlank()) {
+                                                                val textToSend = if (isViewOnce) {
+                                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
                                                                 } else {
-                                                                    "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                                    "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                                                 }
-                                                            } else {
-                                                                if (!base64Data.isNullOrBlank()) {
-                                                                    "[AUDIO_BASE64|$base64Data|$durStr] 🎙️ Voice Note ($durStr)"
-                                                                } else {
-                                                                    "[AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ Voice Note ($durStr)"
-                                                                }
+                                                                viewModel.sendMessage(chatId, textToSend)
                                                             }
-                                                            viewModel.sendMessage(chatId, textToSend)
                                                             Toast.makeText(localContext, if (isViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             com.example.util.AudioRecorderManager.cancelRecording()
                                                             if (secs > 0 || holdDuration > 800L) {
-                                                                Toast.makeText(localContext, "Hold for at least 1 second ⏱️", Toast.LENGTH_SHORT).show()
+                                                                
                                                             }
                                                         }
                                                     }
@@ -3630,25 +3617,17 @@ fun ChatDetailScreen(
                                 val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
                                 if (recFile != null && recFile.exists() && secs >= 1) {
                                     val formattedDur = String.format("%02d:%02d", secs / 60, secs % 60)
-                                    val base64Data = try {
-                                        val bytes = recFile.readBytes()
-                                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                                    } catch (_: Exception) { null }
-
-                                    val textToSend = if (sheetIsViewOnce) {
-                                        if (!base64Data.isNullOrBlank()) {
-                                            "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                    val audioUrl = runCatching {
+                                        viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
+                                    }.getOrNull()
+                                    if (!audioUrl.isNullOrBlank()) {
+                                        val textToSend = if (isViewOnce) {
+                                            "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
                                         } else {
-                                            "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                            "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
                                         }
-                                    } else {
-                                        if (!base64Data.isNullOrBlank()) {
-                                            "[AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ Voice Note ($formattedDur)"
-                                        } else {
-                                            "[AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ Voice Note ($formattedDur)"
-                                        }
+                                        viewModel.sendMessage(chatId, textToSend)
                                     }
-                                    viewModel.sendMessage(chatId, textToSend)
                                     Toast.makeText(localContext, if (sheetIsViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
                                 } else {
                                     com.example.util.AudioRecorderManager.cancelRecording()
@@ -5434,11 +5413,7 @@ fun TelegramAudioWaveformBeats(
             barHeights.forEachIndexed { idx, height ->
                 val barFraction = idx / (barHeights.size - 1).toFloat()
                 val isPlayed = barFraction <= progress
-                val activeBrush = if (isUser) {
-                    Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.85f)))
-                } else {
-                    Brush.verticalGradient(listOf(Color(0xFF2563EB), Color(0xFF06B6D4)))
-                }
+                val activeBrush = Brush.verticalGradient(listOf(Color(0xFFF59E0B), Color(0xFFB91C1C)))
                 val inactiveColor = if (isUser) Color.White.copy(alpha = 0.3f) else (if (isNightMode) Color.White.copy(alpha = 0.2f) else Color(0xFFCBD5E1))
 
                 Box(
@@ -5552,7 +5527,7 @@ fun VoiceNoteMessageBubble(
     val bubble = if (isUser) Color(0xFF2563EB) else if (isNightMode) Color(0xFF181C24) else Color.White
     val primary = if (isUser) Color.White else if (isNightMode) Color(0xFFF4F7FB) else Color(0xFF0F172A)
     val secondary = if (isUser) Color.White.copy(alpha = 0.72f) else if (isNightMode) Color(0xFF9AA5B5) else Color(0xFF64748B)
-    val playSurface = if (isUser) Color.White.copy(alpha = 0.18f) else Color(0xFF2563EB)
+    val playSurface = Brush.linearGradient(listOf(Color(0xFFD97706), Color(0xFFB91C1C)))
     val shape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 5.dp)
 
     Surface(
@@ -5560,7 +5535,7 @@ fun VoiceNoteMessageBubble(
         color = bubble,
         border = if (isUser) null else BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE2E8F0)),
         shadowElevation = if (isNightMode || isUser) 0.dp else 2.dp,
-        modifier = Modifier.widthIn(min = 232.dp, max = 292.dp).padding(vertical = 3.dp)
+        modifier = Modifier.widthIn(min = 205.dp, max = 270.dp).padding(vertical = 3.dp)
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -5569,7 +5544,7 @@ fun VoiceNoteMessageBubble(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = if (isViewOnce) "1-Time Voice" else "Voice message", color = primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
-                Text("1×", color = secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+
             }
             Spacer(modifier = Modifier.height(7.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -7291,9 +7266,7 @@ fun ChatProfileDetailsPage(
                                                 val kind = entry.first
                                                 val mediaUrl = entry.second
                                                 val mediaMessage = entry.third
-                                                val displayMediaUrl = remember(mediaUrl, kind) {
-                                                    materializeProfileMediaUrl(mediaUrl, kind)
-                                                }
+                                                val displayMediaUrl = rememberProfileMediaUrl(mediaUrl, kind)
                                                 Box(
                                                     modifier = Modifier
                                                         .weight(1f)
@@ -7418,9 +7391,7 @@ selectedMediaEntry?.let { entry ->
         val kind = entry.first
         val mediaUrl = entry.second
         val mediaMessage = entry.third
-        val displayMediaUrl = remember(entry) {
-            materializeProfileMediaUrl(mediaUrl, kind)
-        }
+        val displayMediaUrl = rememberProfileMediaUrl(mediaUrl, kind)
         var showMediaMenu by remember(entry) { mutableStateOf(false) }
         var audioReady by remember(entry) { mutableStateOf(false) }
         var audioPlaying by remember(entry) { mutableStateOf(false) }
