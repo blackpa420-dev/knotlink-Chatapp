@@ -462,11 +462,38 @@ class BitChatRepository(val dao: BitChatDao) {
             return cleanCandidate
         }
 
-        // 2. Build list of potential candidate identifiers
+        // 2. Build a compatibility list of candidate identifiers.
+        // Older KnotLink/BitChat builds encoded users as KNOTLINK:USER:<username>
+        // or BITCHAT:USER:<username>. Those values are not valid Supabase Auth
+        // UUIDs, so sending with them makes the sender's row persist but leaves
+        // the recipient unable to see it. Normalize those legacy identifiers
+        // before falling back to profile lookup.
         val candidateList = mutableListOf<String>()
         if (candidate.isNotBlank()) {
-            candidateList.add(candidate.trim())
-            val stripped = candidate.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
+            val rawCandidate = candidate.trim()
+            candidateList.add(rawCandidate)
+
+            val legacyPrefixes = listOf(
+                "KNOTLINK:USER:",
+                "BITCHAT:USER:",
+                "KNOTLINK:",
+                "BITCHAT:"
+            )
+            var legacyStripped = rawCandidate
+            for (prefix in legacyPrefixes) {
+                if (legacyStripped.startsWith(prefix, ignoreCase = true)) {
+                    legacyStripped = legacyStripped.substring(prefix.length).trim()
+                    break
+                }
+            }
+
+            val stripped = legacyStripped
+                .removePrefix("chat_")
+                .removePrefix("user_")
+                .removePrefix("@")
+                .trim()
+
+            if (legacyStripped.isNotBlank()) candidateList.add(legacyStripped)
             if (stripped.isNotBlank()) candidateList.add(stripped)
         }
 
@@ -484,7 +511,20 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         if (chatId.isNotBlank()) {
-            val cleanChat = chatId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
+            var cleanChat = chatId.trim()
+            val legacyPrefixes = listOf(
+                "KNOTLINK:USER:",
+                "BITCHAT:USER:",
+                "KNOTLINK:",
+                "BITCHAT:"
+            )
+            for (prefix in legacyPrefixes) {
+                if (cleanChat.startsWith(prefix, ignoreCase = true)) {
+                    cleanChat = cleanChat.substring(prefix.length).trim()
+                    break
+                }
+            }
+            cleanChat = cleanChat.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
             if (cleanChat.isNotBlank() && cleanChat != "global" && cleanChat != "bitassistant") {
                 candidateList.add(cleanChat)
             }
