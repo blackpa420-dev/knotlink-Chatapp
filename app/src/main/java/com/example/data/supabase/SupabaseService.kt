@@ -1030,6 +1030,11 @@ object SupabaseService {
 
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
+            // Preserve the legacy chat bootstrap behavior. Some existing/direct chats
+            // can reach the composer before their chat row has been materialized.
+            // Message persistence must not depend on a prior UI-only chat insert.
+            ensureChatExists(message.chatId)
+
             // Refresh/validate the session before deriving authorization. This
             // keeps the protected row's sender_id exactly equal to auth.uid().
             val authenticatedUid = getAuthenticatedUserId().getOrElse { error ->
