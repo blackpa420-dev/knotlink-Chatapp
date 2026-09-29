@@ -1062,6 +1062,10 @@ object SupabaseService {
 
             if (!response.isSuccessful) {
                 val errorMsg = parseErrorMessage(resStr, "Failed to send message (${response.code})")
+                Log.e(
+                    TAG,
+                    "Message REST insert failed: HTTP ${response.code}; body=${resStr.take(1200)}"
+                )
                 return@withContext Result.failure(Exception(errorMsg))
             }
 
