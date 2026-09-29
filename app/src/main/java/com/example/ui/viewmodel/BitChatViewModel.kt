@@ -226,22 +226,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             Log.w("BitChat_Debug", "Presence setup warning: ${e.message}")
         }
 
-        // Automatic one-time session reset for new clean database instance
-        viewModelScope.launch {
-            try {
-                val dbPref = application.getSharedPreferences("knotlink_migration_pref", android.content.Context.MODE_PRIVATE)
-                val migrated = dbPref.getBoolean("v2_new_db_reset_done", false)
-                if (!migrated) {
-                    SupabaseService.signOut()
-                    repository.clearAllLocalData()
-                    dbPref.edit().putBoolean("v2_new_db_reset_done", true).apply()
-                    Log.d("BitChat_Debug", "Successfully performed clean auto-logout for new database migration")
-                }
-            } catch (e: Throwable) {
-                Log.w("BitChat_Debug", "Session reset error: ${e.message}")
-            }
-        }
-
+        // Authentication is restored/refreshed by SupabaseService.
+        // Never sign out or wipe local identity automatically at startup.
         // Observe user identity and initialize Realtime listener with actual UID
         viewModelScope.launch {
             repository.userIdentity.collect { identity ->
