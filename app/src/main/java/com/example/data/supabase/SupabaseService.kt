@@ -325,10 +325,18 @@ object SupabaseService {
         email: String,
         password: String
     ): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase()
+        if (normalizedEmail.isBlank()) {
+            return@withContext Result.failure(Exception("Please enter your email address"))
+        }
+        if (password.isBlank()) {
+            return@withContext Result.failure(Exception("Please enter your password"))
+        }
+
         try {
             val url = "${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=password"
             val bodyObj = JSONObject().apply {
-                put("email", email.trim())
+                put("email", normalizedEmail)
                 put("password", password)
             }
 
@@ -340,19 +348,42 @@ object SupabaseService {
                 .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            httpClient.newCall(request).execute().use { response ->
+                val resStr = response.body?.string().orEmpty()
 
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(resStr, "Invalid email or password")
-                return@withContext Result.failure(Exception(errorMsg))
+                if (!response.isSuccessful) {
+                    // Keep the real non-sensitive GoTrue/Auth error so the UI and
+                    // logcat can distinguish invalid credentials from rate limits,
+                    // disabled providers, confirmation requirements, etc.
+                    val errorMsg = parseErrorMessage(
+                        resStr,
+                        "Supabase Auth login failed (HTTP ${response.code})"
+                    ).trim().ifBlank {
+                        "Supabase Auth login failed (HTTP ${response.code})"
+                    }
+                    Log.w(
+                        TAG,
+                        "signInWithEmail failed: HTTP ${response.code}, email=$normalizedEmail, error=${errorMsg.take(300)}"
+                    )
+                    return@withContext Result.failure(Exception(errorMsg))
+                }
+
+                val json = JSONObject(resStr)
+                val session = SupabaseAuthSession.fromJson(json)
+                if (session.accessToken.isBlank() || session.accessToken == SupabaseConfig.ANON_KEY) {
+                    Log.w(TAG, "signInWithEmail returned success without an authenticated access token")
+                    return@withContext Result.failure(
+                        Exception("Supabase Auth returned no authenticated session")
+                    )
+                }
+
+                // The token returned by GoTrue is authoritative. Do not keep a
+                // previous account's session when switching between accounts.
+                currentSession = session
+                persistSession(session)
+                Log.d(TAG, "Supabase email login succeeded for user=${session.user?.id.orEmpty()}")
+                Result.success(session)
             }
-
-            val json = JSONObject(resStr)
-            val session = SupabaseAuthSession.fromJson(json)
-            currentSession = session
-            persistSession(session)
-            Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error in signInWithEmail", e)
             Result.failure(e)
