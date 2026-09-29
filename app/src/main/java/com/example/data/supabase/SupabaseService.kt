@@ -148,6 +148,57 @@ object SupabaseService {
         return currentSession?.user?.id
     }
 
+    /**
+     * Returns the canonical Supabase Auth UID from the currently authenticated
+     * access token. This deliberately refreshes the session first so callers
+     * never build protected rows from a stale/local identity.
+     */
+    suspend fun getAuthenticatedUserId(): Result<String> = withContext(Dispatchers.IO) {
+        if (!ensureAuthenticatedSession()) {
+            return@withContext Result.failure(Exception("Supabase session expired. Please sign in again."))
+        }
+
+        try {
+            val token = currentSession?.accessToken
+                ?: return@withContext Result.failure(Exception("No authenticated Supabase access token"))
+
+            val parts = token.split(".")
+            if (parts.size != 3) {
+                return@withContext Result.failure(Exception("Invalid Supabase access token"))
+            }
+
+            val payloadBytes = android.util.Base64.decode(
+                parts[1],
+                android.util.Base64.URL_SAFE or
+                    android.util.Base64.NO_WRAP or
+                    android.util.Base64.NO_PADDING
+            )
+            val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
+            val subject = payload.optString("sub").trim()
+
+            if (!isValidUuid(subject)) {
+                return@withContext Result.failure(Exception("Authenticated Supabase UID is invalid"))
+            }
+
+            // Keep the in-memory/persisted session user synchronized with the
+            // token subject so future calls cannot use a stale local UID.
+            val existing = currentSession
+            if (existing?.user?.id != subject) {
+                val syncedUser = SupabaseUser(
+                    id = subject,
+                    email = existing?.user?.email ?: ""
+                )
+                currentSession = existing?.copy(user = syncedUser)
+                persistSession(currentSession)
+            }
+
+            Result.success(subject)
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to resolve authenticated Supabase UID", e)
+            Result.failure(Exception("Unable to resolve authenticated Supabase user"))
+        }
+    }
+
     private suspend fun ensureAuthenticatedSession(): Boolean = withContext(Dispatchers.IO) {
         val session = currentSession
         if (session != null && isJwtValid(session.accessToken)) return@withContext true
