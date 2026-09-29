@@ -23,6 +23,7 @@ object SupabaseService {
     private const val TAG = "SupabaseService"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val callCandidateMutexes = ConcurrentHashMap<String, Mutex>()
+    private val authSessionMutex = Mutex()
     private val localCallCandidates = ConcurrentHashMap<String, JSONArray>()
     private data class ProfileCacheEntry(val profile: SupabaseProfile?, val cachedAt: Long)
     private const val PROFILE_CACHE_TTL_MS = 60_000L
@@ -72,7 +73,12 @@ object SupabaseService {
 
     fun init(context: android.content.Context) {
         if (prefs == null) {
-            prefs = context.applicationContext.getSharedPreferences("bitchat_supabase_prefs", android.content.Context.MODE_PRIVATE)
+            prefs = context.applicationContext.getSharedPreferences(
+                "bitchat_supabase_prefs",
+                android.content.Context.MODE_PRIVATE
+            )
+        }
+        if (currentSession == null) {
             restoreSession()
         }
     }
@@ -200,48 +206,64 @@ object SupabaseService {
         }
     }
 
-    private suspend fun ensureAuthenticatedSession(forceRefresh: Boolean = false): Boolean = withContext(Dispatchers.IO) {
-        val session = currentSession
-        if (!forceRefresh && session != null && isJwtValid(session.accessToken)) return@withContext true
+    private suspend fun ensureAuthenticatedSession(forceRefresh: Boolean = false): Boolean {
+        return authSessionMutex.withLock {
+            withContext(Dispatchers.IO) {
+                if (currentSession == null) {
+                    restoreSession()
+                }
 
-        val refreshToken = session?.refreshToken?.takeIf { it.isNotBlank() }
-            ?: prefs?.getString("refresh_token", null)?.takeIf { it.isNotBlank() }
-            ?: return@withContext false
+                val session = currentSession
+                if (!forceRefresh && session != null && isJwtValid(session.accessToken)) {
+                    return@withContext true
+                }
 
-        try {
-            val url = "${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token"
-            val body = JSONObject().apply { put("refresh_token", refreshToken) }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
+                val refreshToken = session?.refreshToken?.takeIf { it.isNotBlank() }
+                    ?: prefs?.getString("refresh_token", null)?.takeIf { it.isNotBlank() }
+                    ?: run {
+                        Log.w(TAG, "No Supabase refresh token available; authenticated session cannot be restored")
+                        return@withContext false
+                    }
 
-            val response = httpClient.newCall(request).execute()
-            val raw = response.body?.string() ?: ""
-            if (!response.isSuccessful || raw.isBlank()) {
-                Log.w(TAG, "Supabase session refresh failed: HTTP ${response.code}")
-                return@withContext false
+                try {
+                    val url = "${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token"
+                    val body = JSONObject().apply { put("refresh_token", refreshToken) }
+                    val request = Request.Builder()
+                        .url(url)
+                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                        .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                        .addHeader("Content-Type", "application/json")
+                        .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                        .build()
+
+                    httpClient.newCall(request).execute().use { response ->
+                        val raw = response.body?.string().orEmpty()
+                        if (!response.isSuccessful || raw.isBlank()) {
+                            Log.w(TAG, "Supabase session refresh failed: HTTP ${response.code}: ${raw.take(500)}")
+                            return@withContext false
+                        }
+
+                        val refreshed = SupabaseAuthSession.fromJson(JSONObject(raw))
+                        if (refreshed.accessToken.isBlank() || refreshed.accessToken == SupabaseConfig.ANON_KEY) {
+                            Log.w(TAG, "Supabase refresh returned no authenticated access token")
+                            return@withContext false
+                        }
+
+                        val effectiveUser = refreshed.user ?: session?.user
+                        currentSession = refreshed.copy(
+                            refreshToken = refreshed.refreshToken?.takeIf { it.isNotBlank() } ?: refreshToken,
+                            user = effectiveUser
+                        )
+                        persistSession(currentSession)
+                        true
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Supabase session refresh error: ${e.message}")
+                    false
+                }
             }
-
-            val refreshed = SupabaseAuthSession.fromJson(JSONObject(raw))
-            if (refreshed.accessToken.isBlank()) return@withContext false
-
-            val effectiveUser = refreshed.user ?: session?.user
-            currentSession = refreshed.copy(
-                refreshToken = refreshed.refreshToken ?: refreshToken,
-                user = effectiveUser
-            )
-            persistSession(currentSession)
-            true
-        } catch (e: Exception) {
-            Log.w(TAG, "Supabase session refresh error: ${e.message}")
-            false
         }
     }
-
     // ==========================================
     // AUTH API
     // ==========================================
@@ -466,9 +488,11 @@ object SupabaseService {
                 httpClient.newCall(request).execute()
             }
             currentSession = null
+            persistSession(null)
             Result.success(true)
         } catch (e: Exception) {
             currentSession = null
+            persistSession(null)
             Result.success(true)
         }
     }
