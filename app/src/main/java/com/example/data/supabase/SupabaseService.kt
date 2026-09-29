@@ -1029,10 +1029,20 @@ object SupabaseService {
 
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureAuthenticatedSession()) {
-                return@withContext Result.failure(Exception("Supabase session expired. Please sign in again."))
+            // Refresh/validate the session before deriving authorization. This
+            // keeps the protected row's sender_id exactly equal to auth.uid().
+            val authenticatedUid = getAuthenticatedUserId().getOrElse { error ->
+                return@withContext Result.failure(error)
             }
-            ensureChatExists(message.chatId)
+
+            if (!message.senderId.equals(authenticatedUid, ignoreCase = true)) {
+                Log.e(TAG, "Blocked message send: sender UID does not match authenticated UID")
+                return@withContext Result.failure(Exception("Message sender identity mismatch"))
+            }
+
+            if (message.receiverId.isBlank()) {
+                return@withContext Result.failure(Exception("Message recipient is missing"))
+            }
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}"
             val bodyStr = message.toJson().toString()
