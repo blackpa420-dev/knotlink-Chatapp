@@ -1648,14 +1648,27 @@ class BitChatRepository(val dao: BitChatDao) {
     suspend fun syncAllChatHistory(myUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
         if (myUid.isBlank()) return@withContext false
 
+        // History is protected by messages RLS, so the only safe identity for a
+        // restore is the UID from the current authenticated Supabase session.
+        // This prevents a stale Room identity / profile identifier from making
+        // one account restore correctly while another account gets an empty inbox.
+        val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrNull()
+            ?: return@withContext false
+        if (!authenticatedUid.equals(myUid, ignoreCase = true)) {
+            Log.w(
+                "BitChatRepo",
+                "History sync UID mismatch. requested=$myUid authenticated=$authenticatedUid; using authenticated UID."
+            )
+        }
+        val syncUid = authenticatedUid
+
         val now = System.currentTimeMillis()
-        val last = lastHistorySyncAt[myUid] ?: 0L
+        val last = lastHistorySyncAt[syncUid] ?: 0L
         if (now - last < HISTORY_SYNC_TTL_MS) return@withContext true
         historySyncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            val lockedLast = lastHistorySyncAt[myUid] ?: 0L
+            val lockedLast = lastHistorySyncAt[syncUid] ?: 0L
             if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock true
-            lastHistorySyncAt[myUid] = lockedNow
             try {
             // First run deduplication on existing copy chats
             deduplicateCopyChats()
@@ -1664,7 +1677,7 @@ class BitChatRepository(val dao: BitChatDao) {
             val myEmail = currentIdentity?.email?.trim()?.lowercase() ?: ""
             val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
             val fetchedMessages = mutableListOf<SupabaseMessage>()
-            val syncKey = "user_history:$myUid"
+            val syncKey = "user_history:$syncUid"
             val previousSync = dao.getSyncState(syncKey)?.lastSyncedAt ?: 0L
 
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
@@ -1678,7 +1691,7 @@ class BitChatRepository(val dao: BitChatDao) {
             // history and keeps Supabase traffic focused on new/missing messages.
             if (previousSync <= 0L) {
                 val initialRes = SupabaseService.fetchUserMessages(
-                    userId = myUid,
+                    userId = syncUid,
                     username = historyUsername,
                     email = historyEmail,
                     limit = 500
@@ -1688,7 +1701,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 }
             } else {
                 val sinceRes = SupabaseService.fetchUserMessagesSince(
-                    userId = myUid,
+                    userId = syncUid,
                     username = historyUsername,
                     email = historyEmail,
                     sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
@@ -1730,12 +1743,12 @@ class BitChatRepository(val dao: BitChatDao) {
             val existingChatMap = existingChats.associateBy { it.id }.toMutableMap()
 
             for (supaMsg in uniqueMessages) {
-                val isSentByMe = supaMsg.senderId == myUid ||
+                val isSentByMe = supaMsg.senderId == syncUid ||
                         (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
                         (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true)) ||
                         (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
 
-                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
+                val isReceivedByMe = supaMsg.receiverId.equals(syncUid, ignoreCase = true) ||
                         (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
                         (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
                         (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
@@ -1934,7 +1947,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 val isNoAvatar = chat.avatarType.isBlank() || chat.avatarType == "default"
                 if (isUgly || isNoAvatar) {
                     val parts = chat.participantUids.split(",").map { it.trim() }.filter {
-                        it.isNotBlank() && !it.equals(myUid, ignoreCase = true) && !it.equals(myUsername, ignoreCase = true) && !it.equals(myEmail, ignoreCase = true) && it != "user_me"
+                        it.isNotBlank() && !it.equals(syncUid, ignoreCase = true) && !it.equals(myUsername, ignoreCase = true) && !it.equals(myEmail, ignoreCase = true) && it != "user_me"
                     }
                     val pUid = parts.firstOrNull() ?: if (isUgly) chat.name else ""
                     if (pUid.isNotBlank()) {
@@ -1962,11 +1975,15 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.upsertSyncState(SyncStateEntity(syncKey, latestRemoteTimestamp))
             }
 
+            // Only mark the UID as recently synced after the complete restore
+            // succeeds. A failed/unauthenticated restore must be retryable.
+            lastHistorySyncAt[syncUid] = System.currentTimeMillis()
+
             // Run deduplication again after history sync
             deduplicateCopyChats()
             true
             } catch (e: Exception) {
-                Log.w("BitChatRepo", "syncAllChatHistory error: " + e.message, e)
+                Log.w("BitChatRepo", "syncAllChatHistory error for uid=$syncUid: " + e.message, e)
                 false
             }
         }
