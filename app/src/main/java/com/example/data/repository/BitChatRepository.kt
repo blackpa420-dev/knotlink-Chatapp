@@ -1270,10 +1270,14 @@ class BitChatRepository(val dao: BitChatDao) {
             val latestTime = if (latest.timestamp > 0L) {
                 SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(latest.timestamp))
             } else chat.timeString
+            // The inbox timestamp must represent the actual newest message,
+            // not the time when the ChatEntity was created/refreshed. Otherwise an
+            // old remote preview can keep a newer-looking lastUpdated value and
+            // later overwrite the real latest message.
             val corrected = chat.copy(
                 lastMessage = latestPreview,
                 timeString = latestTime,
-                lastUpdated = maxOf(chat.lastUpdated, latest.timestamp)
+                lastUpdated = latest.timestamp
             )
             if (corrected.lastMessage != chat.lastMessage || corrected.timeString != chat.timeString || corrected.lastUpdated != chat.lastUpdated) {
                 updates += corrected
@@ -1315,6 +1319,11 @@ class BitChatRepository(val dao: BitChatDao) {
                     dao.deleteChatById(dup.id)
                 }
             }
+
+            // Moving messages between duplicate chat IDs changes which message is
+            // considered latest for the surviving ChatEntity. Rebuild previews once
+            // more after the merge so the keeper cannot retain a stale copy preview.
+            refreshAllDirectChatPreviews()
         } catch (e: Exception) {
             Log.w("BitChatRepo", "deduplicateCopyChats error: ${e.message}")
         }
