@@ -207,6 +207,7 @@ class CallActivity : FragmentActivity() {
             LaunchedEffect(incomingCall) {
                 if (incomingCall != null) {
                     hadIncomingSession = true
+                }
                 // Do not finish the CallActivity merely because the incoming
                 // session becomes null. Accepting a call intentionally clears
                 // incomingCallSession before WebRTC flips activeCall to true;
