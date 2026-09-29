@@ -176,7 +176,8 @@ object SupabaseService {
             val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
             val subject = payload.optString("sub").trim()
 
-            if (!isValidUuid(subject)) {
+            val uuidPattern = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!uuidPattern.matches(subject)) {
                 return@withContext Result.failure(Exception("Authenticated Supabase UID is invalid"))
             }
 
