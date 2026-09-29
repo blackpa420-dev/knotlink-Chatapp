@@ -251,16 +251,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val currentEmail = identity.email
                     if (currentUid.isNotBlank()) {
                         try {
-                            NotificationHelper.registerFcmToken(getApplication(), currentUid)
-                            SupabaseRealtimeManager.startRealtime(currentUid, currentUsername, currentEmail)
+                            // Reconcile the local identity with the live Supabase Auth UID
+                            // before starting Realtime/history sync. This prevents a stale Room
+                            // UID from subscribing to the wrong message channel after relogin.
+                            val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrNull()
+                            val realtimeUid = authenticatedUid?.takeIf { it.isNotBlank() } ?: currentUid
+                            if (!realtimeUid.equals(currentUid, ignoreCase = true)) {
+                                Log.w("BitChat_Debug", "Auth UID differs from local identity; using authenticated UID for Realtime/history")
+                            }
+                            NotificationHelper.registerFcmToken(getApplication(), realtimeUid)
+                            SupabaseRealtimeManager.startRealtime(realtimeUid, currentUsername, currentEmail)
 
-                            // One bootstrap sync per signed-in UID for this process.
+                            // One bootstrap sync per authenticated UID for this process.
                             // Realtime/incremental sync continues to handle live changes afterwards.
-                            if (initialHistorySyncStartedUids.add(currentUid)) {
+                            if (initialHistorySyncStartedUids.add(realtimeUid)) {
                                 _initialHistorySyncing.value = true
                                 _initialHistorySyncError.value = null
                                 launch(Dispatchers.IO) {
-                                    val success = repository.syncAllChatHistory(currentUid, currentUsername)
+                                    val success = repository.syncAllChatHistory(realtimeUid, currentUsername)
                                     // Restore call history as well. FCM call notifications can be
                                     // missed while the process is dead, but call sessions are server-backed.
                                     repository.syncCallHistory(currentUid, currentUsername)
