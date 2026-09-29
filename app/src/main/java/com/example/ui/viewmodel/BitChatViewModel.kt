@@ -959,10 +959,43 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (loginRes.isSuccess) {
                     val session = loginRes.getOrNull()
-                    val uid = session?.user?.id ?: profile?.id ?: ""
+                    val sessionUid = session?.user?.id.orEmpty()
+
+                    // A profile row is not an authentication session. Never treat a
+                    // successful profile lookup as a logged-in state when Supabase Auth
+                    // rejected the password. Protected message history and message
+                    // inserts rely on auth.uid(), so continuing without a real session
+                    // creates the exact "can see opponent messages but cannot send /
+                    // cannot restore history" split.
+                    if (sessionUid.isBlank()) {
+                        _isSendingOtp.value = false
+                        val displayErr = "Login succeeded without a valid Supabase session. Please try again."
+                        _emailAuthError.value = displayErr
+                        showToast(displayErr, isError = true)
+                        return@launch
+                    }
+
+                    // Always derive the canonical UID from the authenticated JWT after
+                    // sign-in. Do not trust the profile row or stale Room identity for
+                    // authorization-sensitive history/message operations.
+                    val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrElse { error ->
+                        _isSendingOtp.value = false
+                        val displayErr = error.message ?: "Could not establish a valid Supabase session."
+                        _emailAuthError.value = displayErr
+                        showToast(displayErr, isError = true)
+                        return@launch
+                    }
+
+                    if (!authenticatedUid.equals(sessionUid, ignoreCase = true)) {
+                        _isSendingOtp.value = false
+                        val displayErr = "Authenticated account mismatch. Please sign in again."
+                        _emailAuthError.value = displayErr
+                        showToast(displayErr, isError = true)
+                        return@launch
+                    }
 
                     if (profile == null) {
-                        profile = SupabaseService.getProfile(uid).getOrNull()
+                        profile = SupabaseService.getProfile(authenticatedUid).getOrNull()
                             ?: SupabaseService.getProfileByEmail(email).getOrNull()
                     }
 
@@ -973,7 +1006,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val existing = repository.userIdentity.firstOrNull()
                     val finalIdentity = (existing ?: UserIdentityEntity()).copy(
                         id = 1,
-                        supabaseUid = uid,
+                        supabaseUid = authenticatedUid,
                         email = email,
                         username = finalUsername,
                         fullName = finalFullName,
@@ -986,42 +1019,12 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     )
                     repository.saveUserIdentity(finalIdentity)
                     repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
-                    viewModelScope.launch {
-                        repository.syncAllChatHistory(uid, finalUsername)
-                    }
-                    _isSendingOtp.value = false
-                    showToast("Welcome back, $finalFullName!")
-                    withContext(Dispatchers.Main) {
-                        onSuccess()
-                    }
-                } else if (profile != null && profile.username.isNotBlank()) {
-                    // Fallback for previous accounts created before password authentication:
-                    // Authenticate and restore the existing account directly.
-                    val uid = profile.id
-                    val finalUsername = profile.username
-                    val finalFullName = profile.fullName.ifBlank { finalUsername.removeSuffix(".link") }
-
-                    repository.saveEmail(email)
-                    val existing = repository.userIdentity.firstOrNull()
-                    val finalIdentity = (existing ?: UserIdentityEntity()).copy(
-                        id = 1,
-                        supabaseUid = uid,
-                        email = profile.email.ifBlank { email },
-                        username = finalUsername,
-                        fullName = finalFullName,
-                        avatarPath = profile.avatarUrl ?: "",
-                        profession = profile.profession ?: "",
-                        birthDate = profile.birthDate ?: "",
-                        isEmailVerified = true,
-                        isVerified = true,
-                        loginTimestamp = System.currentTimeMillis()
-                    )
-                    repository.saveUserIdentity(finalIdentity)
-                    repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
-                    viewModelScope.launch {
-                        repository.syncAllChatHistory(uid, finalUsername)
+                    SupabaseRealtimeManager.startRealtime(authenticatedUid, finalUsername)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val historyOk = repository.syncAllChatHistory(authenticatedUid, finalUsername)
+                        if (!historyOk) {
+                            Log.w("BitChatViewModel", "Initial chat history sync failed after login for $authenticatedUid")
+                        }
                     }
                     _isSendingOtp.value = false
                     showToast("Welcome back, $finalFullName!")
