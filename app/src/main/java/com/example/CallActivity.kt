@@ -206,11 +206,12 @@ class CallActivity : FragmentActivity() {
             LaunchedEffect(incomingCall) {
                 if (incomingCall != null) {
                     hadIncomingSession = true
-                } else if (hadIncomingSession && !activeCall.isActive && !callWasActive) {
-                    // Remote decline/cancel before answer: return directly to
-                    // the underlying lock/home screen, never to MainActivity.
-                    finishCallTask()
-                }
+                // Do not finish the CallActivity merely because the incoming
+                // session becomes null. Accepting a call intentionally clears
+                // incomingCallSession before WebRTC flips activeCall to true;
+                // finishing here races that transition and can kill the receiver's
+                // call before the answer is sent. Remote cancellation is handled by
+                // the dedicated CALL_ENDED receiver / active-call status observer.
                 val session = incomingCall ?: return@LaunchedEffect
                 if (intent.getBooleanExtra("action_accept_call", false) && !accepting) {
                     if (PermissionUtils.hasCallPermissions(this@CallActivity, callType.equals("VIDEO", true))) {
