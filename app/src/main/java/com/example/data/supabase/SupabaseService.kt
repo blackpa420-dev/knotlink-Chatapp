@@ -200,9 +200,9 @@ object SupabaseService {
         }
     }
 
-    private suspend fun ensureAuthenticatedSession(): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun ensureAuthenticatedSession(forceRefresh: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val session = currentSession
-        if (session != null && isJwtValid(session.accessToken)) return@withContext true
+        if (!forceRefresh && session != null && isJwtValid(session.accessToken)) return@withContext true
 
         val refreshToken = session?.refreshToken?.takeIf { it.isNotBlank() }
             ?: prefs?.getString("refresh_token", null)?.takeIf { it.isNotBlank() }
@@ -1057,8 +1057,19 @@ object SupabaseService {
                 .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            var response = httpClient.newCall(request).execute()
+            var resStr = response.body?.string() ?: ""
+
+            // Refresh once if Supabase rejects an otherwise locally valid JWT.
+            if (response.code == 401 && ensureAuthenticatedSession(forceRefresh = true)) {
+                response.close()
+                val retryRequest = request.newBuilder()
+                    .removeHeader("Authorization")
+                    .addHeader("Authorization", "Bearer " + getAccessToken())
+                    .build()
+                response = httpClient.newCall(retryRequest).execute()
+                resStr = response.body?.string() ?: ""
+            }
 
             if (!response.isSuccessful) {
                 val errorMsg = parseErrorMessage(resStr, "Failed to send message (${response.code})")
