@@ -2560,9 +2560,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     val session = SupabaseService.getCallSession(sessId).getOrNull()
-                    val myUid = repository.userIdentity.firstOrNull()?.supabaseUid.orEmpty()
+                    // Resolve the peer against the authenticated Supabase UID,
+                    // not a stale Room identity, so terminal call notifications are
+                    // always addressed to the actual other participant.
+                    val myUid = SupabaseService.getAuthenticatedUserId().getOrNull().orEmpty()
                     val peerId = session?.let {
-                        if (it.callerId == myUid) it.receiverId else it.callerId
+                        when {
+                            myUid.isNotBlank() && it.callerId.equals(myUid, ignoreCase = true) -> it.receiverId
+                            myUid.isNotBlank() && it.receiverId.equals(myUid, ignoreCase = true) -> it.callerId
+                            else -> targetContactId
+                        }
                     }.orEmpty().ifBlank { targetContactId }
 
                     var ended = false
