@@ -1033,9 +1033,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     }
                 } else {
                     _isSendingOtp.value = false
-                    val displayErr = "Invalid email or password. Please check your credentials and try again."
+                    // Keep the real non-sensitive Supabase Auth error visible instead
+                    // of masking every server-side rejection as a wrong password.
+                    val authError = loginRes.exceptionOrNull()?.message?.trim().orEmpty()
+                    val displayErr = authError.ifBlank {
+                        "Unable to sign in. Please check your email and try again."
+                    }
                     _emailAuthError.value = displayErr
                     showToast(displayErr, isError = true)
+                    Log.w("BitChatViewModel", "Email login rejected by Supabase Auth: ${displayErr.take(300)}")
                 }
             } catch (e: Exception) {
                 _isSendingOtp.value = false
