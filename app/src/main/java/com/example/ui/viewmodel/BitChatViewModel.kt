@@ -1619,18 +1619,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 existingIdentity?.email?.trim()?.lowercase() ?: ""
             }
 
-            // Consolidate full identity update atomically
-            val sessionUid = SupabaseService.getCurrentUserId()
-            val authUid = if (!sessionUid.isNullOrBlank()) {
-                sessionUid
-            } else if (!existingIdentity?.supabaseUid.isNullOrBlank() && !existingIdentity!!.supabaseUid.contains("@")) {
-                existingIdentity!!.supabaseUid
-            } else if (existingEmail.isNotBlank()) {
-                val p = SupabaseService.getProfileByEmail(existingEmail).getOrNull()
-                p?.id?.ifBlank { UUID.randomUUID().toString() } ?: UUID.randomUUID().toString()
-            } else {
-                UUID.randomUUID().toString()
-            }
+            // Consolidate full identity update atomically. The Auth session is
+            // the only valid source for the immutable account UID.
+            val authUid = SupabaseService.getAuthenticatedUserId()
+                ?: throw IllegalStateException("Cannot complete profile without an authenticated Supabase session")
 
             val finalIdentity = (existingIdentity ?: UserIdentityEntity()).copy(
                 id = 1,
