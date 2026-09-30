@@ -163,13 +163,7 @@ object SupabaseRealtimeManager {
             } catch (_: Exception) {}
             webSocket = null
 
-            val baseUrl = SupabaseConfig.REALTIME_WS_URL
-            val accessToken = SupabaseService.getAccessToken()
-            val url = if (accessToken.isNotBlank() && accessToken != SupabaseConfig.ANON_KEY) {
-                "$baseUrl&access_token=${java.net.URLEncoder.encode(accessToken, "UTF-8")}"
-            } else {
-                baseUrl
-            }
+            val url = SupabaseConfig.REALTIME_WS_URL
             val request = Request.Builder().url(url).build()
 
             webSocket = wsClient.newWebSocket(request, object : WebSocketListener() {
@@ -229,14 +223,11 @@ object SupabaseRealtimeManager {
                         val payload = json.optJSONObject("payload")
 
                         // 1. Handle Broadcast typing & instant new_message events
-                        // Message content is delivered only through RLS-gated
-                        // postgres_changes/polling. Public broadcasts are limited to
-                        // non-sensitive typing state.
-                        val isBroadcast = event == "typing" ||
-                            (payload != null && (
+                        val isBroadcast = event == "broadcast" || event == "typing" || event == "new_message" || event == "message_mutation" ||
+                            (payload != null && (payload.optString("type") == "broadcast" ||
                                 payload.optString("event") == "typing" ||
-                                payload.optString("type") == "typing"
-                            ))
+                                payload.optString("event") == "new_message" ||
+                                payload.optString("event") == "message_mutation"))
 
                         if (isBroadcast) {
                             val innerPayload = payload?.optJSONObject("payload") ?: payload ?: json
@@ -416,18 +407,16 @@ object SupabaseRealtimeManager {
                             }
                         }
 
-                        // Realtime is the fast path; polling is the delivery safety-net.
-                        // Do not disable it merely because a WebSocket object exists: a socket
-                        // can be connected while an event is missed due to reconnects, OEM
-                        // background restrictions, or a Realtime subscription/RLS mismatch.
-                        SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
-                        SupabaseService.fetchUserMessages(
-                            userId = uid,
-                            username = uname,
-                            email = currentUserEmail,
-                            limit = 15
-                        ).getOrNull()?.forEach { msg ->
-                            handlePolledMessage(msg, uid, uname)
+                        if (webSocket == null) {
+                            SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
+                            SupabaseService.fetchUserMessages(
+                                userId = uid,
+                                username = uname,
+                                email = currentUserEmail,
+                                limit = 15
+                            ).getOrNull()?.forEach { msg ->
+                                handlePolledMessage(msg, uid, uname)
+                            }
                         }
                     }
                     loopCounter++
@@ -440,26 +429,26 @@ object SupabaseRealtimeManager {
             }
         }
     }
-    /**
-     * Realtime is an at-least-once transport: the same logical message can arrive
-     * from broadcast, Postgres INSERT and the polling safety-net. Deduplicate only
-     * by immutable message identity. Never use text/time buckets because two real
-     * messages may legitimately contain the same text within the same second.
-     */
     private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
-        val serverKey = msg.id.trim().takeIf { it.isNotBlank() }?.let { "server:$it" }
-        val clientKey = msg.clientMsgId?.trim()?.takeIf { it.isNotBlank() }?.let { "client:$it" }
+        val cleanText = msg.text.trim().take(40)
+        val timeBucket = msg.timestamp / 10000L // 10-second window
+        val contentBucketKey = "${msg.chatId}_${msg.senderId}_${cleanText}_$timeBucket"
+        val idKey = if (msg.id.isNotBlank() && !msg.id.startsWith("msg_")) "id_${msg.id}" else contentBucketKey
+        val clientKey = if (!msg.clientMsgId.isNullOrBlank()) "client_${msg.clientMsgId}" else null
 
-        val keys = listOfNotNull(serverKey, clientKey)
-        if (keys.isEmpty()) return false
+        val isAlreadyProcessed = processedMessageIds.contains(contentBucketKey) ||
+            processedMessageIds.contains(idKey) ||
+            (clientKey != null && processedMessageIds.contains(clientKey))
 
-        if (keys.any { processedMessageIds.contains(it) }) return true
-        keys.forEach { processedMessageIds.add(it) }
-
-        // Bound memory for long-running app processes.
-        if (processedMessageIds.size > 5000) {
-            val snapshot = processedMessageIds.take(1000)
-            snapshot.forEach { processedMessageIds.remove(it) }
+        if (isAlreadyProcessed) {
+            return true
+        }
+        processedMessageIds.add(contentBucketKey)
+        if (idKey != contentBucketKey) {
+            processedMessageIds.add(idKey)
+        }
+        if (clientKey != null) {
+            processedMessageIds.add(clientKey)
         }
         return false
     }
@@ -518,15 +507,17 @@ object SupabaseRealtimeManager {
         if (isDirectRecipient) return true
 
         // 2. Group or Broadcast messages
-        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) ||
-            recUid.equals("group", ignoreCase = true) ||
-            chat == "global" ||
-            chat.startsWith("group_")
+        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) || 
+            recUid.equals("group", ignoreCase = true) || 
+            chat == "global" || 
+            chat.startsWith("group_") ||
+            msg.messageType == "SYSTEM_EVENT"
 
         if (isGroupOrBroadcast) {
-            // Group/system messages require an explicit locally known membership/chat.
-            // A generic SYSTEM_EVENT flag is never an authorization signal.
-            return knownChatIds.contains(chat)
+            if (chat == "global") return true
+            if (knownChatIds.contains(chat)) return true
+            // If it's a group/system message and receiver is specifically 'all' or 'group', allow if user is in group
+            return recUid.equals("all", ignoreCase = true)
         }
 
         // 3. Unaddressed messages (blank receiver and not group) MUST NOT leak to 3rd party users
@@ -544,19 +535,79 @@ object SupabaseRealtimeManager {
     }
 
     fun broadcastNewMessage(msg: SupabaseMessage) {
-        // Message bodies are intentionally NOT sent through a public Realtime
-        // broadcast channel. Durable Postgres INSERT + RLS-gated postgres_changes
-        // + the polling safety-net are the only delivery paths for message content.
-        // This prevents an unrelated client from subscribing to a public topic and
-        // receiving another user's message payload.
-        Log.d(TAG, "Skipping public message broadcast; using RLS-gated database delivery for ${msg.id}")
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (webSocket == null) {
+                    connectWebSocket()
+                }
+
+                val msgRef = "bc_msg_${System.currentTimeMillis()}"
+                val payload = JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "new_message")
+                    put("payload", JSONObject().apply {
+                        put("id", msg.id)
+                        put("chat_id", msg.chatId)
+                        put("sender_id", msg.senderId)
+                        put("sender_name", msg.senderName)
+                        put("recipient_id", msg.receiverId)
+                        put("text", msg.text)
+                        put("created_at", msg.timestamp)
+                        put("message_type", msg.messageType)
+                        put("reply_to_id", msg.replyToId ?: "")
+                        put("is_forwarded", msg.isForwarded)
+                        put("status", msg.status)
+                    })
+                }
+                val broadcastMsg = JSONObject().apply {
+                    put("topic", "realtime:public")
+                    put("event", "broadcast")
+                    put("payload", payload)
+                    put("ref", msgRef)
+                }
+                webSocket?.send(broadcastMsg.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Error sending new_message broadcast: ${e.message}")
+            }
+        }
     }
 
     fun broadcastMessageMutation(msg: SupabaseMessage, mutation: String) {
-        // Message mutations (READ/EDIT/PIN/DELETE) are persisted in Postgres and
-        // delivered through the same RLS-gated postgres_changes path. Never put
-        // message metadata/content onto a public broadcast topic.
-        Log.d(TAG, "Skipping public message mutation broadcast for ${msg.id} (${mutation})")
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (webSocket == null) connectWebSocket()
+
+                val payload = JSONObject().apply {
+                    put("type", "broadcast")
+                    put("event", "message_mutation")
+                    put("payload", JSONObject().apply {
+                        put("mutation", mutation)
+                        put("id", msg.id)
+                        put("chat_id", msg.chatId)
+                        put("sender_id", msg.senderId)
+                        put("sender_name", msg.senderName)
+                        put("recipient_id", msg.receiverId)
+                        put("text", msg.text)
+                        put("created_at", msg.timestamp)
+                        put("status", msg.status)
+                        put("message_type", msg.messageType)
+                        put("is_edited", msg.isEdited)
+                        put("is_deleted_for_everyone", msg.isDeletedForEveryone)
+                        put("is_pinned", msg.isPinned)
+                        put("client_msg_id", msg.clientMsgId ?: "")
+                    })
+                }
+                val packet = JSONObject().apply {
+                    put("topic", "realtime:public")
+                    put("event", "broadcast")
+                    put("payload", payload)
+                    put("ref", "mutation_${System.currentTimeMillis()}")
+                }
+                webSocket?.send(packet.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Error sending message mutation broadcast: ${e.message}")
+            }
+        }
     }
 
     fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {

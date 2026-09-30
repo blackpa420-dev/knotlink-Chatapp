@@ -162,9 +162,9 @@ data class SupabaseMessage(
             put("status", if (isRead) "READ" else status)
             put("message_type", messageType)
             put("created_at", timestamp)
-            // clientMsgId is a local Room id only. The current public.messages
-            // schema intentionally does not expose a client_msg_id column, so never
-            // send this local-only field through PostgREST.
+            if (!clientMsgId.isNullOrBlank()) {
+                put("client_msg_id", clientMsgId)
+            }
             if (!mediaUrl.isNullOrBlank()) {
                 put("media_url", mediaUrl)
             }

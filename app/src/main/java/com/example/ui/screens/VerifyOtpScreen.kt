@@ -88,7 +88,6 @@ import kotlin.math.sin
 fun VerifyOtpScreen(
     viewModel: BitChatViewModel,
     onVerifySuccess: () -> Unit,
-    isPasswordReset: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val otpCode by viewModel.enteredOtpCode.collectAsState()
@@ -104,31 +103,17 @@ fun VerifyOtpScreen(
     // Check verification status whenever otpCode changes
     LaunchedEffect(otpCode) {
         if (otpCode.length == 6) {
-            if (isPasswordReset) {
-                viewModel.verifyPasswordResetOtp(
-                    onSuccess = {
-                        isSuccess = true
-                        isError = false
-                        onVerifySuccess()
-                    },
-                    onError = {
-                        isError = true
-                        isSuccess = false
-                    }
-                )
-            } else {
-                viewModel.verifyFirebaseOtp(
-                    onSuccess = {
-                        isSuccess = true
-                        isError = false
-                        onVerifySuccess()
-                    },
-                    onError = {
-                        isError = true
-                        isSuccess = false
-                    }
-                )
-            }
+            viewModel.verifyFirebaseOtp(
+                onSuccess = {
+                    isSuccess = true
+                    isError = false
+                    onVerifySuccess()
+                },
+                onError = {
+                    isError = true
+                    isSuccess = false
+                }
+            )
         } else {
             isError = false
             isSuccess = false
@@ -191,7 +176,7 @@ fun VerifyOtpScreen(
                 Spacer(modifier = Modifier.height(20.dp))
 
                 Text(
-                    text = if (isPasswordReset) "Reset Password" else "Verify Email",
+                    text = "Verify Email",
                     color = BitOnSurface,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
@@ -201,11 +186,7 @@ fun VerifyOtpScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = if (enteredEmail.isNotBlank()) {
-                        if (isPasswordReset) "Enter the 6-digit reset code sent to:\n$enteredEmail" else "Enter the 6-digit code sent to:\n$enteredEmail"
-                    } else {
-                        if (isPasswordReset) "Enter the 6-digit reset code sent to your email." else "Enter the 6-digit code sent to your email."
-                    },
+                    text = if (enteredEmail.isNotBlank()) "Enter the 6-digit code sent to:\n$enteredEmail" else "Enter the 6-digit code sent to your email.",
                     color = BitOnSurfaceVariant,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -241,7 +222,7 @@ fun VerifyOtpScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
-                            text = if (isSuccess) "VERIFIED" else if (isPasswordReset) "ENTER PASSWORD RESET CODE" else "ENTER MAIL VERIFICATION CODE",
+                            text = if (isSuccess) "VERIFIED" else "ENTER MAIL VERIFICATION CODE",
                             color = if (isSuccess) Color(0xFF00FF88) else BitSecondary,
                             fontSize = 11.5.sp,
                             fontFamily = FontFamily.Monospace,
@@ -368,11 +349,7 @@ fun VerifyOtpScreen(
                                 )
                         )
                         Text(
-                            text = if (isSuccess) {
-                                if (isPasswordReset) "CODE VERIFIED! CHOOSE A NEW PASSWORD" else "VERIFIED! REDIRECTING..."
-                            } else {
-                                if (isPasswordReset) "INVALID RESET CODE! PLEASE TRY AGAIN" else "INVALID CODE! PLEASE ENTER CORRECT OTP"
-                            },
+                            text = if (isSuccess) "VERIFIED! REDIRECTING..." else "INVALID CODE! PLEASE ENTER CORRECT OTP",
                             color = if (isSuccess) Color(0xFF00FF88) else BitError,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
@@ -388,7 +365,7 @@ fun VerifyOtpScreen(
                 Row(
                     modifier = Modifier.clickable(enabled = countdown == 0) {
                         if (countdown == 0) {
-                            if (isPasswordReset) viewModel.resendPasswordResetOtp() else viewModel.resendEmailOtp()
+                            viewModel.resendEmailOtp()
                         }
                     },
                     horizontalArrangement = Arrangement.Center,
@@ -467,33 +444,18 @@ fun VerifyOtpScreen(
                                     isArrowLaunching = true
                                     delay(200)
                                     if (otpCode.length == 6) {
-                                        if (isPasswordReset) {
-                                            viewModel.verifyPasswordResetOtp(
-                                                onSuccess = {
-                                                    isSuccess = true
-                                                    isError = false
-                                                    onVerifySuccess()
-                                                },
-                                                onError = {
-                                                    isError = true
-                                                    isSuccess = false
-                                                    isArrowLaunching = false
-                                                }
-                                            )
-                                        } else {
-                                            viewModel.verifyFirebaseOtp(
-                                                onSuccess = {
-                                                    isSuccess = true
-                                                    isError = false
-                                                    onVerifySuccess()
-                                                },
-                                                onError = {
-                                                    isError = true
-                                                    isSuccess = false
-                                                    isArrowLaunching = false
-                                                }
-                                            )
-                                        }
+                                        viewModel.verifyFirebaseOtp(
+                                            onSuccess = {
+                                                isSuccess = true
+                                                isError = false
+                                                onVerifySuccess()
+                                            },
+                                            onError = {
+                                                isError = true
+                                                isSuccess = false
+                                                isArrowLaunching = false
+                                            }
+                                        )
                                     } else {
                                         isError = true
                                         isArrowLaunching = false

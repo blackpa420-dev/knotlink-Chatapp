@@ -66,9 +66,7 @@ import com.example.ui.screens.GroupInfoScreen
 import com.example.ui.screens.ContactsScreen
 import com.example.ui.screens.EmailAuthScreen
 import com.example.ui.screens.NumberVerificationScreen
-import com.example.ui.screens.PasswordRecoveryEmailScreen
 import com.example.ui.screens.RegisterIdentityScreen
-import com.example.ui.screens.SetNewPasswordScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.StoreScreen
 import com.example.ui.screens.VerifyOtpScreen
@@ -106,9 +104,6 @@ object BitChatRoutes {
     const val WELCOME = "welcome"
     const val NUMBER_VERIFICATION = "number_verification"
     const val VERIFY_OTP = "verify_otp"
-    const val PASSWORD_RESET_EMAIL = "password_reset_email"
-    const val PASSWORD_RESET_OTP = "password_reset_otp"
-    const val SET_NEW_PASSWORD = "set_new_password"
     const val REGISTER_IDENTITY = "register_identity"
     const val CHATS = "chats"
     const val CONTACTS = "contacts"
@@ -363,44 +358,6 @@ fun BitChatNavHost(
                 onLoginSuccess = {
                     navController.navigate(BitChatRoutes.CHATS) {
                         popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
-                    }
-                },
-                onForgotPasswordClick = {
-                    bitChatViewModel.beginPasswordReset()
-                    navController.navigate(BitChatRoutes.PASSWORD_RESET_EMAIL)
-                }
-            )
-        }
-
-        composable(BitChatRoutes.PASSWORD_RESET_EMAIL) {
-            PasswordRecoveryEmailScreen(
-                viewModel = bitChatViewModel,
-                onBackClick = { navController.popBackStack() },
-                onOtpSent = {
-                    navController.navigate(BitChatRoutes.PASSWORD_RESET_OTP)
-                }
-            )
-        }
-
-        composable(BitChatRoutes.PASSWORD_RESET_OTP) {
-            VerifyOtpScreen(
-                viewModel = bitChatViewModel,
-                isPasswordReset = true,
-                onVerifySuccess = {
-                    navController.navigate(BitChatRoutes.SET_NEW_PASSWORD)
-                }
-            )
-        }
-
-        composable(BitChatRoutes.SET_NEW_PASSWORD) {
-            SetNewPasswordScreen(
-                viewModel = bitChatViewModel,
-                onBackClick = { navController.popBackStack() },
-                onPasswordReset = {
-                    bitChatViewModel.setLoginMode(true)
-                    navController.navigate(BitChatRoutes.NUMBER_VERIFICATION) {
-                        popUpTo(BitChatRoutes.NUMBER_VERIFICATION) { inclusive = false }
-                        launchSingleTop = true
                     }
                 }
             )

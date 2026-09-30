@@ -82,7 +82,7 @@
             android:value="knotlink_msg_channel_v4" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@drawable/ic_stat_knotlink" />
+            android:resource="@mipmap/ic_launcher" />
 
         <!-- Firebase Cloud Messaging Service -->
         <service

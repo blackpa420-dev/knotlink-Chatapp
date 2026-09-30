@@ -43,26 +43,6 @@ import com.example.util.PermissionUtils
  */
 class CallActivity : FragmentActivity() {
 
-    private val remoteCallEndedReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            val endedId = intent?.getStringExtra("call_id") ?: intent?.getStringExtra("chat_id")
-            if (endedId.isNullOrBlank() || endedId == callId) {
-                if (::viewModel.isInitialized) {
-                    viewModel.handleRemoteCallEnded(
-                        callerName = intent?.getStringExtra("caller_name"),
-                        callId = endedId
-                    )
-                }
-                // The remote caller cancelled/ended the session. Do not leave the
-                // dedicated full-screen CallActivity visible after the signaling
-                // state has become terminal. This is especially important when the
-                // receiver has not answered yet: there is no active WebRTC call,
-                // so the Compose active-call observer alone cannot finish the task.
-                finishCallTask()
-            }
-        }
-    }
-
     private lateinit var viewModel: BitChatViewModel
 
     private var callId: String = ""
@@ -141,10 +121,6 @@ class CallActivity : FragmentActivity() {
             "AUDIO"
         }
 
-        if (callType == "VIDEO") {
-            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        }
-
         try {
             SupabaseService.init(this)
             NotificationHelper.createNotificationChannels(this)
@@ -152,16 +128,6 @@ class CallActivity : FragmentActivity() {
         }
 
         viewModel = ViewModelProvider(this)[BitChatViewModel::class.java]
-
-        try {
-            val filter = android.content.IntentFilter("com.knotlink.CALL_ENDED")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(remoteCallEndedReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("DEPRECATION")
-                registerReceiver(remoteCallEndedReceiver, filter)
-            }
-        } catch (_: Throwable) {}
 
         setContent {
             val activeCall by viewModel.activeCall.collectAsState()
@@ -195,9 +161,8 @@ class CallActivity : FragmentActivity() {
 
                 // Match the notification's lifetime. If the remote caller
                 // cancels before the session reaches the UI, remove this task.
-                kotlinx.coroutines.delay(8_000L)
-                if (!accepting &&
-                    !viewModel.activeCall.value.isActive &&
+                kotlinx.coroutines.delay(65_000L)
+                if (!viewModel.activeCall.value.isActive &&
                     viewModel.incomingCallSession.value == null
                 ) {
                     finishCallTask()
@@ -207,13 +172,11 @@ class CallActivity : FragmentActivity() {
             LaunchedEffect(incomingCall) {
                 if (incomingCall != null) {
                     hadIncomingSession = true
+                } else if (hadIncomingSession && !activeCall.isActive && !callWasActive) {
+                    // Remote decline/cancel before answer: return directly to
+                    // the underlying lock/home screen, never to MainActivity.
+                    finishCallTask()
                 }
-                // Do not finish the CallActivity merely because the incoming
-                // session becomes null. Accepting a call intentionally clears
-                // incomingCallSession before WebRTC flips activeCall to true;
-                // finishing here races that transition and can kill the receiver's
-                // call before the answer is sent. Remote cancellation is handled by
-                // the dedicated CALL_ENDED receiver / active-call status observer.
                 val session = incomingCall ?: return@LaunchedEffect
                 if (intent.getBooleanExtra("action_accept_call", false) && !accepting) {
                     if (PermissionUtils.hasCallPermissions(this@CallActivity, callType.equals("VIDEO", true))) {
@@ -316,11 +279,6 @@ class CallActivity : FragmentActivity() {
         setIntent(intent)
     }
 
-    override fun onDestroy() {
-        try { unregisterReceiver(remoteCallEndedReceiver) } catch (_: Throwable) {}
-        super.onDestroy()
-    }
-
     private fun enterVideoPipOrBackground() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE) &&
@@ -336,15 +294,6 @@ class CallActivity : FragmentActivity() {
                     builder.setAutoEnterEnabled(true)
                 }
                 setPictureInPictureParams(builder.build())
-                // Clip the PiP content itself as well as the system PiP window.
-                // This matters on OEMs where Surface/Texture content otherwise paints
-                // square corners inside the rounded PiP container.
-                window.decorView.outlineProvider = object : android.view.ViewOutlineProvider() {
-                    override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
-                        outline.setRoundRect(0, 0, view.width, view.height, 18f * resources.displayMetrics.density)
-                    }
-                }
-                window.decorView.clipToOutline = true
                 inPipMode = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     window.setBackgroundDrawableResource(android.R.color.transparent)

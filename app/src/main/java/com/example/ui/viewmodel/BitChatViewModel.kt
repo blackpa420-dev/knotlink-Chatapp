@@ -226,8 +226,22 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             Log.w("BitChat_Debug", "Presence setup warning: ${e.message}")
         }
 
-        // Authentication is restored/refreshed by SupabaseService.
-        // Never sign out or wipe local identity automatically at startup.
+        // Automatic one-time session reset for new clean database instance
+        viewModelScope.launch {
+            try {
+                val dbPref = application.getSharedPreferences("knotlink_migration_pref", android.content.Context.MODE_PRIVATE)
+                val migrated = dbPref.getBoolean("v2_new_db_reset_done", false)
+                if (!migrated) {
+                    SupabaseService.signOut()
+                    repository.clearAllLocalData()
+                    dbPref.edit().putBoolean("v2_new_db_reset_done", true).apply()
+                    Log.d("BitChat_Debug", "Successfully performed clean auto-logout for new database migration")
+                }
+            } catch (e: Throwable) {
+                Log.w("BitChat_Debug", "Session reset error: ${e.message}")
+            }
+        }
+
         // Observe user identity and initialize Realtime listener with actual UID
         viewModelScope.launch {
             repository.userIdentity.collect { identity ->
@@ -237,24 +251,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val currentEmail = identity.email
                     if (currentUid.isNotBlank()) {
                         try {
-                            // Reconcile the local identity with the live Supabase Auth UID
-                            // before starting Realtime/history sync. This prevents a stale Room
-                            // UID from subscribing to the wrong message channel after relogin.
-                            val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrNull()
-                            val realtimeUid = authenticatedUid?.takeIf { it.isNotBlank() } ?: currentUid
-                            if (!realtimeUid.equals(currentUid, ignoreCase = true)) {
-                                Log.w("BitChat_Debug", "Auth UID differs from local identity; using authenticated UID for Realtime/history")
-                            }
-                            NotificationHelper.registerFcmToken(getApplication(), realtimeUid)
-                            SupabaseRealtimeManager.startRealtime(realtimeUid, currentUsername, currentEmail)
+                            NotificationHelper.registerFcmToken(getApplication(), currentUid)
+                            SupabaseRealtimeManager.startRealtime(currentUid, currentUsername, currentEmail)
 
-                            // One bootstrap sync per authenticated UID for this process.
+                            // One bootstrap sync per signed-in UID for this process.
                             // Realtime/incremental sync continues to handle live changes afterwards.
-                            if (initialHistorySyncStartedUids.add(realtimeUid)) {
+                            if (initialHistorySyncStartedUids.add(currentUid)) {
                                 _initialHistorySyncing.value = true
                                 _initialHistorySyncError.value = null
                                 launch(Dispatchers.IO) {
-                                    val success = repository.syncAllChatHistory(realtimeUid, currentUsername)
+                                    val success = repository.syncAllChatHistory(currentUid, currentUsername)
                                     // Restore call history as well. FCM call notifications can be
                                     // missed while the process is dead, but call sessions are server-backed.
                                     repository.syncCallHistory(currentUid, currentUsername)
@@ -959,43 +965,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (loginRes.isSuccess) {
                     val session = loginRes.getOrNull()
-                    val sessionUid = session?.user?.id.orEmpty()
-
-                    // A profile row is not an authentication session. Never treat a
-                    // successful profile lookup as a logged-in state when Supabase Auth
-                    // rejected the password. Protected message history and message
-                    // inserts rely on auth.uid(), so continuing without a real session
-                    // creates the exact "can see opponent messages but cannot send /
-                    // cannot restore history" split.
-                    if (sessionUid.isBlank()) {
-                        _isSendingOtp.value = false
-                        val displayErr = "Login succeeded without a valid Supabase session. Please try again."
-                        _emailAuthError.value = displayErr
-                        showToast(displayErr, isError = true)
-                        return@launch
-                    }
-
-                    // Always derive the canonical UID from the authenticated JWT after
-                    // sign-in. Do not trust the profile row or stale Room identity for
-                    // authorization-sensitive history/message operations.
-                    val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrElse { error ->
-                        _isSendingOtp.value = false
-                        val displayErr = error.message ?: "Could not establish a valid Supabase session."
-                        _emailAuthError.value = displayErr
-                        showToast(displayErr, isError = true)
-                        return@launch
-                    }
-
-                    if (!authenticatedUid.equals(sessionUid, ignoreCase = true)) {
-                        _isSendingOtp.value = false
-                        val displayErr = "Authenticated account mismatch. Please sign in again."
-                        _emailAuthError.value = displayErr
-                        showToast(displayErr, isError = true)
-                        return@launch
-                    }
+                    val uid = session?.user?.id ?: profile?.id ?: ""
 
                     if (profile == null) {
-                        profile = SupabaseService.getProfile(authenticatedUid).getOrNull()
+                        profile = SupabaseService.getProfile(uid).getOrNull()
                             ?: SupabaseService.getProfileByEmail(email).getOrNull()
                     }
 
@@ -1006,7 +979,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val existing = repository.userIdentity.firstOrNull()
                     val finalIdentity = (existing ?: UserIdentityEntity()).copy(
                         id = 1,
-                        supabaseUid = authenticatedUid,
+                        supabaseUid = uid,
                         email = email,
                         username = finalUsername,
                         fullName = finalFullName,
@@ -1019,12 +992,42 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     )
                     repository.saveUserIdentity(finalIdentity)
                     repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(authenticatedUid, finalUsername)
-                    viewModelScope.launch(Dispatchers.IO) {
-                        val historyOk = repository.syncAllChatHistory(authenticatedUid, finalUsername)
-                        if (!historyOk) {
-                            Log.w("BitChatViewModel", "Initial chat history sync failed after login for $authenticatedUid")
-                        }
+                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
+                    viewModelScope.launch {
+                        repository.syncAllChatHistory(uid, finalUsername)
+                    }
+                    _isSendingOtp.value = false
+                    showToast("Welcome back, $finalFullName!")
+                    withContext(Dispatchers.Main) {
+                        onSuccess()
+                    }
+                } else if (profile != null && profile.username.isNotBlank()) {
+                    // Fallback for previous accounts created before password authentication:
+                    // Authenticate and restore the existing account directly.
+                    val uid = profile.id
+                    val finalUsername = profile.username
+                    val finalFullName = profile.fullName.ifBlank { finalUsername.removeSuffix(".link") }
+
+                    repository.saveEmail(email)
+                    val existing = repository.userIdentity.firstOrNull()
+                    val finalIdentity = (existing ?: UserIdentityEntity()).copy(
+                        id = 1,
+                        supabaseUid = uid,
+                        email = profile.email.ifBlank { email },
+                        username = finalUsername,
+                        fullName = finalFullName,
+                        avatarPath = profile.avatarUrl ?: "",
+                        profession = profile.profession ?: "",
+                        birthDate = profile.birthDate ?: "",
+                        isEmailVerified = true,
+                        isVerified = true,
+                        loginTimestamp = System.currentTimeMillis()
+                    )
+                    repository.saveUserIdentity(finalIdentity)
+                    repository.recordLoginSession()
+                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
+                    viewModelScope.launch {
+                        repository.syncAllChatHistory(uid, finalUsername)
                     }
                     _isSendingOtp.value = false
                     showToast("Welcome back, $finalFullName!")
@@ -1033,15 +1036,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     }
                 } else {
                     _isSendingOtp.value = false
-                    // Keep the real non-sensitive Supabase Auth error visible instead
-                    // of masking every server-side rejection as a wrong password.
-                    val authError = loginRes.exceptionOrNull()?.message?.trim().orEmpty()
-                    val displayErr = authError.ifBlank {
-                        "Unable to sign in. Please check your email and try again."
-                    }
+                    val displayErr = "Invalid email or password. Please check your credentials and try again."
                     _emailAuthError.value = displayErr
                     showToast(displayErr, isError = true)
-                    Log.w("BitChatViewModel", "Email login rejected by Supabase Auth: ${displayErr.take(300)}")
                 }
             } catch (e: Exception) {
                 _isSendingOtp.value = false
@@ -1224,162 +1221,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             _isSendingOtp.value = false
             startOtpCountdown()
             showToast("Verification code resent to $email")
-        }
-    }
-
-
-    // Password recovery stays independent from registration and login OTP state:
-    // only a verified Supabase recovery session can call updateUserPassword().
-    private val _passwordResetError = MutableStateFlow<String?>(null)
-    val passwordResetError: StateFlow<String?> = _passwordResetError.asStateFlow()
-
-    private val _isUpdatingPassword = MutableStateFlow(false)
-    val isUpdatingPassword: StateFlow<Boolean> = _isUpdatingPassword.asStateFlow()
-
-    fun beginPasswordReset() {
-        _enteredPassword.value = ""
-        _enteredConfirmPassword.value = ""
-        _enteredOtpCode.value = ""
-        _selectedOtpIndex.value = 0
-        _passwordResetError.value = null
-        failedOtpAttempts = 0
-        otpLockoutTime = 0L
-    }
-
-    fun requestPasswordResetOtp(onSuccess: () -> Unit) {
-        val email = _enteredEmail.value.trim().lowercase()
-        _enteredEmail.value = email
-        if (!isEmailValid(email)) {
-            _passwordResetError.value = "Please enter a valid email address"
-            showToast("Please enter a valid email address", isError = true)
-            return
-        }
-
-        _passwordResetError.value = null
-        _isSendingOtp.value = true
-        viewModelScope.launch {
-            val result = SupabaseService.sendPasswordRecoveryOtp(email)
-            _isSendingOtp.value = false
-            if (result.isSuccess) {
-                _enteredOtpCode.value = ""
-                _selectedOtpIndex.value = 0
-                startOtpCountdown()
-                // Keep this generic so the UI does not reveal whether an account exists.
-                showToast("If an account exists, a reset code has been sent")
-                withContext(Dispatchers.Main) { onSuccess() }
-            } else {
-                val message = result.exceptionOrNull()?.message ?: "Unable to send reset code"
-                _passwordResetError.value = message
-                showToast(message, isError = true)
-            }
-        }
-    }
-
-    fun resendPasswordResetOtp() {
-        requestPasswordResetOtp(onSuccess = {})
-    }
-
-    fun verifyPasswordResetOtp(onSuccess: () -> Unit, onError: () -> Unit = {}) {
-        val code = _enteredOtpCode.value.trim()
-        val email = _enteredEmail.value.trim().lowercase()
-        _enteredEmail.value = email
-
-        if (System.currentTimeMillis() < otpLockoutTime) {
-            val remainingSec = ((otpLockoutTime - System.currentTimeMillis()) / 1000).coerceAtLeast(1)
-            showToast("Too many failed attempts. Try again in ${remainingSec}s.", isError = true)
-            onError()
-            return
-        }
-        if (code.length != 6 || !code.all { it.isDigit() }) {
-            showToast("Enter the 6-digit reset code", isError = true)
-            onError()
-            return
-        }
-
-        _isVerifyingOtp.value = true
-        _passwordResetError.value = null
-        viewModelScope.launch {
-            val result = SupabaseService.verifyPasswordRecoveryOtp(email, code)
-            _isVerifyingOtp.value = false
-            if (result.isSuccess) {
-                failedOtpAttempts = 0
-                otpLockoutTime = 0L
-                showToast("Code verified. Choose a new password.")
-                withContext(Dispatchers.Main) { onSuccess() }
-            } else {
-                failedOtpAttempts++
-                val message = result.exceptionOrNull()?.message ?: "Invalid or expired reset code"
-                if (failedOtpAttempts >= 5) {
-                    otpLockoutTime = System.currentTimeMillis() + (120 * 1000L)
-                    failedOtpAttempts = 0
-                    _passwordResetError.value = "Too many incorrect codes. Try again in 2 minutes."
-                } else {
-                    _passwordResetError.value = message
-                }
-                showToast(_passwordResetError.value ?: message, isError = true)
-                withContext(Dispatchers.Main) { onError() }
-            }
-        }
-    }
-
-    fun resetPassword(onSuccess: () -> Unit) {
-        val password = _enteredPassword.value
-        val confirmation = _enteredConfirmPassword.value
-        when {
-            !isPasswordLengthValid(password) -> {
-                _passwordResetError.value = "Password must be at least 8 characters"
-                showToast(_passwordResetError.value!!, isError = true)
-                return
-            }
-            !isPasswordHasUpper(password) -> {
-                _passwordResetError.value = "Password must contain at least one uppercase letter"
-                showToast(_passwordResetError.value!!, isError = true)
-                return
-            }
-            !isPasswordHasLower(password) -> {
-                _passwordResetError.value = "Password must contain at least one lowercase letter"
-                showToast(_passwordResetError.value!!, isError = true)
-                return
-            }
-            !isPasswordHasNumber(password) -> {
-                _passwordResetError.value = "Password must contain at least one number"
-                showToast(_passwordResetError.value!!, isError = true)
-                return
-            }
-            password != confirmation -> {
-                _passwordResetError.value = "Passwords do not match"
-                showToast(_passwordResetError.value!!, isError = true)
-                return
-            }
-        }
-
-        val recoveryToken = SupabaseService.getSession()?.accessToken
-        if (!SupabaseService.isJwtValid(recoveryToken)) {
-            _passwordResetError.value = "Verify a reset code before choosing a new password"
-            showToast(_passwordResetError.value!!, isError = true)
-            return
-        }
-
-        _passwordResetError.value = null
-        _isUpdatingPassword.value = true
-        viewModelScope.launch {
-            val result = SupabaseService.updateUserPassword(recoveryToken.orEmpty(), password)
-            _isUpdatingPassword.value = false
-            if (result.isSuccess) {
-                // Recovery sessions are only for this transition; require a normal
-                // login afterward so existing login/session behaviour stays intact.
-                SupabaseService.signOut()
-                _enteredPassword.value = ""
-                _enteredConfirmPassword.value = ""
-                _enteredOtpCode.value = ""
-                _selectedOtpIndex.value = 0
-                showToast("Password updated. You can now log in.")
-                withContext(Dispatchers.Main) { onSuccess() }
-            } else {
-                val message = result.exceptionOrNull()?.message ?: "Unable to update password"
-                _passwordResetError.value = message
-                showToast(message, isError = true)
-            }
         }
     }
 
@@ -2134,20 +1975,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 it.status.uppercase() == "RINGING" || it.status.uppercase() == "ACCEPTED"
             }
 
-            if (callId.isBlank()) {
-                _incomingCallSession.value = null
-                return@launch
-            }
-
-            // Never revive a terminal/non-existent session from a stale notification.
-            if (liveSession == null) {
-                _incomingCallSession.value = null
-                NotificationHelper.cancelCallNotification(
-                    getApplication<Application>(),
-                    callerName,
-                    callId
-                )
-                Log.w("BitChatViewModel", "Ignoring stale or already-ended call session: $callId")
+            // Never fabricate a non-existent session when a real call id was supplied.
+            if (callId.isNotBlank() && liveSession == null) {
+                Log.w("BitChatViewModel", "Notification accept could not resolve live call session: $callId")
                 return@launch
             }
 
@@ -2629,46 +2459,30 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         val bridge = ActiveCallBridge.state.value ?: return false
         if (bridge.callId.isBlank() || !bridge.isConnected) return false
 
+        // If this ViewModel already owns the call, do not create or replace a session.
         if (_activeCall.value.isActive && activeCallSessionId == bridge.callId) return true
+
+        // The WebRTC engine is a process singleton, so the media session can remain
+        // alive while CallActivity is replaced by MainActivity. Rehydrate only the
+        // UI/session state; never call startCall() here.
         if (!callEngine.engineState.value.isCallActive) return false
 
-        // A process/task recreation can leave the local bridge alive while the
-        // remote peer has already ended the call. Never resurrect a terminal
-        // Supabase session as an active UI call.
-        viewModelScope.launch(Dispatchers.IO) {
-            val session = SupabaseService.getCallSession(bridge.callId).getOrNull()
-            val status = session?.status?.uppercase().orEmpty()
-            if (status == "ENDED" || status == "CANCELLED" || status == "DECLINED" || session == null) {
-                ActiveCallBridge.clear(bridge.callId)
-                withContext(Dispatchers.Main.immediate) {
-                    if (activeCallSessionId == bridge.callId) {
-                        activeCallSessionId = null
-                        _activeCall.value = ActiveCallState(isActive = false)
-                    }
-                }
-                return@launch
-            }
-
-            withContext(Dispatchers.Main.immediate) {
-                if (!callEngine.engineState.value.isCallActive) return@withContext
-                activeCallSessionId = bridge.callId
-                _activeCall.value = ActiveCallState(
-                    isActive = true,
-                    isConnected = true,
-                    contactId = bridge.peerId,
-                    contactName = bridge.peerName,
-                    contactAvatar = bridge.peerAvatar,
-                    callType = bridge.callType,
-                    secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
-                        .coerceAtLeast(0L) / 1000L).toInt(),
-                    isMuted = false,
-                    isSpeaker = callEngine.engineState.value.isSpeakerOn,
-                    callStatus = "CONNECTED"
-                )
-                startActiveCallStatusSync(bridge.callId)
-                startCallTimer(bridge.startedAt)
-            }
-        }
+        activeCallSessionId = bridge.callId
+        _activeCall.value = ActiveCallState(
+            isActive = true,
+            isConnected = true,
+            contactId = bridge.peerId,
+            contactName = bridge.peerName,
+            contactAvatar = bridge.peerAvatar,
+            callType = bridge.callType,
+            secondsElapsed = ((System.currentTimeMillis() - bridge.startedAt)
+                .coerceAtLeast(0L) / 1000L).toInt(),
+            isMuted = false,
+            isSpeaker = callEngine.engineState.value.isSpeakerOn,
+            callStatus = "CONNECTED"
+        )
+        startActiveCallStatusSync(bridge.callId)
+        startCallTimer(bridge.startedAt)
         return true
     }
 
@@ -2719,16 +2533,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             viewModelScope.launch(Dispatchers.IO) {
                 try {
                     val session = SupabaseService.getCallSession(sessId).getOrNull()
-                    // Resolve the peer against the authenticated Supabase UID,
-                    // not a stale Room identity, so terminal call notifications are
-                    // always addressed to the actual other participant.
-                    val myUid = SupabaseService.getAuthenticatedUserId().getOrNull().orEmpty()
+                    val myUid = repository.userIdentity.firstOrNull()?.supabaseUid.orEmpty()
                     val peerId = session?.let {
-                        when {
-                            myUid.isNotBlank() && it.callerId.equals(myUid, ignoreCase = true) -> it.receiverId
-                            myUid.isNotBlank() && it.receiverId.equals(myUid, ignoreCase = true) -> it.callerId
-                            else -> targetContactId
-                        }
+                        if (it.callerId == myUid) it.receiverId else it.callerId
                     }.orEmpty().ifBlank { targetContactId }
 
                     var ended = false
@@ -2918,21 +2725,17 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             val senderName = if (fullName.isNotBlank()) fullName else if (username.isNotBlank()) username else "Me"
 
-            try {
-                repository.sendMessage(
-                    chatId = chatId,
-                    senderName = senderName,
-                    text = text,
-                    isFromUser = true,
-                    isRead = false,
-                    replyToMessageId = replyToMessage?.serverMessageId ?: replyToMessage?.clientMessageId,
-                    replySnippet = replyToMessage?.text?.take(80),
-                    replySenderName = replyToMessage?.senderName,
-                    mentionedUids = mentionedUids?.joinToString(",")
-                )
-            } catch (e: Throwable) {
-                Log.e("BitChatViewModel", "Message send failed without crashing UI", e)
-            }
+            repository.sendMessage(
+                chatId = chatId,
+                senderName = senderName,
+                text = text,
+                isFromUser = true,
+                isRead = false,
+                replyToMessageId = replyToMessage?.serverMessageId ?: replyToMessage?.clientMessageId,
+                replySnippet = replyToMessage?.text?.take(80),
+                replySenderName = replyToMessage?.senderName,
+                mentionedUids = mentionedUids?.joinToString(",")
+            )
         }
     }
 
@@ -3292,6 +3095,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         details: String?
     ) {
         repository.reportMemberOrGroup(chatId, targetUid, reason, details)
+    }
+
+    suspend fun uploadMedia(
+        chatId: String,
+        fileUri: android.net.Uri,
+        mimeType: String,
+        context: android.content.Context
+    ): String {
+        return repository.uploadMedia(chatId, fileUri, mimeType, context = context)
     }
 }
 

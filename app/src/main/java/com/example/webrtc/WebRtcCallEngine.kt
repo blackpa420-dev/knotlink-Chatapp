@@ -34,9 +34,9 @@ enum class CallQuality(
 ) {
     ULTRA_2K("2K Ultra HD", "2560x1440", 2560, 1440, 2200, 30, 1.0),
     FHD_1080P("1080p Full HD", "1920x1080", 1920, 1080, 1500, 30, 1.333333),
-    HD_720P("720p HD", "1280x720", 1280, 720, 1650, 30, 1.0),
-    SD_480P("480p SD", "640x480", 640, 480, 650, 24, 1.0),
-    LOW_360P("360p Low Bandwidth", "480x360", 480, 360, 450, 20, 1.0)
+    HD_720P("720p HD", "1280x720", 1280, 720, 850, 30, 2.0),
+    SD_480P("480p SD", "640x480", 640, 480, 450, 24, 3.0),
+    LOW_360P("360p Low Bandwidth", "480x360", 480, 360, 300, 20, 4.0)
 }
 
 enum class NetworkStatus(val label: String, val colorHex: Long) {
@@ -62,7 +62,7 @@ data class CallEngineState(
     val autoGainControlActive: Boolean = true,
     val currentQuality: CallQuality = CallQuality.HD_720P,
     val networkStatus: NetworkStatus = NetworkStatus.EXCELLENT,
-    val currentBitrateKbps: Int = 1650,
+    val currentBitrateKbps: Int = 1200,
     val roundTripTimeMs: Long = 28L,
     val packetLossPercent: Float = 0.0f,
     val localAudioLevel: Float = 0.0f,
@@ -835,16 +835,22 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         if (!_engineState.value.isCallActive || !_engineState.value.isCameraOn) return
         if (paused == videoCapturePausedByScreen) return
 
-        // Do not tear down the Camera2 capture session when the activity/PiP
-        // changes visibility. Repeated stop/startCapture() transitions can cause
-        // frozen frames and blank PiP surfaces on Android.
-        // Keep the native camera pipeline warm and only gate the outgoing track.
+        // Camera stop/start can block while the camera session transitions.
+        // Keep that work off MainActivity's BroadcastReceiver/main thread.
         videoCaptureControlJob?.cancel()
         videoCaptureControlJob = scope.launch(Dispatchers.Default) {
             try {
                 if (!_engineState.value.isCallActive || !_engineState.value.isCameraOn) return@launch
-                localVideoTrackInstance?.setEnabled(!paused)
-                videoCapturePausedByScreen = paused
+                if (paused) {
+                    localVideoTrackInstance?.setEnabled(false)
+                    videoCapturer?.stopCapture()
+                    videoCapturePausedByScreen = true
+                } else {
+                    if (!videoCapturePausedByScreen || !_engineState.value.isCallActive) return@launch
+                    videoCapturer?.startCapture(1280, 720, 30)
+                    localVideoTrackInstance?.setEnabled(true)
+                    videoCapturePausedByScreen = false
+                }
             } catch (e: Throwable) {
                 Log.w(TAG, "setVideoPausedByScreen error: " + e.message)
             }
@@ -969,7 +975,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 val params = sender.parameters ?: continue
                 if (params.encodings.isEmpty()) continue
                 for (encoding in params.encodings) {
-                    encoding.minBitrateBps = (quality.targetBitrateKbps * 0.45 * 1000).toInt().coerceAtLeast(180_000)
+                    encoding.minBitrateBps = (quality.targetBitrateKbps * 0.30 * 1000).toInt().coerceAtLeast(100_000)
                     encoding.maxBitrateBps = quality.targetBitrateKbps * 1000
                     encoding.maxFramerate = quality.targetFps
                     encoding.scaleResolutionDownBy = quality.scaleResolutionDownBy
@@ -979,7 +985,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
                 sender.parameters = params
             }
-            peerConnection?.setBitrate(180_000, (quality.targetBitrateKbps * 1000).coerceAtLeast(550_000), (quality.targetBitrateKbps * 1000).coerceAtLeast(650_000))
+            peerConnection?.setBitrate(100_000, (quality.targetBitrateKbps * 1000).coerceAtLeast(250_000), (quality.targetBitrateKbps * 1000).coerceAtLeast(300_000))
         } catch (e: Throwable) {
             Log.w(TAG, "configureVideoSenderBitrate warning")
         }

@@ -462,38 +462,11 @@ class BitChatRepository(val dao: BitChatDao) {
             return cleanCandidate
         }
 
-        // 2. Build a compatibility list of candidate identifiers.
-        // Older KnotLink/BitChat builds encoded users as KNOTLINK:USER:<username>
-        // or BITCHAT:USER:<username>. Those values are not valid Supabase Auth
-        // UUIDs, so sending with them makes the sender's row persist but leaves
-        // the recipient unable to see it. Normalize those legacy identifiers
-        // before falling back to profile lookup.
+        // 2. Build list of potential candidate identifiers
         val candidateList = mutableListOf<String>()
         if (candidate.isNotBlank()) {
-            val rawCandidate = candidate.trim()
-            candidateList.add(rawCandidate)
-
-            val legacyPrefixes = listOf(
-                "KNOTLINK:USER:",
-                "BITCHAT:USER:",
-                "KNOTLINK:",
-                "BITCHAT:"
-            )
-            var legacyStripped = rawCandidate
-            for (prefix in legacyPrefixes) {
-                if (legacyStripped.startsWith(prefix, ignoreCase = true)) {
-                    legacyStripped = legacyStripped.substring(prefix.length).trim()
-                    break
-                }
-            }
-
-            val stripped = legacyStripped
-                .removePrefix("chat_")
-                .removePrefix("user_")
-                .removePrefix("@")
-                .trim()
-
-            if (legacyStripped.isNotBlank()) candidateList.add(legacyStripped)
+            candidateList.add(candidate.trim())
+            val stripped = candidate.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
             if (stripped.isNotBlank()) candidateList.add(stripped)
         }
 
@@ -511,20 +484,7 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         if (chatId.isNotBlank()) {
-            var cleanChat = chatId.trim()
-            val legacyPrefixes = listOf(
-                "KNOTLINK:USER:",
-                "BITCHAT:USER:",
-                "KNOTLINK:",
-                "BITCHAT:"
-            )
-            for (prefix in legacyPrefixes) {
-                if (cleanChat.startsWith(prefix, ignoreCase = true)) {
-                    cleanChat = cleanChat.substring(prefix.length).trim()
-                    break
-                }
-            }
-            cleanChat = cleanChat.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
+            val cleanChat = chatId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
             if (cleanChat.isNotBlank() && cleanChat != "global" && cleanChat != "bitassistant") {
                 candidateList.add(cleanChat)
             }
@@ -596,16 +556,7 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentTime = sdf.format(Date())
         val clientMsgId = existingClientMessageId ?: UUID.randomUUID().toString()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
-
-        // Resolve the sender identity only after the Supabase session has been
-        // refreshed/validated. The UID comes from the access-token subject,
-        // never from email, username, chat IDs, or a stale local identity.
-        val currentUid = SupabaseService.getAuthenticatedUserId()
-            .getOrElse { error ->
-                throw IllegalStateException(
-                    error.message ?: "No authenticated Supabase user for message send"
-                )
-            }
+        val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
         val mySenderName = if (isFromUser) {
             currentIdentity?.fullName?.ifBlank { currentIdentity.username.ifBlank { senderName } } ?: senderName
         } else {
@@ -741,12 +692,19 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         try {
-            // The REST insert is the durable source of truth. Never broadcast or
-            // notify before persistence succeeds, otherwise an offline receiver can
-            // permanently miss a message when the database write fails.
             val serverMsgId = "msg_" + UUID.randomUUID().toString().take(8)
-            val localServerTs = System.currentTimeMillis()
+            val serverTs = System.currentTimeMillis()
 
+            val syncedMessage = message.copy(
+                id = localRowId,
+                serverMessageId = serverMsgId,
+                serverTimestamp = serverTs,
+                syncStatus = "SYNCED",
+                deliveryState = "SENT"
+            )
+            dao.insertMessage(syncedMessage)
+
+            // Send to Supabase REST
             val remoteText = if (!replySnippet.isNullOrBlank() || !replySenderName.isNullOrBlank()) {
                 val encSender = java.net.URLEncoder.encode(replySenderName ?: "User", "UTF-8")
                 val encSnippet = java.net.URLEncoder.encode(replySnippet ?: "", "UTF-8")
@@ -757,12 +715,12 @@ class BitChatRepository(val dao: BitChatDao) {
 
             val supaMsg = SupabaseMessage(
                 id = serverMsgId,
-                chatId = targetChatId,
+                chatId = chatId,
                 senderId = currentUid,
                 senderName = mySenderName,
                 receiverId = otherParticipant,
                 text = remoteText,
-                timestamp = localServerTs,
+                timestamp = serverTs,
                 isRead = false,
                 replyToId = replyToMessageId,
                 messageType = messageType,
@@ -771,54 +729,14 @@ class BitChatRepository(val dao: BitChatDao) {
                 clientMsgId = clientMsgId
             )
 
-            var persistedMessage: SupabaseMessage? = null
-            var lastSendError: Throwable? = null
-            repeat(3) { attempt ->
-                if (persistedMessage != null) return@repeat
-                try {
-                    val result = SupabaseService.sendMessage(supaMsg)
-                    if (result.isSuccess) {
-                        persistedMessage = result.getOrNull() ?: supaMsg
-                    } else {
-                        lastSendError = result.exceptionOrNull() ?: Exception("Message persistence failed")
-                        if (attempt < 2) kotlinx.coroutines.delay(300L * (attempt + 1))
-                    }
-                } catch (e: Throwable) {
-                    lastSendError = e
-                    if (attempt < 2) kotlinx.coroutines.delay(300L * (attempt + 1))
-                }
-            }
+            // INSTANT DELIVER: Broadcast message directly over WebSocket (<50ms latency)
+            SupabaseRealtimeManager.broadcastNewMessage(supaMsg)
 
-            val persisted = persistedMessage
-                ?: throw (lastSendError ?: Exception("Message could not be persisted"))
+            val sendResult = SupabaseService.sendMessage(supaMsg).getOrNull()
+            val finalServerId = sendResult?.id?.ifBlank { serverMsgId } ?: serverMsgId
 
-            val finalServerId = persisted.id.ifBlank { serverMsgId }
-            val finalServerTs = persisted.timestamp.takeIf { it > 0L } ?: localServerTs
-            dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
-
-            val finalSyncedMessage = message.copy(
-                id = localRowId,
-                serverMessageId = finalServerId,
-                serverTimestamp = finalServerTs,
-                timestamp = finalServerTs,
-                syncStatus = "SYNCED",
-                deliveryState = "SENT"
-            )
-            dao.insertMessage(finalSyncedMessage)
-
-            // Only after durable persistence succeeds do we fan out the realtime
-            // broadcast. Realtime is an acceleration path, not message persistence;
-            // a socket/broadcast failure must never crash the sender or invalidate the
-            // already-persisted message.
-            try {
-                SupabaseRealtimeManager.broadcastNewMessage(
-                    supaMsg.copy(
-                        id = finalServerId,
-                        timestamp = finalServerTs
-                    )
-                )
-            } catch (e: Throwable) {
-                Log.w("BitChatRepository", "Realtime fan-out failed after durable send: ${e.message}")
+            if (finalServerId.isNotBlank()) {
+                dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
             }
 
             // Trigger FCM High Priority Push Notification to recipient
@@ -872,16 +790,10 @@ class BitChatRepository(val dao: BitChatDao) {
                 }
             }
 
-            // Re-assert the chat preview after durable persistence so the inbox
-            // always reflects the message that was just sent.
-            val refreshedChat = dao.getChatById(targetChatId)
-            if (refreshedChat != null && refreshedChat.lastUpdated <= finalServerTs) {
-                dao.insertChats(listOf(refreshedChat.copy(
-                    lastMessage = previewText,
-                    timeString = currentTime,
-                    lastUpdated = finalServerTs
-                )))
-            }
+            val finalSyncedMessage = syncedMessage.copy(
+                serverMessageId = finalServerId
+            )
+            dao.insertMessage(finalSyncedMessage)
 
             return finalSyncedMessage
         } catch (e: Exception) {
@@ -1292,43 +1204,8 @@ class BitChatRepository(val dao: BitChatDao) {
         return newChat
     }
 
-    /** Rebuild persisted inbox previews from the actual newest Room message. */
-    private suspend fun refreshAllDirectChatPreviews() {
-        val chats = dao.getAllChatsList()
-        val updates = mutableListOf<ChatEntity>()
-        for (chat in chats) {
-            if (chat.chatType == "GROUP" || chat.category == "Group" || chat.id.startsWith("group_")) continue
-            val latest = dao.getLatestMessageForChat(chat.id) ?: continue
-            val latestPreview = when {
-                latest.messageType == "SYSTEM_EVENT" -> latest.text
-                latest.text.contains("[AUDIO_BASE64|") || latest.text.contains("[AUDIO_FILE|") || latest.text.contains("[VIEW_ONCE_AUDIO") -> "🎙️ Voice message"
-                latest.text.contains("[IMAGE_ATTACHMENT|") || latest.text.contains("[IMAGE_ALBUM|") || latest.text.contains("[IMAGE_BASE64|") -> "🖼️ Photo"
-                latest.text.contains("[VIDEO_FILE|") || latest.text.contains("[VIDEO_URL|") || latest.text.contains("[VIDEO_BASE64|") -> "🎥 Video"
-                latest.text.contains("[DOCUMENT_FILE|") -> "📄 Document"
-                else -> latest.text
-            }
-            val latestTime = if (latest.timestamp > 0L) {
-                SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(latest.timestamp))
-            } else chat.timeString
-            // The inbox timestamp must represent the actual newest message,
-            // not the time when the ChatEntity was created/refreshed. Otherwise an
-            // old remote preview can keep a newer-looking lastUpdated value and
-            // later overwrite the real latest message.
-            val corrected = chat.copy(
-                lastMessage = latestPreview,
-                timeString = latestTime,
-                lastUpdated = latest.timestamp
-            )
-            if (corrected.lastMessage != chat.lastMessage || corrected.timeString != chat.timeString || corrected.lastUpdated != chat.lastUpdated) {
-                updates += corrected
-            }
-        }
-        if (updates.isNotEmpty()) dao.insertChats(updates)
-    }
-
     suspend fun deduplicateCopyChats() = withContext(Dispatchers.IO) {
         try {
-            refreshAllDirectChatPreviews()
             val allChats = dao.getAllChatsList()
             if (allChats.size <= 1) return@withContext
 
@@ -1359,11 +1236,6 @@ class BitChatRepository(val dao: BitChatDao) {
                     dao.deleteChatById(dup.id)
                 }
             }
-
-            // Moving messages between duplicate chat IDs changes which message is
-            // considered latest for the surviving ChatEntity. Rebuild previews once
-            // more after the merge so the keeper cannot retain a stale copy preview.
-            refreshAllDirectChatPreviews()
         } catch (e: Exception) {
             Log.w("BitChatRepo", "deduplicateCopyChats error: ${e.message}")
         }
@@ -1439,6 +1311,9 @@ class BitChatRepository(val dao: BitChatDao) {
             val clientKey = supaMsg.clientMsgId ?: ""
             val existingLocal = dao.findMessageByServerId(supaMsg.id)
                 ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
+                ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
+                ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
+                ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
 
             val updatedEntity = if (existingLocal != null) {
                 existingLocal.copy(
@@ -1458,7 +1333,19 @@ class BitChatRepository(val dao: BitChatDao) {
                     pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingLocal.pinnedAt
                 )
             } else {
-                MessageEntity(
+                val pendingRecent = dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
+                if (pendingRecent != null) {
+                    pendingRecent.copy(
+                        serverMessageId = supaMsg.id,
+                        syncStatus = "SYNCED",
+                        deliveryState = when {
+                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                        else -> "SENT"
+                    }
+                    )
+                } else {
+                    MessageEntity(
                         chatId = supaMsg.chatId,
                         senderName = "You",
                         text = msgText,
@@ -1477,6 +1364,7 @@ class BitChatRepository(val dao: BitChatDao) {
                         replySnippet = replySnippet,
                         replySenderName = replySenderName
                     )
+                }
             }
             dao.insertMessage(updatedEntity)
 
@@ -1505,14 +1393,12 @@ class BitChatRepository(val dao: BitChatDao) {
                 opponentName = resolvedOpponentName.ifBlank { supaMsg.receiverId },
                 opponentAvatar = resolvedOpponentAvatar
             )
-            if (supaMsg.timestamp >= chat.lastUpdated) {
-                val updatedChat = chat.copy(
-                    lastMessage = msgText,
-                    timeString = timeStr,
-                    lastUpdated = supaMsg.timestamp
-                )
-                dao.insertChats(listOf(updatedChat))
-            }
+            val updatedChat = chat.copy(
+                lastMessage = msgText,
+                timeString = timeStr,
+                lastUpdated = supaMsg.timestamp
+            )
+            dao.insertChats(listOf(updatedChat))
             return updatedEntity
         }
 
@@ -1520,26 +1406,26 @@ class BitChatRepository(val dao: BitChatDao) {
         val isGroupOrBroadcast = supaMsg.receiverId.equals("all", ignoreCase = true) ||
             supaMsg.receiverId.equals("group", ignoreCase = true) ||
             supaMsg.chatId == "global" ||
-            supaMsg.chatId.startsWith("group_")
+            supaMsg.chatId.startsWith("group_") ||
+            supaMsg.messageType == "SYSTEM_EVENT"
 
         val myFullName = currentIdentity?.fullName?.trim()?.lowercase() ?: ""
 
         val isDirectRecipient = (
-            supaMsg.receiverId.isNotBlank() &&
-            (
+            supaMsg.receiverId.isBlank() ||
             supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
             (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
             (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
             (myFullName.isNotBlank() && supaMsg.receiverId.equals(myFullName, ignoreCase = true)) ||
             (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
-            )
         )
 
-        // Direct messages must pass the recipient check above. Merely having the
-        // chat_id/contact locally is NOT authorization: a malicious or unrelated
-        // message can reuse a known chat_id. Never accept such a message.
-        if (!isGroupOrBroadcast && !isDirectRecipient) {
-            Log.d("BitChatRepo", "Ignoring message not addressed to current user: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
+        val existingChatById = dao.getChatById(supaMsg.chatId)
+        val isChatParticipant = existingChatById != null ||
+            (supaMsg.senderId.isNotBlank() && dao.getAllContactsList().any { it.id == supaMsg.senderId || it.name.equals(supaMsg.senderName, ignoreCase = true) })
+
+        if (!isGroupOrBroadcast && !isDirectRecipient && !isChatParticipant) {
+            Log.d("BitChatRepo", "Ignoring 3rd party message not addressed to me: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
             return MessageEntity(
                 id = 0L,
                 chatId = supaMsg.chatId,
@@ -1553,7 +1439,10 @@ class BitChatRepository(val dao: BitChatDao) {
         // Existing message check (to prevent duplicate insertions)
         val clientKey = supaMsg.clientMsgId ?: ""
         val existingIncoming = dao.findMessageByServerId(supaMsg.id)
-            ?: clientKey.takeIf { it.isNotBlank() }?.let { dao.getMessageByServerOrClientId(supaMsg.id, it) }
+            ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
+            ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
+            ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
+            ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
 
         if (existingIncoming != null) {
             val updated = existingIncoming.copy(
@@ -1670,17 +1559,15 @@ class BitChatRepository(val dao: BitChatDao) {
             } catch (_: Exception) {}
         }
 
-        if (supaMsg.timestamp >= targetChat.lastUpdated) {
-            val updatedChat = targetChat.copy(
-                name = if (resolvedSenderName.isNotBlank() && resolvedSenderName != "Contact" && resolvedSenderName != "User") resolvedSenderName else targetChat.name,
-                avatarType = if (resolvedSenderAvatar.isNotBlank() && resolvedSenderAvatar != "default") resolvedSenderAvatar else targetChat.avatarType,
-                lastMessage = msgText,
-                timeString = timeStr,
-                unreadCount = if (isChatOpen) 0 else targetChat.unreadCount + 1,
-                lastUpdated = supaMsg.timestamp
-            )
-            dao.insertChats(listOf(updatedChat))
-        }
+        val updatedChat = targetChat.copy(
+            name = if (resolvedSenderName.isNotBlank() && resolvedSenderName != "Contact" && resolvedSenderName != "User") resolvedSenderName else targetChat.name,
+            avatarType = if (resolvedSenderAvatar.isNotBlank() && resolvedSenderAvatar != "default") resolvedSenderAvatar else targetChat.avatarType,
+            lastMessage = msgText,
+            timeString = timeStr,
+            unreadCount = if (isChatOpen) 0 else targetChat.unreadCount + 1,
+            lastUpdated = supaMsg.timestamp
+        )
+        dao.insertChats(listOf(updatedChat))
 
         return savedEntity
     }
@@ -1688,27 +1575,14 @@ class BitChatRepository(val dao: BitChatDao) {
     suspend fun syncAllChatHistory(myUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
         if (myUid.isBlank()) return@withContext false
 
-        // History is protected by messages RLS, so the only safe identity for a
-        // restore is the UID from the current authenticated Supabase session.
-        // This prevents a stale Room identity / profile identifier from making
-        // one account restore correctly while another account gets an empty inbox.
-        val authenticatedUid = SupabaseService.getAuthenticatedUserId().getOrNull()
-            ?: return@withContext false
-        if (!authenticatedUid.equals(myUid, ignoreCase = true)) {
-            Log.w(
-                "BitChatRepo",
-                "History sync UID mismatch. requested=$myUid authenticated=$authenticatedUid; using authenticated UID."
-            )
-        }
-        val syncUid = authenticatedUid
-
         val now = System.currentTimeMillis()
-        val last = lastHistorySyncAt[syncUid] ?: 0L
+        val last = lastHistorySyncAt[myUid] ?: 0L
         if (now - last < HISTORY_SYNC_TTL_MS) return@withContext true
         historySyncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            val lockedLast = lastHistorySyncAt[syncUid] ?: 0L
+            val lockedLast = lastHistorySyncAt[myUid] ?: 0L
             if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock true
+            lastHistorySyncAt[myUid] = lockedNow
             try {
             // First run deduplication on existing copy chats
             deduplicateCopyChats()
@@ -1717,31 +1591,30 @@ class BitChatRepository(val dao: BitChatDao) {
             val myEmail = currentIdentity?.email?.trim()?.lowercase() ?: ""
             val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
             val fetchedMessages = mutableListOf<SupabaseMessage>()
-            val syncKey = "user_history:$syncUid"
+            val syncKey = "user_history:$myUid"
             val previousSync = dao.getSyncState(syncKey)?.lastSyncedAt ?: 0L
 
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
             val historyEmail = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername }
 
-            // Room is the primary history store. Only the first sync for a
-            // completely empty local history downloads the initial server window.
-            // Once a sync checkpoint exists, fetch only messages newer than the
-            // local checkpoint (with a small overlap for timestamp/retry safety).
-            // This prevents reopening the app from repeatedly downloading old
-            // history and keeps Supabase traffic focused on new/missing messages.
-            if (previousSync <= 0L) {
-                val initialRes = SupabaseService.fetchUserMessages(
-                    userId = syncUid,
-                    username = historyUsername,
-                    email = historyEmail,
-                    limit = 500
-                )
-                if (initialRes.isSuccess) {
-                    initialRes.getOrNull()?.let { fetchedMessages.addAll(it) }
-                }
-            } else {
+            // Always fetch a recent server window when the app returns from a long
+            // background/closed period. This is the recovery path when an FCM data
+            // message was delayed, dropped, or the service process was killed.
+            val recentRes = SupabaseService.fetchUserMessages(
+                userId = myUid,
+                username = historyUsername,
+                email = historyEmail,
+                limit = 500
+            )
+            if (recentRes.isSuccess) {
+                recentRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+            }
+
+            // Also fetch the incremental window with a small overlap so timestamp
+            // boundaries and delayed delivery cannot leave a permanent hole.
+            if (previousSync > 0L) {
                 val sinceRes = SupabaseService.fetchUserMessagesSince(
-                    userId = syncUid,
+                    userId = myUid,
                     username = historyUsername,
                     email = historyEmail,
                     sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
@@ -1783,15 +1656,16 @@ class BitChatRepository(val dao: BitChatDao) {
             val existingChatMap = existingChats.associateBy { it.id }.toMutableMap()
 
             for (supaMsg in uniqueMessages) {
-                val isSentByMe = supaMsg.senderId == syncUid ||
+                val isSentByMe = supaMsg.senderId == myUid ||
                         (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
                         (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true)) ||
                         (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
 
-                val isReceivedByMe = supaMsg.receiverId.equals(syncUid, ignoreCase = true) ||
+                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
                         (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
                         (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
+                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
+                        existingChatMap.containsKey(supaMsg.chatId)
 
                 if (!isSentByMe && !isReceivedByMe) continue
 
@@ -1987,7 +1861,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 val isNoAvatar = chat.avatarType.isBlank() || chat.avatarType == "default"
                 if (isUgly || isNoAvatar) {
                     val parts = chat.participantUids.split(",").map { it.trim() }.filter {
-                        it.isNotBlank() && !it.equals(syncUid, ignoreCase = true) && !it.equals(myUsername, ignoreCase = true) && !it.equals(myEmail, ignoreCase = true) && it != "user_me"
+                        it.isNotBlank() && !it.equals(myUid, ignoreCase = true) && !it.equals(myUsername, ignoreCase = true) && !it.equals(myEmail, ignoreCase = true) && it != "user_me"
                     }
                     val pUid = parts.firstOrNull() ?: if (isUgly) chat.name else ""
                     if (pUid.isNotBlank()) {
@@ -2015,15 +1889,11 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.upsertSyncState(SyncStateEntity(syncKey, latestRemoteTimestamp))
             }
 
-            // Only mark the UID as recently synced after the complete restore
-            // succeeds. A failed/unauthenticated restore must be retryable.
-            lastHistorySyncAt[syncUid] = System.currentTimeMillis()
-
             // Run deduplication again after history sync
             deduplicateCopyChats()
             true
             } catch (e: Exception) {
-                Log.w("BitChatRepo", "syncAllChatHistory error for uid=$syncUid: " + e.message, e)
+                Log.w("BitChatRepo", "syncAllChatHistory error: " + e.message, e)
                 false
             }
         }
@@ -2219,15 +2089,7 @@ class BitChatRepository(val dao: BitChatDao) {
     ): String {
         val bytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("Cannot read file")
-        val ext = when {
-            mimeType.contains("png", ignoreCase = true) -> "png"
-            mimeType.contains("webp", ignoreCase = true) -> "webp"
-            mimeType.contains("mp4", ignoreCase = true) -> "mp4"
-            mimeType.contains("quicktime", ignoreCase = true) -> "mov"
-            mimeType.contains("audio", ignoreCase = true) || mimeType.contains("m4a", ignoreCase = true) -> "m4a"
-            mimeType.contains("pdf", ignoreCase = true) -> "pdf"
-            else -> "bin"
-        }
+        val ext = if (mimeType.contains("png")) "png" else "jpg"
         val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.$ext"
         return SupabaseService.uploadChatMedia(fileName, bytes, mimeType).getOrThrow()
     }

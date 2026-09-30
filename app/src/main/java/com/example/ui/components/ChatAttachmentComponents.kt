@@ -26,11 +26,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -915,7 +915,6 @@ fun InteractivePollBubble(
 // 3. Poll Creation Dialog (Title, Question/Topic, Clean Multiple Choices toggle)
 // -----------------------------------------------------------------------------
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PollCreatorDialog(
     isNightMode: Boolean,
@@ -941,31 +940,19 @@ fun PollCreatorDialog(
     val bgColor = if (isNightMode) Color(0xFF1E1F2B) else Color.White
     val textColor = if (isNightMode) Color.White else Color(0xFF0F172A)
     val subTextColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B)
-    val fieldBg = if (isNightMode) Color(0xFF1B1F2A) else Color.White
-    val fieldBorder = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFD6DEE8)
-    val pollSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val pollScrollState = rememberScrollState()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = pollSheetState,
-        modifier = Modifier.fillMaxHeight(),
-        containerColor = bgColor,
-        scrimColor = Color.Black.copy(alpha = 0.48f),
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-    ) {
+    Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            shape = RoundedCornerShape(24.dp),
             color = bgColor,
-            shadowElevation = 0.dp,
-            modifier = Modifier.fillMaxWidth()
+            shadowElevation = 10.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .imePadding()
-                        .verticalScroll(pollScrollState)
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Header
@@ -994,18 +981,12 @@ fun PollCreatorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = textColor,
-                        unfocusedTextColor = textColor,
-                        focusedContainerColor = fieldBg,
-                        unfocusedContainerColor = fieldBg,
                         focusedBorderColor = Color(0xFF2563EB),
-                        unfocusedBorderColor = fieldBorder,
-                        focusedLabelColor = Color(0xFF2563EB),
-                        unfocusedLabelColor = subTextColor,
-                        cursorColor = Color(0xFF2563EB)
+                        unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.2f) else Color(0xFFCBD5E1)
                     )
                 )
 
+                // Multiple choices row (Clean, sleek toggle without cut-off text)
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = if (isNightMode) Color(0xFF272732) else Color(0xFFF1F5F9),
@@ -1063,18 +1044,7 @@ fun PollCreatorDialog(
                                     .weight(1f)
                                     .focusRequester(requester),
                                 shape = RoundedCornerShape(14.dp),
-                                singleLine = true,
-                                 colors = OutlinedTextFieldDefaults.colors(
-                                     focusedTextColor = textColor,
-                                     unfocusedTextColor = textColor,
-                                     focusedContainerColor = fieldBg,
-                                     unfocusedContainerColor = fieldBg,
-                                     focusedBorderColor = Color(0xFF2563EB),
-                                     unfocusedBorderColor = fieldBorder,
-                                     focusedLabelColor = Color(0xFF2563EB),
-                                     unfocusedLabelColor = subTextColor,
-                                     cursorColor = Color(0xFF2563EB)
-                                 )
+                                singleLine = true
                             )
                             if (optionsList.size > 2) {
                                 IconButton(
@@ -1504,219 +1474,424 @@ fun ChecklistCreatorDialog(
     onCreateChecklist: (String) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
-    val items = remember { mutableStateListOf<String>() }
+    val items = remember { mutableStateListOf("", "") }
     var newItemText by remember { mutableStateOf("") }
     val context = LocalContext.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scrollState = rememberScrollState()
+
+    val quickTemplates = remember {
+        listOf(
+            "🛒 Groceries" to listOf("Fresh vegetables & fruits", "Milk & dairy", "Whole grain bread", "Coffee beans"),
+            "🚀 Project Launch" to listOf("Finalize UI design review", "Run QA & unit tests", "Prepare release notes", "Deploy build"),
+            "✈️ Packing List" to listOf("Passport & ID cards", "Phone charger & power bank", "Travel adapter", "First-aid kit"),
+            "✅ Daily Standup" to listOf("Review yesterday's progress", "Outline today's priorities", "Clear team blockers")
+        )
+    }
+
+    val nonEmptyCount = items.count { it.trim().isNotEmpty() } + if (newItemText.trim().isNotEmpty()) 1 else 0
+    val cardBg = if (isNightMode) Color(0xFF1B1F2A) else Color.White
+    val textColor = if (isNightMode) Color.White else Color(0xFF0F172A)
+    val subTextColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        modifier = Modifier.fillMaxHeight(),
-        containerColor = if (isNightMode) Color(0xFF151821) else Color(0xFFF8FAFC),
-        scrimColor = Color.Black.copy(alpha = 0.48f),
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        modifier = Modifier.fillMaxHeight(0.92f),
+        containerColor = if (isNightMode) Color(0xFF11141C) else Color(0xFFF8FAFC),
+        scrimColor = Color.Black.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = null
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.TopCenter
         ) {
-            Box(
+            Column(
                 modifier = Modifier
-                    .align(Alignment.CenterHorizontally)
-                    .widthIn(max = 44.dp)
-                    .height(5.dp)
-                    .clip(CircleShape)
-                    .background(if (isNightMode) Color.White.copy(alpha = 0.18f) else Color(0xFFD1D9E3))
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .widthIn(max = 600.dp)
+                    .verticalScroll(scrollState)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Create Checklist",
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isNightMode) Color.White else Color(0xFF0F172A)
-                    )
-                    Text(
-                        "Build a shared list everyone can tick off",
-                        fontSize = 12.sp,
-                        color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, "Close", tint = if (isNightMode) Color.White else Color(0xFF475569))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            OutlinedTextField(
-                value = title,
-                onValueChange = { title = it },
-                label = { Text("Checklist title") },
-                placeholder = { Text("e.g. Groceries, Project tasks…") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                    unfocusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                    focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                    unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                    focusedBorderColor = Color(0xFF06B6D4),
-                    unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.16f) else Color(0xFFD3DAE4),
-                    focusedLabelColor = Color(0xFF06B6D4),
-                    unfocusedLabelColor = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
-                    cursorColor = Color(0xFF06B6D4)
+                // Custom Drag Handle
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(42.dp)
+                        .height(4.5.dp)
+                        .clip(CircleShape)
+                        .background(if (isNightMode) Color.White.copy(alpha = 0.18f) else Color(0xFFCBD5E1))
                 )
-            )
 
-            Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Items", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (isNightMode) Color.White else Color(0xFF0F172A))
-                Text(items.size.toString() + "/50", fontSize = 12.sp, color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B))
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (items.isEmpty()) {
-                Surface(
+                // Header Row with Icon Badge
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF)),
-                    shadowElevation = 0.dp
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(Icons.Default.CheckBoxOutlineBlank, contentDescription = null, tint = Color(0xFF06B6D4), modifier = Modifier.size(26.dp))
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text("No items yet", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("Add your first task below", color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B), fontSize = 11.sp)
-                    }
-                }
-            }
-
-            items.forEachIndexed { idx, item ->
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                    border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE1E7EF)),
-                    shadowElevation = 0.dp
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier.padding(start = 13.dp, end = 5.dp, top = 5.dp, bottom = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .border(1.5.dp, Color(0xFF06B6D4), RoundedCornerShape(9.dp))
-                                .background(if (isNightMode) Color(0xFF06B6D4).copy(alpha = 0.10f) else Color(0xFFECFEFF)),
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFF06B6D4), Color(0xFF2563EB))
+                                    )
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text((idx + 1).toString(), color = Color(0xFF06B6D4), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Icon(
+                                imageVector = Icons.Default.CheckBox,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(item, color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 14.sp, modifier = Modifier.weight(1f))
-                        IconButton(onClick = { if (items.size > 1) items.removeAt(idx) }, modifier = Modifier.size(36.dp)) {
-                            Icon(Icons.Default.Close, "Remove", tint = Color(0xFFEF4444), modifier = Modifier.size(17.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Create Checklist",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = textColor
+                            )
+                            Text(
+                                text = "Interactive task list everyone in chat can tick off",
+                                fontSize = 12.sp,
+                                color = subTextColor,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
                         }
                     }
-                }
-            }
-
-            if (items.size < 50) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = newItemText,
-                        onValueChange = { newItemText = it },
-                        placeholder = { Text("Add another item…") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF06B6D4),
-                            unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFD3DAE4),
-                            focusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White,
-                            unfocusedContainerColor = if (isNightMode) Color(0xFF1B1F2A) else Color.White
-                        )
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
                     IconButton(
-                        onClick = {
-                            val clean = newItemText.trim()
-                            if (clean.isNotEmpty() && items.size < 50) {
-                                items.add(clean)
-                                newItemText = ""
-                            }
-                        },
-                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)).background(Color(0xFF06B6D4))
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE2E8F0))
                     ) {
-                        Icon(Icons.Default.Add, "Add item", tint = Color.White)
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = textColor,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = {
-                    if (title.isBlank()) {
-                        Toast.makeText(context, "Please enter a checklist title", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    if (items.isEmpty()) {
-                        Toast.makeText(context, "Add at least 1 item", Toast.LENGTH_SHORT).show()
-                        return@Button
-                    }
-                    val itemsJsonArray = items.mapIndexed { i, txt ->
-                        JSONObject().apply {
-                            put("id", i.toString())
-                            put("text", txt)
-                            put("checked", false)
-                            put("checkedBy", "")
-                            put("avatar", "")
+                // Quick Templates Bar
+                Text(
+                    text = "QUICK TEMPLATES",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF06B6D4),
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    quickTemplates.forEach { (tplTitle, tplItems) ->
+                        Surface(
+                            onClick = {
+                                title = tplTitle.substringAfter(" ").trim()
+                                items.clear()
+                                items.addAll(tplItems)
+                                newItemText = ""
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isNightMode) Color(0xFF1B2230) else Color(0xFFECFEFF),
+                            border = BorderStroke(
+                                1.dp,
+                                if (isNightMode) Color(0xFF06B6D4).copy(alpha = 0.3f) else Color(0xFFA5F3FC)
+                            )
+                        ) {
+                            Text(
+                                text = tplTitle,
+                                color = if (isNightMode) Color(0xFF67E8F9) else Color(0xFF0E7490),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
                         }
                     }
-                    val payloadObject = JSONObject().apply {
-                        put("title", title)
-                        put("items", JSONArray(itemsJsonArray))
-                    }
-                    onCreateChecklist("[CHECKLIST_JSON|$payloadObject]")
-                },
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                shape = RoundedCornerShape(17.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06B6D4))
-            ) {
-                Icon(Icons.Default.CheckBox, null, tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Send Checklist", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            }
+                }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Checklist Title Input
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Checklist Title") },
+                    placeholder = { Text("e.g. Sprint Tasks, Groceries, Event Prep…") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF06B6D4),
+                        unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFCBD5E1),
+                        focusedLabelColor = Color(0xFF06B6D4),
+                        unfocusedLabelColor = subTextColor,
+                        focusedTextColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedContainerColor = cardBg,
+                        unfocusedContainerColor = cardBg
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Items Section Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Checklist Items",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = Color(0xFF06B6D4).copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "$nonEmptyCount / 50",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF06B6D4),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    if (items.size > 1 || items.any { it.isNotBlank() }) {
+                        Text(
+                            text = "Clear All",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFEF4444),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    items.clear()
+                                    items.add("")
+                                    newItemText = ""
+                                }
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Editable Checklist Rows
+                items.forEachIndexed { idx, item ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = cardBg,
+                        border = BorderStroke(
+                            1.dp,
+                            if (item.isNotBlank()) Color(0xFF06B6D4).copy(alpha = 0.35f)
+                            else if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)
+                        ),
+                        shadowElevation = if (isNightMode) 0.dp else 1.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (item.isNotBlank()) Color(0xFF06B6D4)
+                                        else if (isNightMode) Color(0xFF06B6D4).copy(alpha = 0.12f)
+                                        else Color(0xFFECFEFF)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = (idx + 1).toString(),
+                                    color = if (item.isNotBlank()) Color.White else Color(0xFF06B6D4),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                if (item.isEmpty()) {
+                                    Text(
+                                        text = "Task item ${idx + 1}…",
+                                        color = subTextColor.copy(alpha = 0.7f),
+                                        fontSize = 14.sp
+                                    )
+                                }
+                                androidx.compose.foundation.text.BasicTextField(
+                                    value = item,
+                                    onValueChange = { updated -> items[idx] = updated },
+                                    singleLine = true,
+                                    textStyle = androidx.compose.ui.text.TextStyle(
+                                        color = textColor,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Color(0xFF06B6D4)),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    if (items.size > 1) {
+                                        items.removeAt(idx)
+                                    } else {
+                                        items[0] = ""
+                                    }
+                                },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove item",
+                                    tint = if (items.size > 1 || item.isNotEmpty()) Color(0xFFEF4444) else subTextColor.copy(alpha = 0.4f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Quick-add another item bar
+                if (items.size < 50) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = newItemText,
+                            onValueChange = { newItemText = it },
+                            placeholder = { Text("Type a new task & tap + to add…") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF06B6D4),
+                                unfocusedBorderColor = if (isNightMode) Color.White.copy(alpha = 0.14f) else Color(0xFFCBD5E1),
+                                focusedTextColor = textColor,
+                                unfocusedTextColor = textColor,
+                                focusedContainerColor = cardBg,
+                                unfocusedContainerColor = cardBg
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = {
+                                val clean = newItemText.trim()
+                                if (clean.isNotEmpty() && items.size < 50) {
+                                    val emptyIndex = items.indexOfFirst { it.isBlank() }
+                                    if (emptyIndex != -1) {
+                                        items[emptyIndex] = clean
+                                    } else {
+                                        items.add(clean)
+                                    }
+                                    newItemText = ""
+                                } else if (items.size < 50) {
+                                    items.add("")
+                                }
+                            },
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFF06B6D4), Color(0xFF2563EB))
+                                    )
+                                )
+                        ) {
+                            Icon(Icons.Default.Add, "Add item", tint = Color.White)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        val finalItems = items.map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+                        if (newItemText.trim().isNotEmpty() && finalItems.size < 50) {
+                            finalItems.add(newItemText.trim())
+                        }
+                        if (title.isBlank()) {
+                            Toast.makeText(context, "Please enter a checklist title", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (finalItems.isEmpty()) {
+                            Toast.makeText(context, "Please add at least 1 task item", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val itemsJsonArray = finalItems.mapIndexed { i, txt ->
+                            JSONObject().apply {
+                                put("id", i.toString())
+                                put("text", txt)
+                                put("checked", false)
+                                put("checkedBy", "")
+                                put("avatar", "")
+                            }
+                        }
+                        val payloadObject = JSONObject().apply {
+                            put("title", title.trim())
+                            put("items", JSONArray(itemsJsonArray))
+                        }
+                        onCreateChecklist("[CHECKLIST_JSON|$payloadObject]")
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF06B6D4))
+                ) {
+                    Icon(Icons.Default.CheckBox, null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (nonEmptyCount > 0) "Send Checklist ($nonEmptyCount ${if (nonEmptyCount == 1) "item" else "items"})" else "Send Checklist",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+            }
         }
     }
 }
@@ -1769,180 +1944,243 @@ fun InteractiveChecklistBubble(
     val doneCount = itemList.count { it.checked }
     val totalCount = itemList.size
     val progress = if (totalCount > 0) doneCount.toFloat() / totalCount else 0f
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 350),
+        label = "checklist_progress"
+    )
+    val isAllDone = totalCount > 0 && doneCount == totalCount
+
+    val bubbleShape = if (isUser) {
+        RoundedCornerShape(22.dp, 22.dp, 4.dp, 22.dp)
+    } else {
+        RoundedCornerShape(22.dp, 22.dp, 22.dp, 4.dp)
+    }
 
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = if (isUser) Color(0xFF0E7490) else if (isNightMode) Color(0xFF121B28) else Color(0xFFECFEFF),
-        border = BorderStroke(1.dp, if (isUser) Color.Transparent else Color(0xFF06B6D4).copy(alpha = 0.35f)),
-        modifier = Modifier.widthIn(min = 230.dp, max = 290.dp).padding(vertical = 4.dp)
+        shape = bubbleShape,
+        color = if (isUser) Color(0xFF0E7490) else if (isNightMode) Color(0xFF151C28) else Color(0xFFF0FDFA),
+        border = BorderStroke(
+            1.dp,
+            if (isAllDone) Color(0xFF10B981).copy(alpha = 0.6f)
+            else if (isUser) Color.White.copy(alpha = 0.16f)
+            else Color(0xFF06B6D4).copy(alpha = 0.35f)
+        ),
+        shadowElevation = 3.dp,
+        modifier = Modifier
+            .widthIn(min = 245.dp, max = 305.dp)
+            .padding(vertical = 4.dp)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    imageVector = Icons.Default.CheckBox,
-                    contentDescription = null,
-                    tint = if (isUser) Color.White else Color(0xFF06B6D4),
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = title,
-                    color = if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Progress bar & text
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(6.dp)
-                        .clip(CircleShape)
-                        .background(if (isUser) Color.White.copy(0.25f) else Color(0xFF06B6D4).copy(0.2f))
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(progress)
-                            .fillMaxHeight()
-                            .clip(CircleShape)
-                            .background(if (isUser) Color.White else Color(0xFF06B6D4))
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (isAllDone) Color(0xFF10B981)
+                                else if (isUser) Color.White.copy(alpha = 0.2f)
+                                else Color(0xFF06B6D4).copy(alpha = 0.15f)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isAllDone) Icons.Default.CheckCircle else Icons.Default.CheckBox,
+                            contentDescription = null,
+                            tint = if (isAllDone || isUser) Color.White else Color(0xFF06B6D4),
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(9.dp))
+                    Text(
+                        text = title,
+                        color = if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "$doneCount/$totalCount",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isUser) Color.White.copy(0.9f) else (if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569))
+
+                Surface(
+                    shape = CircleShape,
+                    color = if (isAllDone) Color(0xFF10B981)
+                    else if (isUser) Color.Black.copy(alpha = 0.22f)
+                    else Color(0xFF06B6D4).copy(alpha = 0.14f)
+                ) {
+                    Text(
+                        text = if (isAllDone) "Done ✓" else "$doneCount/$totalCount",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isAllDone || isUser) Color.White else Color(0xFF06B6D4),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Animated Progress Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(CircleShape)
+                    .background(if (isUser) Color.White.copy(0.22f) else Color(0xFF06B6D4).copy(0.18f))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(animatedProgress)
+                        .fillMaxHeight()
+                        .clip(CircleShape)
+                        .background(
+                            if (isAllDone) Color(0xFF10B981)
+                            else if (isUser) Color.White
+                            else Color(0xFF06B6D4)
+                        )
                 )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             // Checklist Items List
-            itemList.forEachIndexed { index, item ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(13.dp))
-                        .background(
-                            if (item.checked) {
-                                if (isUser) Color.White.copy(alpha = 0.08f)
-                                else Color(0xFF06B6D4).copy(alpha = if (isNightMode) 0.12f else 0.08f)
-                            } else {
-                                if (isUser) Color.White.copy(alpha = 0.03f)
-                                else if (isNightMode) Color.White.copy(alpha = 0.025f) else Color.Black.copy(alpha = 0.015f)
-                            }
-                        )
-                        .clickable {
-                            val newChecked = !item.checked
-                            itemList[index] = item.copy(
-                                checked = newChecked,
-                                checkedBy = if (newChecked) currentUserName else "",
-                                checkedByAvatar = if (newChecked) currentUserAvatar else ""
-                            )
-                            try {
-                                val jsonObj = org.json.JSONObject()
-                                jsonObj.put("title", title)
-                                val arr = org.json.JSONArray()
-                                itemList.forEach { itm ->
-                                    val obj = org.json.JSONObject()
-                                    obj.put("id", itm.id)
-                                    obj.put("text", itm.text)
-                                    obj.put("checked", itm.checked)
-                                    obj.put("checkedBy", itm.checkedBy)
-                                    obj.put("avatar", itm.checkedByAvatar)
-                                    arr.put(obj)
-                                }
-                                jsonObj.put("items", arr)
-                                val updatedPayload = "[CHECKLIST_JSON|${jsonObj.toString()}]"
-                                onToggleItem(updatedPayload)
-                            } catch (_: Exception) {}
-                        }
-                        .padding(vertical = 5.dp, horizontal = 2.dp)
-                ) {
-                    Box(
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                itemList.forEachIndexed { index, item ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .size(23.dp)
-                            .clip(RoundedCornerShape(7.dp))
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
                             .background(
                                 if (item.checked) {
-                                    if (isUser) Color.White else Color(0xFF06B6D4)
+                                    if (isUser) Color.White.copy(alpha = 0.12f)
+                                    else Color(0xFF06B6D4).copy(alpha = if (isNightMode) 0.14f else 0.10f)
                                 } else {
-                                    Color.Transparent
+                                    if (isUser) Color.Black.copy(alpha = 0.12f)
+                                    else if (isNightMode) Color.White.copy(alpha = 0.04f) else Color.White
                                 }
                             )
                             .border(
-                                width = 1.6.dp,
+                                width = 1.dp,
                                 color = if (item.checked) {
-                                    if (isUser) Color.White else Color(0xFF06B6D4)
+                                    if (isUser) Color.White.copy(alpha = 0.25f) else Color(0xFF06B6D4).copy(alpha = 0.3f)
                                 } else {
-                                    if (isUser) Color.White.copy(alpha = 0.55f)
-                                    else Color(0xFF94A3B8)
+                                    if (isUser) Color.White.copy(alpha = 0.08f)
+                                    else if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0)
                                 },
-                                shape = RoundedCornerShape(7.dp)
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (item.checked) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Checked",
-                                tint = if (isUser) Color(0xFF0E7490) else Color.White,
-                                modifier = Modifier.size(16.dp)
+                                shape = RoundedCornerShape(12.dp)
                             )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = item.text,
-                        fontSize = 13.5.sp,
-                        color = if (item.checked) {
-                            if (isUser) Color.White.copy(0.7f) else (if (isNightMode) Color.White.copy(0.5f) else Color.Gray)
-                        } else {
-                            if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A))
-                        },
-                        style = androidx.compose.ui.text.TextStyle(
-                            textDecoration = if (item.checked) androidx.compose.ui.text.style.TextDecoration.LineThrough else androidx.compose.ui.text.style.TextDecoration.None
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-
-                    if (item.checked && item.checkedBy.isNotBlank()) {
-                        Spacer(modifier = Modifier.width(6.dp))
+                            .clickable {
+                                val newChecked = !item.checked
+                                itemList[index] = item.copy(
+                                    checked = newChecked,
+                                    checkedBy = if (newChecked) currentUserName else "",
+                                    checkedByAvatar = if (newChecked) currentUserAvatar else ""
+                                )
+                                try {
+                                    val jsonObj = org.json.JSONObject()
+                                    jsonObj.put("title", title)
+                                    val arr = org.json.JSONArray()
+                                    itemList.forEach { itm ->
+                                        val obj = org.json.JSONObject()
+                                        obj.put("id", itm.id)
+                                        obj.put("text", itm.text)
+                                        obj.put("checked", itm.checked)
+                                        obj.put("checkedBy", itm.checkedBy)
+                                        obj.put("avatar", itm.checkedByAvatar)
+                                        arr.put(obj)
+                                    }
+                                    jsonObj.put("items", arr)
+                                    val updatedPayload = "[CHECKLIST_JSON|${jsonObj.toString()}]"
+                                    onToggleItem(updatedPayload)
+                                } catch (_: Exception) {}
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF06B6D4)),
+                                .size(22.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (item.checked) {
+                                        if (isAllDone) Color(0xFF10B981)
+                                        else if (isUser) Color.White else Color(0xFF06B6D4)
+                                    } else {
+                                        Color.Transparent
+                                    }
+                                )
+                                .border(
+                                    width = 1.5.dp,
+                                    color = if (item.checked) {
+                                        if (isAllDone) Color(0xFF10B981)
+                                        else if (isUser) Color.White else Color(0xFF06B6D4)
+                                    } else {
+                                        if (isUser) Color.White.copy(alpha = 0.6f)
+                                        else Color(0xFF94A3B8)
+                                    },
+                                    shape = RoundedCornerShape(6.dp)
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (item.checkedByAvatar.isNotBlank()) {
-                                coil.compose.AsyncImage(
-                                    model = item.checkedByAvatar,
-                                    contentDescription = item.checkedBy,
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                    contentScale = ContentScale.Crop
+                            if (item.checked) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Checked",
+                                    tint = if (isUser && !isAllDone) Color(0xFF0E7490) else Color.White,
+                                    modifier = Modifier.size(15.dp)
                                 )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = item.text,
+                            fontSize = 13.5.sp,
+                            fontWeight = if (item.checked) FontWeight.Normal else FontWeight.Medium,
+                            color = if (item.checked) {
+                                if (isUser) Color.White.copy(0.72f) else (if (isNightMode) Color.White.copy(0.55f) else Color(0xFF64748B))
                             } else {
-                                Text(
-                                    text = item.checkedBy.take(1).uppercase(),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A))
+                            },
+                            style = androidx.compose.ui.text.TextStyle(
+                                textDecoration = if (item.checked) androidx.compose.ui.text.style.TextDecoration.LineThrough else androidx.compose.ui.text.style.TextDecoration.None
+                            ),
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (item.checked && item.checkedBy.isNotBlank()) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isUser) Color.White.copy(alpha = 0.25f) else Color(0xFF06B6D4)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (item.checkedByAvatar.isNotBlank()) {
+                                    coil.compose.AsyncImage(
+                                        model = item.checkedByAvatar,
+                                        contentDescription = item.checkedBy,
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = item.checkedBy.take(1).uppercase(),
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }

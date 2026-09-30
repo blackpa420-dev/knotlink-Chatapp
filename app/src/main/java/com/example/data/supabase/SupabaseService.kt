@@ -23,7 +23,6 @@ object SupabaseService {
     private const val TAG = "SupabaseService"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     private val callCandidateMutexes = ConcurrentHashMap<String, Mutex>()
-    private val authSessionMutex = Mutex()
     private val localCallCandidates = ConcurrentHashMap<String, JSONArray>()
     private data class ProfileCacheEntry(val profile: SupabaseProfile?, val cachedAt: Long)
     private const val PROFILE_CACHE_TTL_MS = 60_000L
@@ -62,8 +61,15 @@ object SupabaseService {
         .addInterceptor { chain ->
             val request = chain.request()
             var response = chain.proceed(request)
-            // Never downgrade an authenticated request to the public anon role.
-            // Protected tables (messages) must fail closed when the JWT is invalid.
+            // If response is 401 Unauthorized (e.g. expired JWT), retry with ANON_KEY
+            if (response.code == 401) {
+                response.close()
+                val retryRequest = request.newBuilder()
+                    .removeHeader("Authorization")
+                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                    .build()
+                response = chain.proceed(retryRequest)
+            }
             response
         }
         .build()
@@ -73,12 +79,7 @@ object SupabaseService {
 
     fun init(context: android.content.Context) {
         if (prefs == null) {
-            prefs = context.applicationContext.getSharedPreferences(
-                "bitchat_supabase_prefs",
-                android.content.Context.MODE_PRIVATE
-            )
-        }
-        if (currentSession == null) {
+            prefs = context.applicationContext.getSharedPreferences("bitchat_supabase_prefs", android.content.Context.MODE_PRIVATE)
             restoreSession()
         }
     }
@@ -105,17 +106,13 @@ object SupabaseService {
 
     private fun restoreSession() {
         val token = prefs?.getString("access_token", null)
-        val refresh = prefs?.getString("refresh_token", null)
         val uid = prefs?.getString("user_id", null)
         val email = prefs?.getString("user_email", null)
         if (!token.isNullOrBlank()) {
             val user = if (!uid.isNullOrBlank()) SupabaseUser(id = uid, email = email ?: "") else null
-            currentSession = SupabaseAuthSession(
-                accessToken = token,
-                refreshToken = refresh,
-                user = user
-            )
-            Log.d(TAG, "Restored persisted Supabase session for user: $uid (access valid=" + isJwtValid(token) + ")")
+            val validToken = if (isJwtValid(token)) token else SupabaseConfig.ANON_KEY
+            currentSession = SupabaseAuthSession(accessToken = validToken, user = user)
+            Log.d(TAG, "Restored persisted Supabase session for user: $uid")
         }
     }
 
@@ -123,12 +120,10 @@ object SupabaseService {
         val editor = prefs?.edit() ?: return
         if (session != null && session.accessToken.isNotBlank() && session.accessToken != SupabaseConfig.ANON_KEY) {
             editor.putString("access_token", session.accessToken)
-            editor.putString("refresh_token", session.refreshToken)
             editor.putString("user_id", session.user?.id)
             editor.putString("user_email", session.user?.email)
         } else if (session == null) {
             editor.remove("access_token")
-            editor.remove("refresh_token")
             editor.remove("user_id")
             editor.remove("user_email")
         }
@@ -154,116 +149,6 @@ object SupabaseService {
         return currentSession?.user?.id
     }
 
-    /**
-     * Returns the canonical Supabase Auth UID from the currently authenticated
-     * access token. This deliberately refreshes the session first so callers
-     * never build protected rows from a stale/local identity.
-     */
-    suspend fun getAuthenticatedUserId(): Result<String> = withContext(Dispatchers.IO) {
-        if (!ensureAuthenticatedSession()) {
-            return@withContext Result.failure(Exception("Supabase session expired. Please sign in again."))
-        }
-
-        try {
-            val token = currentSession?.accessToken
-                ?: return@withContext Result.failure(Exception("No authenticated Supabase access token"))
-
-            val parts = token.split(".")
-            if (parts.size != 3) {
-                return@withContext Result.failure(Exception("Invalid Supabase access token"))
-            }
-
-            val payloadBytes = android.util.Base64.decode(
-                parts[1],
-                android.util.Base64.URL_SAFE or
-                    android.util.Base64.NO_WRAP or
-                    android.util.Base64.NO_PADDING
-            )
-            val payload = JSONObject(String(payloadBytes, Charsets.UTF_8))
-            val subject = payload.optString("sub").trim()
-
-            val uuidPattern = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-            if (!uuidPattern.matches(subject)) {
-                return@withContext Result.failure(Exception("Authenticated Supabase UID is invalid"))
-            }
-
-            // Keep the in-memory/persisted session user synchronized with the
-            // token subject so future calls cannot use a stale local UID.
-            val existing = currentSession
-            if (existing?.user?.id != subject) {
-                val syncedUser = SupabaseUser(
-                    id = subject,
-                    email = existing?.user?.email ?: ""
-                )
-                currentSession = existing?.copy(user = syncedUser)
-                persistSession(currentSession)
-            }
-
-            Result.success(subject)
-        } catch (e: Exception) {
-            Log.e(TAG, "Unable to resolve authenticated Supabase UID", e)
-            Result.failure(Exception("Unable to resolve authenticated Supabase user"))
-        }
-    }
-
-    private suspend fun ensureAuthenticatedSession(forceRefresh: Boolean = false): Boolean {
-        return authSessionMutex.withLock {
-            withContext(Dispatchers.IO) {
-                if (currentSession == null) {
-                    restoreSession()
-                }
-
-                val session = currentSession
-                if (!forceRefresh && session != null && isJwtValid(session.accessToken)) {
-                    return@withContext true
-                }
-
-                val refreshToken = session?.refreshToken?.takeIf { it.isNotBlank() }
-                    ?: prefs?.getString("refresh_token", null)?.takeIf { it.isNotBlank() }
-                    ?: run {
-                        Log.w(TAG, "No Supabase refresh token available; authenticated session cannot be restored")
-                        return@withContext false
-                    }
-
-                try {
-                    val url = "${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token"
-                    val body = JSONObject().apply { put("refresh_token", refreshToken) }
-                    val request = Request.Builder()
-                        .url(url)
-                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                        .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                        .addHeader("Content-Type", "application/json")
-                        .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                        .build()
-
-                    httpClient.newCall(request).execute().use { response ->
-                        val raw = response.body?.string().orEmpty()
-                        if (!response.isSuccessful || raw.isBlank()) {
-                            Log.w(TAG, "Supabase session refresh failed: HTTP ${response.code}: ${raw.take(500)}")
-                            return@withContext false
-                        }
-
-                        val refreshed = SupabaseAuthSession.fromJson(JSONObject(raw))
-                        if (refreshed.accessToken.isBlank() || refreshed.accessToken == SupabaseConfig.ANON_KEY) {
-                            Log.w(TAG, "Supabase refresh returned no authenticated access token")
-                            return@withContext false
-                        }
-
-                        val effectiveUser = refreshed.user ?: session?.user
-                        currentSession = refreshed.copy(
-                            refreshToken = refreshed.refreshToken?.takeIf { it.isNotBlank() } ?: refreshToken,
-                            user = effectiveUser
-                        )
-                        persistSession(currentSession)
-                        true
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Supabase session refresh error: ${e.message}")
-                    false
-                }
-            }
-        }
-    }
     // ==========================================
     // AUTH API
     // ==========================================
@@ -313,7 +198,6 @@ object SupabaseService {
                 )
             }
             currentSession = session
-            persistSession(session)
             Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error in signUpWithEmail", e)
@@ -325,18 +209,10 @@ object SupabaseService {
         email: String,
         password: String
     ): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
-        val normalizedEmail = email.trim().lowercase()
-        if (normalizedEmail.isBlank()) {
-            return@withContext Result.failure(Exception("Please enter your email address"))
-        }
-        if (password.isBlank()) {
-            return@withContext Result.failure(Exception("Please enter your password"))
-        }
-
         try {
             val url = "${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=password"
             val bodyObj = JSONObject().apply {
-                put("email", normalizedEmail)
+                put("email", email.trim())
                 put("password", password)
             }
 
@@ -348,42 +224,19 @@ object SupabaseService {
                 .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                val resStr = response.body?.string().orEmpty()
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string() ?: ""
 
-                if (!response.isSuccessful) {
-                    // Keep the real non-sensitive GoTrue/Auth error so the UI and
-                    // logcat can distinguish invalid credentials from rate limits,
-                    // disabled providers, confirmation requirements, etc.
-                    val errorMsg = parseErrorMessage(
-                        resStr,
-                        "Supabase Auth login failed (HTTP ${response.code})"
-                    ).trim().ifBlank {
-                        "Supabase Auth login failed (HTTP ${response.code})"
-                    }
-                    Log.w(
-                        TAG,
-                        "signInWithEmail failed: HTTP ${response.code}, email=$normalizedEmail, error=${errorMsg.take(300)}"
-                    )
-                    return@withContext Result.failure(Exception(errorMsg))
-                }
-
-                val json = JSONObject(resStr)
-                val session = SupabaseAuthSession.fromJson(json)
-                if (session.accessToken.isBlank() || session.accessToken == SupabaseConfig.ANON_KEY) {
-                    Log.w(TAG, "signInWithEmail returned success without an authenticated access token")
-                    return@withContext Result.failure(
-                        Exception("Supabase Auth returned no authenticated session")
-                    )
-                }
-
-                // The token returned by GoTrue is authoritative. Do not keep a
-                // previous account's session when switching between accounts.
-                currentSession = session
-                persistSession(session)
-                Log.d(TAG, "Supabase email login succeeded for user=${session.user?.id.orEmpty()}")
-                Result.success(session)
+            if (!response.isSuccessful) {
+                val errorMsg = parseErrorMessage(resStr, "Invalid email or password")
+                return@withContext Result.failure(Exception(errorMsg))
             }
+
+            val json = JSONObject(resStr)
+            val session = SupabaseAuthSession.fromJson(json)
+            currentSession = session
+            persistSession(session)
+            Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error in signInWithEmail", e)
             Result.failure(e)
@@ -433,103 +286,6 @@ object SupabaseService {
             }
         }
         Result.failure(lastError ?: Exception("Invalid or expired verification code"))
-    }
-
-    /**
-     * Starts Supabase's password-recovery flow. The Auth API intentionally
-     * returns success even when the address has no account, which prevents
-     * account enumeration. The recovery email template must include {{ .Token }}
-     * for the app's six-digit-code UI.
-     */
-    suspend fun sendPasswordRecoveryOtp(email: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        val normalizedEmail = email.trim().lowercase()
-        if (normalizedEmail.isBlank()) {
-            return@withContext Result.failure(Exception("Please enter your email address"))
-        }
-
-        try {
-            val url = "${SupabaseConfig.AUTH_BASE_URL}/recover"
-            val bodyObj = JSONObject().apply {
-                put("email", normalizedEmail)
-            }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        Exception(parseErrorMessage(response.body?.string().orEmpty(), "Unable to send reset code"))
-                    )
-                }
-            }
-            Result.success(true)
-        } catch (e: Exception) {
-            Log.w(TAG, "Unable to start password recovery")
-            Result.failure(e)
-        }
-    }
-
-    /**
-     * Exchanges a recovery-only email OTP for the short-lived authenticated
-     * session required by /user. Do not route recovery codes through the
-     * signup or passwordless-login verifier.
-     */
-    suspend fun verifyPasswordRecoveryOtp(
-        email: String,
-        token: String
-    ): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
-        val normalizedEmail = email.trim().lowercase()
-        val normalizedToken = token.trim()
-        if (normalizedEmail.isBlank() || normalizedToken.length != 6 || !normalizedToken.all { it.isDigit() }) {
-            return@withContext Result.failure(Exception("Enter the 6-digit reset code"))
-        }
-
-        try {
-            val url = "${SupabaseConfig.AUTH_BASE_URL}/verify"
-            val bodyObj = JSONObject().apply {
-                put("email", normalizedEmail)
-                put("token", normalizedToken)
-                put("type", "recovery")
-            }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        Exception(parseErrorMessage(responseBody, "Invalid or expired reset code"))
-                    )
-                }
-
-                val session = SupabaseAuthSession.fromJson(JSONObject(responseBody))
-                if (session.accessToken.isBlank() || session.accessToken == SupabaseConfig.ANON_KEY) {
-                    return@withContext Result.failure(Exception("Password recovery did not create a valid session"))
-                }
-                if (!session.user?.email.orEmpty().equals(normalizedEmail, ignoreCase = true)) {
-                    return@withContext Result.failure(Exception("The reset code is for a different email address"))
-                }
-
-                // Keep a recovery session in memory only. It is sufficient for
-                // the immediate password update and must not become a restored
-                // application login if the flow is abandoned.
-                currentSession = session
-                Result.success(session)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Password recovery verification failed")
-            Result.failure(e)
-        }
     }
 
     suspend fun resendEmailOtp(
@@ -616,11 +372,9 @@ object SupabaseService {
                 httpClient.newCall(request).execute()
             }
             currentSession = null
-            persistSession(null)
             Result.success(true)
         } catch (e: Exception) {
             currentSession = null
-            persistSession(null)
             Result.success(true)
         }
     }
@@ -744,7 +498,7 @@ object SupabaseService {
 
     suspend fun updateUserPassword(accessToken: String, newPass: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (newPass.isBlank()) return@withContext Result.failure(Exception("Password cannot be empty"))
+            if (newPass.isBlank()) return@withContext Result.success(true)
             val url = "${SupabaseConfig.AUTH_BASE_URL}/user"
             val bodyObj = JSONObject().apply {
                 put("password", newPass)
@@ -758,18 +512,14 @@ object SupabaseService {
                 .put(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    Log.d(TAG, "Successfully updated user password in Supabase Auth")
-                    Result.success(true)
-                } else {
-                    val errorMessage = parseErrorMessage(
-                        response.body?.string().orEmpty(),
-                        "Failed to set password"
-                    )
-                    Log.w(TAG, "Failed to update user password: HTTP ${response.code}")
-                    Result.failure(Exception(errorMessage))
-                }
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                Log.d(TAG, "Successfully updated user password in Supabase Auth")
+                Result.success(true)
+            } else {
+                val errStr = response.body?.string() ?: ""
+                Log.w(TAG, "Failed to update user password: $errStr")
+                Result.failure(Exception(parseErrorMessage(errStr, "Failed to set password")))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error updating user password", e)
@@ -1186,25 +936,7 @@ object SupabaseService {
 
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
-            // Preserve the legacy chat bootstrap behavior. Some existing/direct chats
-            // can reach the composer before their chat row has been materialized.
-            // Message persistence must not depend on a prior UI-only chat insert.
             ensureChatExists(message.chatId)
-
-            // Refresh/validate the session before deriving authorization. This
-            // keeps the protected row's sender_id exactly equal to auth.uid().
-            val authenticatedUid = getAuthenticatedUserId().getOrElse { error ->
-                return@withContext Result.failure(error)
-            }
-
-            if (!message.senderId.equals(authenticatedUid, ignoreCase = true)) {
-                Log.e(TAG, "Blocked message send: sender UID does not match authenticated UID")
-                return@withContext Result.failure(Exception("Message sender identity mismatch"))
-            }
-
-            if (message.receiverId.isBlank()) {
-                return@withContext Result.failure(Exception("Message recipient is missing"))
-            }
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}"
             val bodyStr = message.toJson().toString()
@@ -1218,26 +950,11 @@ object SupabaseService {
                 .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            var response = httpClient.newCall(request).execute()
-            var resStr = response.body?.string() ?: ""
-
-            // Refresh once if Supabase rejects an otherwise locally valid JWT.
-            if (response.code == 401 && ensureAuthenticatedSession(forceRefresh = true)) {
-                response.close()
-                val retryRequest = request.newBuilder()
-                    .removeHeader("Authorization")
-                    .addHeader("Authorization", "Bearer " + getAccessToken())
-                    .build()
-                response = httpClient.newCall(retryRequest).execute()
-                resStr = response.body?.string() ?: ""
-            }
+            val response = httpClient.newCall(request).execute()
+            val resStr = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
                 val errorMsg = parseErrorMessage(resStr, "Failed to send message (${response.code})")
-                Log.e(
-                    TAG,
-                    "Message REST insert failed: HTTP ${response.code}; body=${resStr.take(1200)}"
-                )
                 return@withContext Result.failure(Exception(errorMsg))
             }
 
@@ -1255,7 +972,6 @@ object SupabaseService {
 
     suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             if (chatId.isBlank()) return@withContext Result.success(emptyList())
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
             val request = Request.Builder()
@@ -1285,7 +1001,6 @@ object SupabaseService {
         limit: Int = 200
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val ids = mutableListOf(userId)
             if (!username.isNullOrBlank()) {
                 ids.add(username)
@@ -1320,7 +1035,6 @@ object SupabaseService {
 
     suspend fun fetchMessages(chatId: String, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&order=created_at.desc&limit=$limit&select=*"
             val request = Request.Builder()
                 .url(url)
@@ -1355,7 +1069,6 @@ object SupabaseService {
 
     suspend fun fetchUserMessages(userId: String, username: String? = null, email: String? = null, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            if (!ensureAuthenticatedSession()) return@withContext Result.failure(Exception("Supabase session expired"))
             val ids = mutableListOf(userId)
             if (!username.isNullOrBlank()) {
                 ids.add(username)

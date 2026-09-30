@@ -1,7 +1,6 @@
 package com.example.ui.screens
 
 import android.graphics.Bitmap
-import android.media.MediaPlayer
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
@@ -39,7 +38,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -141,8 +139,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -472,10 +468,7 @@ fun ChatDetailScreen(
 
     // New messages only auto-scroll when the user was already at the bottom.
     LaunchedEffect(messages.lastOrNull()?.id) {
-         if (!hasInitialScrolled || displayedMessages.isEmpty()) return@LaunchedEffect
-         val newestMessage = messages.lastOrNull()
-         val shouldFollowNewest = isUserNearBottom || newestMessage?.isFromUser == true
-         if (!shouldFollowNewest) return@LaunchedEffect
+        if (!hasInitialScrolled || !isUserNearBottom || displayedMessages.isEmpty()) return@LaunchedEffect
         kotlinx.coroutines.yield()
         val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
         listState.animateScrollToItem(lastIndex)
@@ -911,7 +904,7 @@ fun ChatDetailScreen(
                                 color = Color.Transparent,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(40.dp)
                                     .graphicsLayer {
                                         scaleX = audioScale
                                         scaleY = audioScale
@@ -931,7 +924,7 @@ fun ChatDetailScreen(
                                         imageVector = Icons.Default.Call,
                                         contentDescription = "Audio Call",
                                         tint = Color.White,
-                                        modifier = Modifier.size(21.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -952,7 +945,7 @@ fun ChatDetailScreen(
                                 color = Color.Transparent,
                                 shadowElevation = 0.dp,
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(40.dp)
                                     .graphicsLayer {
                                         scaleX = videoScale
                                         scaleY = videoScale
@@ -1802,7 +1795,7 @@ fun ChatDetailScreen(
                                 isRecordingLocked = false
                                 recordSeconds = 0
                                 recordDragOffsetX = 0f
-                                
+                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.size(44.dp)
                         ) {
@@ -1909,46 +1902,35 @@ fun ChatDetailScreen(
                                         Text(
                                             text = String.format("%02d:%02d", mins, secs),
                                             color = Color(0xFFEF4444),
-                                            fontSize = 18.sp,
-                                             fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
                                             fontFamily = FontFamily.Monospace
                                         )
-                                         val waveTransition = rememberInfiniteTransition(label = "record_ecg")
-                                         val wavePhase by waveTransition.animateFloat(
-                                             initialValue = 0f,
-                                             targetValue = 1f,
-                                             animationSpec = infiniteRepeatable(
-                                                 animation = tween(1200, easing = LinearEasing),
-                                                 repeatMode = RepeatMode.Restart
-                                             ),
-                                             label = "record_ecg_phase"
-                                         )
-                                         androidx.compose.foundation.Canvas(
-                                             modifier = Modifier
-                                                 .weight(1f)
-                                                 .height(34.dp)
-                                         ) {
-                                             val path = androidx.compose.ui.graphics.Path()
-                                             val centerY = size.height / 2f
-                                             val strength = if (recordingAmplitude > 0.02f) recordingAmplitude else 0.08f
-                                             val samples = 64
-                                             for (i in 0 until samples) {
-                                                 val t = i / (samples - 1f)
-                                                 val x = t * size.width
-                                                 val phase = t * 3.2f * 6.2831853f + wavePhase * 6.2831853f
-                                                 val sine = kotlin.math.sin(phase)
-                                                 val pulse = kotlin.math.sin(phase * 2f) * kotlin.math.abs(sine * sine * sine)
-                                                 val y = centerY - pulse * (4f + strength * 16f)
-                                                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                                             }
-                                             drawPath(
-                                                 path = path,
-                                                 brush = Brush.horizontalGradient(listOf(Color(0xFFF59E0B), Color(0xFFDC2626))),
-                                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2.dp.toPx())
-                                             )
-                                         }
-                                         Text(
-                                             text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
+                                        Row(
+                                            modifier = Modifier.weight(1f),
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            for (index in 0 until 18) {
+                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72)).toFloat()
+                                                val speaking = recordingAmplitude > 0.035f
+                                                val h = if (speaking) {
+                                                    (5f + (recordingAmplitude * 24f * (0.35f + phase))).coerceIn(5f, 28f)
+                                                } else 5f
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(3.dp)
+                                                        .height(h.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (recordDragOffsetX < -120f) Color(0xFFEF4444)
+                                                            else Color(0xFF2563EB).copy(alpha = 0.9f)
+                                                        )
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
                                             color = if (recordDragOffsetX < -120f) Color(0xFFEF4444) else animSubTextColor,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
@@ -2031,7 +2013,7 @@ fun ChatDetailScreen(
                                     isViewOnce = false
                                     recordSeconds = 0
                                     recordDragOffsetX = 0f
-                                    
+                                    Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
                                 },
                                 modifier = Modifier.size(44.dp)
                             ) {
@@ -2097,25 +2079,31 @@ fun ChatDetailScreen(
                                 onClick = {
                                     try { view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP) } catch (_: Exception) {}
                                     val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
-                                    val viewOnceMode = isViewOnce
                                     if (recFile != null && recFile.exists() && secs >= 1) {
                                         val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                        coroutineScope.launch {
-                                            val audioUrl = runCatching {
-                                                viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                            }.getOrNull()
-                                            if (!audioUrl.isNullOrBlank()) {
-                                                val textToSend = if (viewOnceMode) {
-                                                    "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
-                                                } else {
-                                                    "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
-                                                }
-                                                viewModel.sendMessage(chatId, textToSend)
+                                        val base64Data = try {
+                                            val bytes = recFile.readBytes()
+                                            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                        } catch (_: Exception) { null }
+
+                                        val textToSend = if (isViewOnce) {
+                                            if (!base64Data.isNullOrBlank()) {
+                                                "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                            } else {
+                                                "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                            }
+                                        } else {
+                                            if (!base64Data.isNullOrBlank()) {
+                                                "[AUDIO_BASE64|$base64Data|$durStr] 🎙️ Voice Note ($durStr)"
+                                            } else {
+                                                "[AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ Voice Note ($durStr)"
                                             }
                                         }
+                                        viewModel.sendMessage(chatId, textToSend)
+                                        Toast.makeText(localContext, if (isViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
                                     } else {
                                         com.example.util.AudioRecorderManager.cancelRecording()
-                                        
+                                        Toast.makeText(localContext, "Voice note must be at least 1 second ⏱️", Toast.LENGTH_SHORT).show()
                                     }
                                     isRecording = false
                                     isRecordingLocked = false
@@ -2292,7 +2280,7 @@ fun ChatDetailScreen(
                                                                 }
                                                                 vibrator?.vibrate(android.os.VibrationEffect.createOneShot(60, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
                                                             } catch (_: Exception) {}
-                                                            
+                                                            Toast.makeText(localContext, "Recording locked hands-free 🔒", Toast.LENGTH_SHORT).show()
                                                         }
 
                                                         // Drag left past threshold (-240f) to trigger instant cancellation
@@ -2312,7 +2300,7 @@ fun ChatDetailScreen(
                                                             isButtonHolding = false
                                                             recordSeconds = 0
                                                             recordDragOffsetX = 0f
-                                                            
+                                                            Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
                                                             break
                                                         }
                                                     }
@@ -2346,29 +2334,35 @@ fun ChatDetailScreen(
                                                             }
                                                             vibrator?.vibrate(android.os.VibrationEffect.createOneShot(80, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
                                                         } catch (_: Exception) {}
-                                                        
+                                                        Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
-                                                        val viewOnceMode = isViewOnce
                                                         if (recFile != null && recFile.exists() && secs >= 1) {
                                                             val durStr = String.format("%02d:%02d", secs / 60, secs % 60)
-                                                            coroutineScope.launch {
-                                                                val audioUrl = runCatching {
-                                                                    viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                                                }.getOrNull()
-                                                                if (!audioUrl.isNullOrBlank()) {
-                                                                    val textToSend = if (viewOnceMode) {
-                                                                        "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
-                                                                    } else {
-                                                                        "[AUDIO_FILE|$audioUrl|$durStr] 🎙️ Voice Note ($durStr)"
-                                                                    }
-                                                                    viewModel.sendMessage(chatId, textToSend)
+                                                            val base64Data = try {
+                                                                val bytes = recFile.readBytes()
+                                                                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                                            } catch (_: Exception) { null }
+
+                                                            val textToSend = if (isViewOnce) {
+                                                                if (!base64Data.isNullOrBlank()) {
+                                                                    "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                                } else {
+                                                                    "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ 1-Time Voice Note ($durStr)"
+                                                                }
+                                                            } else {
+                                                                if (!base64Data.isNullOrBlank()) {
+                                                                    "[AUDIO_BASE64|$base64Data|$durStr] 🎙️ Voice Note ($durStr)"
+                                                                } else {
+                                                                    "[AUDIO_FILE|${recFile.absolutePath}|$durStr] 🎙️ Voice Note ($durStr)"
                                                                 }
                                                             }
+                                                            viewModel.sendMessage(chatId, textToSend)
+                                                            Toast.makeText(localContext, if (isViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             com.example.util.AudioRecorderManager.cancelRecording()
                                                             if (secs > 0 || holdDuration > 800L) {
-                                                                
+                                                                Toast.makeText(localContext, "Hold for at least 1 second ⏱️", Toast.LENGTH_SHORT).show()
                                                             }
                                                         }
                                                     }
@@ -3119,16 +3113,61 @@ fun ChatDetailScreen(
             )
         }
 
-        // 3. Forward Message — dedicated, scroll-safe full-screen composer
+        // 3. Forward Message — Premium, responsive across devices composer with image thumbnail, date, time & resolution
         if (showForwardSheet && messageToForward != null) {
             val forwardMsg = messageToForward!!
             var forwardSearchQuery by remember { mutableStateOf("") }
-            val filteredForwardChats = remember(allChats, forwardSearchQuery) {
-                if (forwardSearchQuery.isBlank()) allChats
-                else allChats.filter {
-                    it.name.contains(forwardSearchQuery, ignoreCase = true) ||
-                        it.category.contains(forwardSearchQuery, ignoreCase = true)
+            var forwardCategoryFilter by remember { mutableStateOf("All") }
+            var resolvedForwardImgRes by remember(forwardMsg.id) { mutableStateOf("1920×1080 HD") }
+
+            val forwardFilterTabs = remember { listOf("All", "Direct", "Groups") }
+
+            val filteredForwardChats = remember(allChats, forwardSearchQuery, forwardCategoryFilter) {
+                allChats.filter { target ->
+                    val matchesQuery = forwardSearchQuery.isBlank() ||
+                        target.name.contains(forwardSearchQuery, ignoreCase = true) ||
+                        target.category.contains(forwardSearchQuery, ignoreCase = true)
+                    val isGroupItem = target.chatType == "GROUP" || target.id.startsWith("group_") || target.name.contains("[Group]", ignoreCase = true)
+                    val matchesTab = when (forwardCategoryFilter) {
+                        "Groups" -> isGroupItem
+                        "Direct" -> !isGroupItem
+                        else -> true
+                    }
+                    matchesQuery && matchesTab
                 }
+            }
+
+            val forwardRawText = forwardMsg.text.trim()
+            val isForwardPhoto = forwardRawText.contains("IMAGE_ATTACHMENT") ||
+                forwardRawText.contains("IMAGE_ALBUM") ||
+                forwardRawText.contains("[IMAGE_URL|") ||
+                forwardRawText.contains("[IMAGE_BASE64|") ||
+                forwardMsg.messageType == "IMAGE" ||
+                forwardRawText.startsWith("🖼️") ||
+                forwardRawText.startsWith("📸")
+
+            val forwardImagePreviewUrl = remember(forwardRawText) {
+                when {
+                    forwardRawText.contains("[IMAGE_ALBUM|") ->
+                        forwardRawText.substringAfter("[IMAGE_ALBUM|").substringBefore("]").split(",").firstOrNull()?.trim() ?: ""
+                    forwardRawText.contains("[IMAGE_ATTACHMENT|") ->
+                        forwardRawText.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim()
+                    forwardRawText.contains("[IMAGE_URL|") ->
+                        forwardRawText.substringAfter("[IMAGE_URL|").substringBefore("]").trim()
+                    else -> {
+                        val uriRegex = Regex("(content://\\S+|file://\\S+|https?://\\S+)")
+                        uriRegex.find(forwardRawText)?.value ?: ""
+                    }
+                }
+            }
+
+            val forwardEffectiveTs = if (forwardMsg.timestamp > 0L) forwardMsg.timestamp else System.currentTimeMillis()
+            val forwardDateFormatted = remember(forwardEffectiveTs) {
+                java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(forwardEffectiveTs))
+            }
+            val forwardTimeFormatted = remember(forwardEffectiveTs, forwardMsg.timestampString) {
+                if (forwardMsg.timestampString.isNotBlank()) forwardMsg.timestampString
+                else java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(forwardEffectiveTs))
             }
 
             Dialog(
@@ -3136,191 +3175,534 @@ fun ChatDetailScreen(
                     showForwardSheet = false
                     messageToForward = null
                 },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+                properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
             ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing),
-                    color = if (isNightMode) Color(0xFF0D0F14) else Color(0xFFF5F7FA)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .windowInsetsPadding(WindowInsets.safeDrawing),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Column(modifier = Modifier.fillMaxSize().padding(bottom = 82.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 620.dp)
+                            .fillMaxHeight(),
+                        color = if (isNightMode) Color(0xFF0B0D13) else Color(0xFFF8FAFC)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(bottom = 86.dp)
                             ) {
-                                IconButton(onClick = {
-                                    showForwardSheet = false
-                                    messageToForward = null
-                                }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = animTextColor)
-                                }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Forward message", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = animTextColor)
-                                    Text(
-                                        if (selectedForwardChatIds.isEmpty()) "Choose one or more chats" else "${selectedForwardChatIds.size} selected",
-                                        fontSize = 12.sp,
-                                        color = if (selectedForwardChatIds.isNotEmpty()) Color(0xFF2563EB) else animSubTextColor
-                                    )
-                                }
-                                if (selectedForwardChatIds.isNotEmpty()) {
-                                    TextButton(onClick = { selectedForwardChatIds.clear() }) {
-                                        Text("Clear", color = Color(0xFFEF4444), fontWeight = FontWeight.SemiBold)
-                                    }
-                                }
-                            }
-
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(18.dp),
-                                color = if (isNightMode) Color(0xFF171A22) else Color.White,
-                                border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)),
-                                shadowElevation = if (isNightMode) 0.dp else 3.dp
-                            ) {
-                                Row(modifier = Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        modifier = Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF2563EB).copy(alpha = 0.12f)),
-                                        contentAlignment = Alignment.Center
+                                // Premium Top Bar
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = if (isNightMode) Color(0xFF12151E) else Color.White,
+                                    shadowElevation = if (isNightMode) 0.dp else 2.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Icon(Icons.AutoMirrored.Filled.Forward, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
-                                    }
-                                    Spacer(modifier = Modifier.width(11.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Forwarding", color = Color(0xFF2563EB), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            when {
-                                                forwardMsg.text.contains("[DOCUMENT_FILE|") -> "📄 Document"
-                                                forwardMsg.text.contains("[IMAGE_BASE64|") || forwardMsg.text.contains("[IMAGE_URL|") -> "🖼️ Photo"
-                                                forwardMsg.text.contains("[AUDIO_BASE64|") || forwardMsg.text.contains("[AUDIO_FILE|") -> "🎙️ Voice message"
-                                                forwardMsg.text.contains("[VIDEO_BASE64|") || forwardMsg.text.contains("[VIDEO_FILE|") -> "📹 Video"
-                                                forwardMsg.text.contains("[POLL_DATA|") || forwardMsg.text.startsWith("[POLL_JSON:") -> "📊 Poll"
-                                                else -> forwardMsg.text.ifBlank { "Attachment" }
+                                        IconButton(
+                                            onClick = {
+                                                showForwardSheet = false
+                                                messageToForward = null
                                             },
-                                            color = animTextColor, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-
-                            OutlinedTextField(
-                                value = forwardSearchQuery,
-                                onValueChange = { forwardSearchQuery = it },
-                                placeholder = { Text("Search chats…", color = animSubTextColor) },
-                                leadingIcon = { Icon(Icons.Default.Search, null, tint = animSubTextColor) },
-                                trailingIcon = {
-                                    if (forwardSearchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { forwardSearchQuery = "" }) {
-                                            Icon(Icons.Default.Close, null, tint = animSubTextColor)
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFF1F5F9))
+                                        ) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = animTextColor, modifier = Modifier.size(20.dp))
                                         }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                shape = RoundedCornerShape(18.dp),
-                                singleLine = true,
-                                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = if (isNightMode) Color(0xFF3B82F6) else Color(0xFFB8C2D1),
-                                    unfocusedBorderColor = if (isNightMode) Color(0xFF30343E) else Color(0xFFD7DEE8),
-                                    focusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
-                                    unfocusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White
-                                )
-                            )
-
-                            LazyColumn(
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 20.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(filteredForwardChats, key = { it.id }) { targetChat ->
-                                    val isSelected = selectedForwardChatIds.contains(targetChat.id)
-                                    val isAssistantChat = targetChat.avatarType.equals("assistant", true) || targetChat.name.equals("KnotLink Assistant", true)
-                                    val hasCustomAvatar = targetChat.avatarType.isNotBlank() && targetChat.avatarType != "default" && targetChat.avatarType != "assistant"
-
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).clickable {
-                                            if (isSelected) selectedForwardChatIds.remove(targetChat.id) else selectedForwardChatIds.add(targetChat.id)
-                                        },
-                                        color = when {
-                                            isSelected && isNightMode -> Color(0xFF17233D)
-                                            isSelected -> Color(0xFFEAF2FF)
-                                            isNightMode -> Color(0xFF151820)
-                                            else -> Color.White
-                                        },
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (isSelected) Color(0xFF2563EB) else if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0)
-                                        ),
-                                        shadowElevation = if (isNightMode) 0.dp else 2.dp
-                                    ) {
-                                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                            if (hasCustomAvatar) {
-                                                AsyncImage(
-                                                    model = if (targetChat.avatarType.startsWith("/")) File(targetChat.avatarType) else targetChat.avatarType,
-                                                    contentDescription = targetChat.name,
-                                                    modifier = Modifier.size(50.dp).clip(CircleShape),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            } else {
-                                                Box(
-                                                    modifier = Modifier.size(50.dp).clip(CircleShape).background(if (isAssistantChat) Color(0xFF222226) else Color(0xFF2563EB)),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (isAssistantChat) {
-                                                        Icon(Icons.Default.SmartToy, "KnotLink Assistant", tint = Color.White, modifier = Modifier.size(25.dp))
-                                                    } else {
-                                                        Text(targetChat.name.take(1).uppercase(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Forward Message",
+                                                fontSize = 19.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = animTextColor
+                                            )
+                                            Text(
+                                                text = if (selectedForwardChatIds.isEmpty()) "Select one or more recipients"
+                                                else "${selectedForwardChatIds.size} recipient${if (selectedForwardChatIds.size > 1) "s" else ""} selected",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = if (selectedForwardChatIds.isNotEmpty()) Color(0xFF3B82F6) else animSubTextColor
+                                            )
+                                        }
+                                        val allVisibleSelected = filteredForwardChats.isNotEmpty() &&
+                                            filteredForwardChats.all { selectedForwardChatIds.contains(it.id) }
+                                        TextButton(
+                                            onClick = {
+                                                if (selectedForwardChatIds.isNotEmpty() && allVisibleSelected) {
+                                                    selectedForwardChatIds.clear()
+                                                } else {
+                                                    filteredForwardChats.forEach { c ->
+                                                        if (!selectedForwardChatIds.contains(c.id)) {
+                                                            selectedForwardChatIds.add(c.id)
+                                                        }
                                                     }
                                                 }
                                             }
-                                            Spacer(modifier = Modifier.width(13.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(targetChat.name, color = animTextColor, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text(
-                                                    if (isAssistantChat) "Personal Assistant" else targetChat.category.ifBlank { "Conversation" },
-                                                    color = animSubTextColor, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = { checked ->
-                                                    if (checked) selectedForwardChatIds.add(targetChat.id) else selectedForwardChatIds.remove(targetChat.id)
-                                                },
-                                                colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2563EB))
+                                        ) {
+                                            Text(
+                                                text = if (selectedForwardChatIds.isNotEmpty() && allVisibleSelected) "Clear" else "Select All",
+                                                color = if (selectedForwardChatIds.isNotEmpty() && allVisibleSelected) Color(0xFFEF4444) else Color(0xFF2563EB),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
                                             )
                                         }
                                     }
                                 }
-                            }
-                        }
 
-                        Surface(
-                            modifier = Modifier.align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.navigationBars)
-                                .padding(bottom = 6.dp),
-                            color = if (isNightMode) Color(0xFF11131A) else Color.White,
-                            shadowElevation = 14.dp,
-                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0))
-                        ) {
-                            Button(
-                                onClick = {
-                                    viewModel.forwardMessage(forwardMsg, selectedForwardChatIds.toList())
-                                    showForwardSheet = false
-                                    messageToForward = null
-                                    Toast.makeText(localContext, "Forwarded to ${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
-                                },
-                                enabled = selectedForwardChatIds.isNotEmpty(),
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).height(52.dp),
-                                shape = RoundedCornerShape(17.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF2563EB),
-                                    disabledContainerColor = if (isNightMode) Color(0xFF263044) else Color(0xFFD9E2F0)
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Premium Message / Image Preview Card with Date, Time & Resolution
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isNightMode) Color(0xFF151924) else Color.White,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isNightMode) Color(0xFF2563EB).copy(alpha = 0.28f) else Color(0xFFDBEAFE)
+                                    ),
+                                    shadowElevation = if (isNightMode) 0.dp else 3.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (isForwardPhoto && forwardImagePreviewUrl.isNotBlank()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(64.dp)
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(if (isNightMode) Color(0xFF1E2433) else Color(0xFFE2E8F0))
+                                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                                            ) {
+                                                AsyncImage(
+                                                    model = forwardImagePreviewUrl,
+                                                    contentDescription = "Forwarded Photo Preview",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    onSuccess = { state ->
+                                                        val w = state.result.drawable.intrinsicWidth
+                                                        val h = state.result.drawable.intrinsicHeight
+                                                        if (w > 0 && h > 0) {
+                                                            resolvedForwardImgRes = "${w}×${h} px"
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(48.dp)
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(
+                                                        Brush.linearGradient(
+                                                            listOf(Color(0xFF2563EB), Color(0xFF06B6D4))
+                                                        )
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isForwardPhoto) Icons.Default.Image else Icons.AutoMirrored.Filled.Forward,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.AutoMirrored.Filled.Forward,
+                                                        contentDescription = null,
+                                                        tint = Color(0xFF3B82F6),
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = if (isForwardPhoto) "FORWARDING IMAGE" else "FORWARDING MESSAGE",
+                                                        color = Color(0xFF3B82F6),
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        letterSpacing = 0.6.sp
+                                                    )
+                                                }
+                                                if (isForwardPhoto) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = Color(0xFF2563EB).copy(alpha = 0.14f)
+                                                    ) {
+                                                        Text(
+                                                            text = resolvedForwardImgRes,
+                                                            color = Color(0xFF3B82F6),
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontFamily = FontFamily.Monospace,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+
+                                            Text(
+                                                text = when {
+                                                    forwardMsg.text.contains("[DOCUMENT_FILE|") -> "📄 Document Attachment"
+                                                    isForwardPhoto -> {
+                                                        val cleanCap = forwardMsg.text
+                                                            .replace(Regex("\\[IMAGE_ALBUM\\|.*?\\]"), "")
+                                                            .replace(Regex("\\[IMAGE_ATTACHMENT\\|.*?\\]"), "")
+                                                            .replace(Regex("\\[IMAGE_URL\\|.*?\\]"), "")
+                                                            .replace("🖼️", "")
+                                                            .replace("📸", "")
+                                                            .trim()
+                                                        if (cleanCap.isNotBlank() && cleanCap != "Photo") "🖼️ $cleanCap" else "🖼️ High-Resolution Photo"
+                                                    }
+                                                    forwardMsg.text.contains("[AUDIO_BASE64|") || forwardMsg.text.contains("[AUDIO_FILE|") -> "🎙️ Voice Note"
+                                                    forwardMsg.text.contains("[VIDEO_BASE64|") || forwardMsg.text.contains("[VIDEO_FILE|") -> "📹 Video Clip"
+                                                    forwardMsg.text.contains("[POLL_DATA|") || forwardMsg.text.startsWith("[POLL_JSON:") -> "📊 Interactive Poll"
+                                                    forwardMsg.text.contains("[CHECKLIST_JSON|") -> "☑️ Interactive Checklist"
+                                                    else -> forwardMsg.text.ifBlank { "Attachment" }
+                                                },
+                                                color = animTextColor,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+
+                                            Spacer(modifier = Modifier.height(4.dp))
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.CalendarToday,
+                                                    contentDescription = null,
+                                                    tint = animSubTextColor,
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                                Text(
+                                                    text = "$forwardDateFormatted • $forwardTimeFormatted" +
+                                                        if (isForwardPhoto) " • $resolvedForwardImgRes" else "",
+                                                    color = animSubTextColor,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Selected Recipients Horizontal Chip Strip
+                                AnimatedVisibility(
+                                    visible = selectedForwardChatIds.isNotEmpty(),
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    LazyRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 8.dp, bottom = 2.dp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(
+                                            items = allChats.filter { selectedForwardChatIds.contains(it.id) },
+                                            key = { "sel_${it.id}" }
+                                        ) { selectedChat ->
+                                            Surface(
+                                                onClick = { selectedForwardChatIds.remove(selectedChat.id) },
+                                                shape = CircleShape,
+                                                color = if (isNightMode) Color(0xFF1D283E) else Color(0xFFDBEAFE),
+                                                border = BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.45f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(start = 6.dp, end = 10.dp, top = 5.dp, bottom = 5.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(22.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0xFF2563EB)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = selectedChat.name.take(1).uppercase(),
+                                                            color = Color.White,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = selectedChat.name,
+                                                        color = animTextColor,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Remove",
+                                                        tint = animSubTextColor,
+                                                        modifier = Modifier.size(14.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Search Bar
+                                OutlinedTextField(
+                                    value = forwardSearchQuery,
+                                    onValueChange = { forwardSearchQuery = it },
+                                    placeholder = { Text("Search contacts or groups…", color = animSubTextColor, fontSize = 14.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Search, null, tint = animSubTextColor, modifier = Modifier.size(20.dp)) },
+                                    trailingIcon = {
+                                        if (forwardSearchQuery.isNotEmpty()) {
+                                            IconButton(onClick = { forwardSearchQuery = "" }) {
+                                                Icon(Icons.Default.Close, null, tint = animSubTextColor, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    shape = RoundedCornerShape(18.dp),
+                                    singleLine = true,
+                                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFF3B82F6),
+                                        unfocusedBorderColor = if (isNightMode) Color(0xFF252936) else Color(0xFFE2E8F0),
+                                        focusedContainerColor = if (isNightMode) Color(0xFF141720) else Color.White,
+                                        unfocusedContainerColor = if (isNightMode) Color(0xFF141720) else Color.White
+                                    )
                                 )
+
+                                // Filter Tabs (All, Direct, Groups)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    forwardFilterTabs.forEach { tab ->
+                                        val isTabSelected = forwardCategoryFilter == tab
+                                        Surface(
+                                            onClick = { forwardCategoryFilter = tab },
+                                            shape = CircleShape,
+                                            color = if (isTabSelected) Color(0xFF2563EB)
+                                            else if (isNightMode) Color(0xFF161923) else Color(0xFFE2E8F0)
+                                        ) {
+                                            Text(
+                                                text = tab,
+                                                color = if (isTabSelected) Color.White else animSubTextColor,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isTabSelected) FontWeight.Bold else FontWeight.Medium,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // Recipient List
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(filteredForwardChats, key = { it.id }) { targetChat ->
+                                        val isSelected = selectedForwardChatIds.contains(targetChat.id)
+                                        val isAssistantChat = targetChat.avatarType.equals("assistant", true) || targetChat.name.equals("KnotLink Assistant", true)
+                                        val isGroupTarget = targetChat.chatType == "GROUP" || targetChat.id.startsWith("group_") || targetChat.name.contains("[Group]", ignoreCase = true)
+                                        val hasCustomAvatar = targetChat.avatarType.isNotBlank() && targetChat.avatarType != "default" && targetChat.avatarType != "assistant" && targetChat.avatarType != "group_default"
+
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .clickable {
+                                                    if (isSelected) selectedForwardChatIds.remove(targetChat.id) else selectedForwardChatIds.add(targetChat.id)
+                                                },
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = when {
+                                                isSelected && isNightMode -> Color(0xFF162440)
+                                                isSelected -> Color(0xFFEFF6FF)
+                                                isNightMode -> Color(0xFF141720)
+                                                else -> Color.White
+                                            },
+                                            border = BorderStroke(
+                                                if (isSelected) 1.5.dp else 1.dp,
+                                                if (isSelected) Color(0xFF3B82F6) else if (isNightMode) Color.White.copy(alpha = 0.06f) else Color(0xFFE2E8F0)
+                                            ),
+                                            shadowElevation = if (isNightMode) 0.dp else 1.dp
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(contentAlignment = Alignment.BottomEnd) {
+                                                    if (hasCustomAvatar) {
+                                                        AsyncImage(
+                                                            model = if (targetChat.avatarType.startsWith("/")) File(targetChat.avatarType) else targetChat.avatarType,
+                                                            contentDescription = targetChat.name,
+                                                            modifier = Modifier
+                                                                .size(48.dp)
+                                                                .clip(CircleShape),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(48.dp)
+                                                                .clip(CircleShape)
+                                                                .background(
+                                                                    when {
+                                                                        isAssistantChat -> Brush.linearGradient(listOf(Color(0xFF1E293B), Color(0xFF334155)))
+                                                                        isGroupTarget -> Brush.linearGradient(listOf(Color(0xFF6366F1), Color(0xFF8B5CF6)))
+                                                                        else -> Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF06B6D4)))
+                                                                    }
+                                                                ),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            when {
+                                                                isAssistantChat -> Icon(Icons.Default.SmartToy, "KnotLink Assistant", tint = Color.White, modifier = Modifier.size(24.dp))
+                                                                isGroupTarget -> Icon(Icons.Default.Group, "Group", tint = Color.White, modifier = Modifier.size(22.dp))
+                                                                else -> Text(targetChat.name.take(1).uppercase(), color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.width(13.dp))
+
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = targetChat.name,
+                                                        color = animTextColor,
+                                                        fontSize = 15.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = when {
+                                                            isAssistantChat -> "Personal Cloud & AI Assistant"
+                                                            isGroupTarget -> "Encrypted Group Chat"
+                                                            else -> "@${targetChat.name.trim().lowercase().replace(" ", "").removePrefix("@").removeSuffix(".link")}.link"
+                                                        },
+                                                        color = if (isSelected) Color(0xFF3B82F6) else animSubTextColor,
+                                                        fontSize = 12.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+
+                                                // Custom Animated Check Circle
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(26.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (isSelected) Color(0xFF2563EB)
+                                                            else Color.Transparent
+                                                        )
+                                                        .border(
+                                                            width = 1.8.dp,
+                                                            color = if (isSelected) Color(0xFF2563EB)
+                                                            else if (isNightMode) Color(0xFF475569) else Color(0xFFCBD5E1),
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = "Selected",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Bottom Action Bar
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding(),
+                                color = if (isNightMode) Color(0xFF11141D) else Color.White,
+                                shadowElevation = 16.dp,
+                                border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE2E8F0))
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, null, tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    if (selectedForwardChatIds.isEmpty()) "Select chats to forward" else "Forward • ${selectedForwardChatIds.size}",
-                                    color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
-                                )
+                                Button(
+                                    onClick = {
+                                        viewModel.forwardMessage(forwardMsg, selectedForwardChatIds.toList())
+                                        showForwardSheet = false
+                                        messageToForward = null
+                                        Toast.makeText(localContext, "Forwarded to ${selectedForwardChatIds.size} chat(s)", Toast.LENGTH_SHORT).show()
+                                    },
+                                    enabled = selectedForwardChatIds.isNotEmpty(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        .height(54.dp),
+                                    shape = RoundedCornerShape(18.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF2563EB),
+                                        disabledContainerColor = if (isNightMode) Color(0xFF1E2638) else Color(0xFFE2E8F0)
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Send,
+                                        contentDescription = null,
+                                        tint = if (selectedForwardChatIds.isNotEmpty()) Color.White else animSubTextColor
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (selectedForwardChatIds.isEmpty()) "Select recipients to forward"
+                                        else "Forward to ${selectedForwardChatIds.size} Chat${if (selectedForwardChatIds.size > 1) "s" else ""}",
+                                        color = if (selectedForwardChatIds.isNotEmpty()) Color.White else animSubTextColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                }
                             }
                         }
                     }
@@ -3565,7 +3947,7 @@ fun ChatDetailScreen(
                         IconButton(
                             onClick = {
                                 com.example.util.AudioRecorderManager.cancelRecording()
-                                
+                                Toast.makeText(localContext, "Recording cancelled 🗑️", Toast.LENGTH_SHORT).show()
                                 showVoiceRecorderBottomSheet = false
                             },
                             modifier = Modifier
@@ -3630,25 +4012,31 @@ fun ChatDetailScreen(
                         IconButton(
                             onClick = {
                                 val (recFile, secs) = com.example.util.AudioRecorderManager.stopRecording()
-                                val viewOnceMode = sheetIsViewOnce
                                 if (recFile != null && recFile.exists() && secs >= 1) {
                                     val formattedDur = String.format("%02d:%02d", secs / 60, secs % 60)
-                                    coroutineScope.launch {
-                                        val audioUrl = runCatching {
-                                            viewModel.uploadMedia(chatId, Uri.fromFile(recFile), "audio/mp4", localContext)
-                                        }.getOrNull()
-                                        if (!audioUrl.isNullOrBlank()) {
-                                            val textToSend = if (viewOnceMode) {
-                                                "[VIEW_ONCE_AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
-                                            } else {
-                                                "[AUDIO_FILE|$audioUrl|$formattedDur] 🎙️ Voice Note ($formattedDur)"
-                                            }
-                                            viewModel.sendMessage(chatId, textToSend)
+                                    val base64Data = try {
+                                        val bytes = recFile.readBytes()
+                                        android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                                    } catch (_: Exception) { null }
+
+                                    val textToSend = if (sheetIsViewOnce) {
+                                        if (!base64Data.isNullOrBlank()) {
+                                            "[VIEW_ONCE_AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                        } else {
+                                            "[VIEW_ONCE_AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ 1-Time Voice Note ($formattedDur)"
+                                        }
+                                    } else {
+                                        if (!base64Data.isNullOrBlank()) {
+                                            "[AUDIO_BASE64|$base64Data|$formattedDur] 🎙️ Voice Note ($formattedDur)"
+                                        } else {
+                                            "[AUDIO_FILE|${recFile.absolutePath}|$formattedDur] 🎙️ Voice Note ($formattedDur)"
                                         }
                                     }
+                                    viewModel.sendMessage(chatId, textToSend)
+                                    Toast.makeText(localContext, if (sheetIsViewOnce) "1-Time Voice note sent 1️⃣" else "Voice note sent 🎙️", Toast.LENGTH_SHORT).show()
                                 } else {
                                     com.example.util.AudioRecorderManager.cancelRecording()
-                                    
+                                    Toast.makeText(localContext, "Recording too short ⏱️", Toast.LENGTH_SHORT).show()
                                 }
                                 showVoiceRecorderBottomSheet = false
                             },
@@ -4412,7 +4800,7 @@ fun FigmaMessageBubbleRow(
         return
     }
 
-    val isPhoto = text.contains("IMAGE_ATTACHMENT") || text.contains("IMAGE_ALBUM") || text.startsWith("🖼️") || text.startsWith("📸") || text.startsWith("http://") || text.startsWith("https://") || text.startsWith("content://") || text.startsWith("file://")
+    val isPhoto = text.contains("IMAGE_ATTACHMENT") || text.contains("IMAGE_ALBUM") || text.contains("[IMAGE_URL|") || text.contains("[IMAGE_BASE64|") || message.messageType == "IMAGE" || text.startsWith("🖼️") || text.startsWith("📸") || text.startsWith("http://") || text.startsWith("https://") || text.startsWith("content://") || text.startsWith("file://")
     val isPoll = text.contains("POLL:") || text.startsWith("📊") || text.contains("[POLL_DATA|")
     val isVoice = text.contains("Voice Note") || text.startsWith("🎙️") || text.contains("VIEW_ONCE_AUDIO") || text.contains("AUDIO_BASE64") || text.contains("AUDIO_FILE") || text.contains("VIEW_ONCE_OPENED")
     val isContact = text.contains("Contact:") || text.startsWith("👤")
@@ -4450,9 +4838,11 @@ fun FigmaMessageBubbleRow(
             val isCustomMediaBubble = isPhoto || isPoll || isVoice || isContact || isDocument || isChecklist
 
             if (isCustomMediaBubble) {
-                Column {
-                    // Forward Tag
-                    if (message.isForwarded) {
+                Column(
+                    horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
+                ) {
+                    // Forward Tag (for non-photo custom media bubbles; photo bubbles render an integrated header with metadata)
+                    if (message.isForwarded && !isPhoto) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(bottom = 4.dp)
@@ -4525,7 +4915,10 @@ fun FigmaMessageBubbleRow(
                             isUser = isUser,
                             isNightMode = isNightMode,
                             animTextColor = animTextColor,
-                            isRead = message.isRead
+                            isRead = message.isRead,
+                            isForwarded = message.isForwarded,
+                            timestamp = message.timestamp,
+                            timestampString = message.timestampString
                         )
                         isPoll -> com.example.ui.components.InteractivePollBubble(
                             rawPollText = text,
@@ -4711,6 +5104,15 @@ fun FigmaMessageBubbleRow(
                         fontFamily = FontFamily.Monospace
                     )
 
+                    if (message.isEdited) {
+                        Text(
+                            text = " • edited",
+                            color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontStyle = FontStyle.Italic
+                        )
+                    }
+
                     if (isUser) {
                         Spacer(modifier = Modifier.width(6.dp))
                         val isSeen = message.deliveryState == "READ" || message.isRead
@@ -4787,9 +5189,13 @@ fun RichImageMessageBubble(
     isUser: Boolean,
     isNightMode: Boolean,
     animTextColor: Color,
-    isRead: Boolean = false
+    isRead: Boolean = false,
+    isForwarded: Boolean = false,
+    timestamp: Long = 0L,
+    timestampString: String = ""
 ) {
     var fullscreenInitialIndex by remember { mutableStateOf<Int?>(null) }
+    var imageResolution by remember(imageUrlOrUri) { mutableStateOf("1920×1080 HD") }
 
     val bubbleShape = if (isUser) {
         RoundedCornerShape(22.dp, 22.dp, 4.dp, 22.dp)
@@ -4804,6 +5210,9 @@ fun RichImageMessageBubble(
         } else if (imageUrlOrUri.contains("[IMAGE_ATTACHMENT|")) {
             val raw = imageUrlOrUri.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim()
             if (raw.isNotBlank()) listOf(raw) else listOf(imageUrlOrUri)
+        } else if (imageUrlOrUri.contains("[IMAGE_URL|")) {
+            val raw = imageUrlOrUri.substringAfter("[IMAGE_URL|").substringBefore("]").substringBefore(" ").trim()
+            if (raw.isNotBlank()) listOf(raw) else listOf(imageUrlOrUri)
         } else {
             val uriRegex = Regex("(content://\\S+|file://\\S+|https?://\\S+)")
             val matches = uriRegex.findAll(imageUrlOrUri).map { it.value }.toList()
@@ -4817,61 +5226,193 @@ fun RichImageMessageBubble(
             .replace(Regex("\\[IMAGE_ALBUM\\|.*?\\]"), "")
             .replace(Regex("\\[IMAGE_ATTACHMENT\\|.*?\\|"), "")
             .replace(Regex("\\[IMAGE_ATTACHMENT\\|.*?\\]"), "")
+            .replace(Regex("\\[IMAGE_URL\\|.*?\\]"), "")
             .replace(Regex("🖼️\\s*\\d*\\s*Photos?"), "")
             .replace("🖼️", "")
             .replace("📸", "")
             .trim()
     }
 
+    val effectiveTs = if (timestamp > 0L) timestamp else System.currentTimeMillis()
+    val formattedDate = remember(effectiveTs) {
+        java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(effectiveTs))
+    }
+    val formattedTime = remember(effectiveTs, timestampString) {
+        if (timestampString.isNotBlank()) timestampString
+        else java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(effectiveTs))
+    }
+
     Column(
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-        modifier = Modifier.padding(vertical = 2.dp)
+        modifier = Modifier.padding(vertical = 3.dp)
     ) {
         Surface(
             shape = bubbleShape,
-            color = if (isNightMode) Color(0xFF1E202B) else Color.White,
-            shadowElevation = 3.dp,
+            color = if (isNightMode) Color(0xFF171A24) else Color.White,
+            shadowElevation = if (isNightMode) 2.dp else 4.dp,
             border = BorderStroke(
                 1.dp,
-                if (isUser) Color(0xFF2563EB).copy(alpha = 0.5f)
-                else if (isNightMode) Color.White.copy(0.12f) else Color(0xFFE2E8F0)
+                if (isUser) Color(0xFF3B82F6).copy(alpha = 0.55f)
+                else if (isNightMode) Color.White.copy(0.10f) else Color(0xFFE2E8F0)
             ),
             modifier = Modifier
-                .width(260.dp)
+                .widthIn(min = 240.dp, max = 288.dp)
                 .clip(bubbleShape)
         ) {
-            Column {
-                if (imageUrls.size <= 1) {
-                    // Single Photo
-                    val singleUrl = imageUrls.firstOrNull() ?: imageUrlOrUri
-                    Box(
+            Column(modifier = Modifier.padding(5.dp)) {
+                // Integrated Forwarded Header Banner inside Image Card
+                if (isForwarded) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(220.dp)
-                            .clickable { fullscreenInitialIndex = 0 }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        AsyncImage(
-                            model = singleUrl,
-                            contentDescription = "Photo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Forward,
+                                contentDescription = "Forwarded Image",
+                                tint = Color(0xFF3B82F6),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Forwarded Image",
+                                color = Color(0xFF3B82F6),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFF2563EB).copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                text = imageResolution,
+                                color = Color(0xFF3B82F6),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
-                } else {
-                    // Album Grid of Multiple Photos
-                    PhotoAlbumGrid(
-                        images = imageUrls,
-                        onImageClick = { idx -> fullscreenInitialIndex = idx }
-                    )
                 }
 
+                // Framed Image Container
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(17.dp))
+                        .background(if (isNightMode) Color(0xFF10121A) else Color(0xFFF1F5F9))
+                ) {
+                    if (imageUrls.size <= 1) {
+                        val singleUrl = imageUrls.firstOrNull() ?: imageUrlOrUri
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(228.dp)
+                                .clickable { fullscreenInitialIndex = 0 }
+                        ) {
+                            AsyncImage(
+                                model = singleUrl,
+                                contentDescription = "Photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                                onSuccess = { state ->
+                                    val w = state.result.drawable.intrinsicWidth
+                                    val h = state.result.drawable.intrinsicHeight
+                                    if (w > 0 && h > 0) {
+                                        imageResolution = "${w}×${h}"
+                                    }
+                                }
+                            )
+
+                            // Subtle bottom gradient scrim for pleasing depth & badge legibility
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp)
+                                    .align(Alignment.BottomCenter)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.62f))
+                                        )
+                                    )
+                            )
+
+                            // Bottom-right glassmorphic resolution & time badge on image
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.Black.copy(alpha = 0.52f))
+                                    .border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "$imageResolution • $formattedTime",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    } else {
+                        PhotoAlbumGrid(
+                            images = imageUrls,
+                            onImageClick = { idx -> fullscreenInitialIndex = idx }
+                        )
+                    }
+                }
+
+                // Caption (if present)
                 if (cleanCaption.isNotBlank() && !cleanCaption.startsWith("[")) {
                     Text(
                         text = cleanCaption,
                         color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        fontSize = 13.5.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
+                }
+
+                // Forwarded Image Metadata Footer (Date, Time & Resolution)
+                if (isForwarded) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "$formattedDate • $formattedTime",
+                                color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Text(
+                            text = "Res: $imageResolution",
+                            color = if (isNightMode) Color(0xFF93C5FD) else Color(0xFF2563EB),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
         }
@@ -5430,7 +5971,11 @@ fun TelegramAudioWaveformBeats(
             barHeights.forEachIndexed { idx, height ->
                 val barFraction = idx / (barHeights.size - 1).toFloat()
                 val isPlayed = barFraction <= progress
-                val activeBrush = Brush.verticalGradient(listOf(Color(0xFFF59E0B), Color(0xFFB91C1C)))
+                val activeBrush = if (isUser) {
+                    Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.85f)))
+                } else {
+                    Brush.verticalGradient(listOf(Color(0xFF2563EB), Color(0xFF06B6D4)))
+                }
                 val inactiveColor = if (isUser) Color.White.copy(alpha = 0.3f) else (if (isNightMode) Color.White.copy(alpha = 0.2f) else Color(0xFFCBD5E1))
 
                 Box(
@@ -5465,150 +6010,225 @@ fun VoiceNoteMessageBubble(
         messageText.contains("VIEW_ONCE_OPENED")
     }
 
+    // Parse real audio file path or Base64 string e.g. [AUDIO_BASE64|data|dur] or [AUDIO_FILE|path|dur]
     val (audioData, isBase64) = remember(messageText) {
-        when {
-            messageText.contains("[AUDIO_BASE64|") || messageText.contains("[VIEW_ONCE_AUDIO_BASE64|") -> {
-                val parts = messageText.split("|")
-                if (parts.size >= 2) Pair(parts[1].trim(), true) else Pair(null, false)
-            }
-            messageText.contains("[AUDIO_FILE|") || messageText.contains("[VIEW_ONCE_AUDIO_FILE|") -> {
-                val parts = messageText.split("|")
-                if (parts.size >= 2) Pair(parts[1].trim(), false) else Pair(null, false)
-            }
-            else -> Pair(null, false)
-        }
+        if (messageText.contains("[AUDIO_BASE64|") || messageText.contains("[VIEW_ONCE_AUDIO_BASE64|")) {
+            val parts = messageText.split("|")
+            if (parts.size >= 2) Pair(parts[1].trim(), true) else Pair(null, false)
+        } else if (messageText.contains("[AUDIO_FILE|") || messageText.contains("[VIEW_ONCE_AUDIO_FILE|")) {
+            val parts = messageText.split("|")
+            if (parts.size >= 2) Pair(parts[1].trim(), false) else Pair(null, false)
+        } else if (messageText.contains("/")) {
+            val idx = messageText.indexOf('/')
+            val endIdx = messageText.indexOf(']', idx).let { if (it == -1) messageText.length else it }
+            if (idx != -1) Pair(messageText.substring(idx, endIdx).trim(), false) else Pair(null, false)
+        } else Pair(null, false)
     }
 
-    val mediaPlayer = remember(audioData) { MediaPlayer() }
+    val mediaPlayer = remember(audioData) { android.media.MediaPlayer() }
 
-    DisposableEffect(audioData, isBase64) {
-        val targetFile = if (!audioData.isNullOrBlank()) {
-            if (isBase64) {
-                // Legacy messages only. New voice notes are uploaded as URLs.
-                runCatching {
-                    val bytes = android.util.Base64.decode(audioData, android.util.Base64.DEFAULT)
-                    val file = File(context.cacheDir, "voice_${audioData.hashCode()}.m4a")
-                    if (!file.exists() || file.length() != bytes.size.toLong()) file.writeBytes(bytes)
-                    file
-                }.getOrNull()
+    DisposableEffect(audioData) {
+        if (!audioData.isNullOrBlank()) {
+            val targetFile: java.io.File? = if (isBase64) {
+                try {
+                    val bytes = android.util.Base64.decode(audioData, android.util.Base64.NO_WRAP)
+                    val cacheFile = java.io.File(context.cacheDir, "recv_voice_${audioData.hashCode()}.m4a")
+                    if (!cacheFile.exists() || cacheFile.length() == 0L) {
+                        cacheFile.writeBytes(bytes)
+                    }
+                    cacheFile
+                } catch (e: Exception) {
+                    android.util.Log.e("VoiceNoteMessageBubble", "Error decoding audio base64: ${e.message}")
+                    null
+                }
             } else {
-                File(audioData).takeIf { it.exists() }
+                val file = java.io.File(audioData)
+                if (file.exists()) file else null
             }
-        } else null
 
-        runCatching {
-            mediaPlayer.reset()
-            if (!audioData.isNullOrBlank() && (audioData.startsWith("http://") || audioData.startsWith("https://"))) {
-                mediaPlayer.setDataSource(context, Uri.parse(audioData))
-            } else if (targetFile != null) {
-                mediaPlayer.setDataSource(targetFile.absolutePath)
-            } else {
-                return@runCatching
+            if (targetFile != null && targetFile.exists()) {
+                try {
+                    mediaPlayer.reset()
+                    mediaPlayer.setDataSource(targetFile.absolutePath)
+                    mediaPlayer.prepare()
+                    val dur = mediaPlayer.duration.toFloat()
+                    if (dur > 0f) totalDurationMs = dur
+                } catch (e: Exception) {
+                    android.util.Log.e("VoiceNoteMessageBubble", "Error preparing audio: ${e.message}")
+                }
             }
-            mediaPlayer.setOnPreparedListener { player ->
-                if (player.duration > 0) totalDurationMs = player.duration.toFloat()
-            }
-            mediaPlayer.prepareAsync()
         }
-
         mediaPlayer.setOnCompletionListener {
             isPlaying = false
             currentPositionMs = 0f
-            if (isViewOnce) onViewOncePlayed?.invoke()
+            if (isViewOnce) {
+                onViewOncePlayed?.invoke()
+            }
         }
-
         onDispose {
-            runCatching {
+            try {
                 if (mediaPlayer.isPlaying) mediaPlayer.stop()
                 mediaPlayer.release()
-            }
+            } catch (_: Exception) {}
         }
     }
 
     LaunchedEffect(isPlaying, isDraggingSlider) {
         if (isPlaying && !isDraggingSlider) {
             while (isPlaying) {
-                runCatching {
+                try {
                     if (mediaPlayer.isPlaying) {
                         currentPositionMs = mediaPlayer.currentPosition.toFloat()
-                        if (mediaPlayer.duration > 0) totalDurationMs = mediaPlayer.duration.toFloat()
-                    } else isPlaying = false
+                        val dur = mediaPlayer.duration.toFloat()
+                        if (dur > 0f) totalDurationMs = dur
+                    } else {
+                        isPlaying = false
+                    }
+                } catch (_: Exception) {
+                    isPlaying = false
                 }
-                kotlinx.coroutines.delay(80L)
+                kotlinx.coroutines.delay(100L)
             }
         }
     }
 
-    val parsedDuration = remember(messageText) {
-        messageText.substringAfterLast("|", "").substringBefore("]")
-            .takeIf { it.matches(Regex("\\d{2}:\\d{2}")) }
+    val bubbleShape = if (isUser) {
+        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
+    } else {
+        RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
+    }
+
+    val parsedDurationStr = remember(messageText) {
+        if (messageText.contains("|")) {
+            val parts = messageText.split("|")
+            val lastPart = parts.last().substringBefore("]")
+            if (lastPart.contains(":")) lastPart else null
+        } else {
+            null
+        }
     }
     val curSecs = (currentPositionMs / 1000f).toInt()
     val totSecs = (totalDurationMs / 1000f).toInt()
-    val currentTime = String.format("%02d:%02d", curSecs / 60, curSecs % 60)
-    val totalTime = parsedDuration ?: String.format("%02d:%02d", totSecs / 60, totSecs % 60)
-
-    val bubble = if (isUser) Color(0xFF2563EB) else if (isNightMode) Color(0xFF181C24) else Color.White
-    val primary = if (isUser) Color.White else if (isNightMode) Color(0xFFF4F7FB) else Color(0xFF0F172A)
-    val secondary = if (isUser) Color.White.copy(alpha = 0.72f) else if (isNightMode) Color(0xFF9AA5B5) else Color(0xFF64748B)
-    val playSurface = Brush.linearGradient(listOf(Color(0xFFD97706), Color(0xFFB91C1C)))
-    val shape = if (isUser) RoundedCornerShape(20.dp, 20.dp, 5.dp, 20.dp) else RoundedCornerShape(20.dp, 20.dp, 20.dp, 5.dp)
+    val curTimeStr = String.format("%02d:%02d", curSecs / 60, curSecs % 60)
+    val totTimeStr = parsedDurationStr ?: String.format("%02d:%02d", totSecs / 60, totSecs % 60)
 
     Surface(
-        shape = shape,
-        color = bubble,
-        border = if (isUser) null else BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.07f) else Color(0xFFE2E8F0)),
-        shadowElevation = if (isNightMode || isUser) 0.dp else 2.dp,
-        modifier = Modifier.widthIn(min = 205.dp, max = 270.dp).padding(vertical = 3.dp)
+        shape = bubbleShape,
+        color = if (isUser) Color(0xFF2563EB) else if (isNightMode) Color(0xFF1E202B) else Color(0xFFF1F5F9),
+        border = BorderStroke(
+            1.dp,
+            if (isUser) Color.Transparent else if (isNightMode) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1)
+        ),
+        modifier = Modifier
+            .widthIn(min = 210.dp, max = 270.dp)
+            .padding(vertical = 4.dp)
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Mic, contentDescription = null, tint = if (isUser) Color.White.copy(alpha = 0.9f) else Color(0xFF2563EB), modifier = Modifier.size(14.dp))
+        Column {
+            if (isViewOnce) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(if (isUser) Color.White.copy(alpha = 0.35f) else Color(0xFF2563EB)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("1", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                    }
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text(text = if (isViewOnce) "1-Time Voice" else "Voice message", color = primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = if (hasBeenPlayedOnce) {
+                            if (isUser) "Opened" else "Opened • Expired"
+                        } else {
+                            "1-Time Voice Note"
+                        },
+                        color = if (isUser) Color.White.copy(alpha = 0.9f) else (if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569)),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-
             }
-            Spacer(modifier = Modifier.height(7.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Play/Pause Button - prominent circular button
                 Box(
-                    modifier = Modifier.size(42.dp).clip(CircleShape).background(playSurface).clickable(enabled = !hasBeenPlayedOnce) {
-                        runCatching {
-                            if (isPlaying) { mediaPlayer.pause(); isPlaying = false }
-                            else { mediaPlayer.start(); isPlaying = true }
-                        }
-                    },
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isUser)
+                                Color.White.copy(0.25f)
+                            else if (isNightMode)
+                                Color(0xFF2563EB)
+                            else
+                                Color(0xFF0F172A)
+                        )
+                        .clickable(enabled = !hasBeenPlayedOnce) {
+                            if (isPlaying) {
+                                try {
+                                    mediaPlayer.pause()
+                                } catch (_: Exception) {}
+                                isPlaying = false
+                            } else {
+                                try {
+                                    mediaPlayer.start()
+                                    isPlaying = true
+                                } catch (e: Exception) {
+                                    isPlaying = false
+                                }
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        contentDescription = "Play/Pause Voice Note",
                         tint = Color.White,
-                        modifier = Modifier.size(21.dp).offset(x = if (isPlaying) 0.dp else 1.dp)
+                        modifier = Modifier
+                            .size(20.dp)
+                            .offset(x = if (isPlaying) 0.dp else 1.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(9.dp))
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Waveform Beats Bar in center
                 val progress = if (totalDurationMs > 0f) (currentPositionMs / totalDurationMs).coerceIn(0f, 1f) else 0f
                 TelegramAudioWaveformBeats(
                     progress = progress,
                     isUser = isUser,
                     isNightMode = isNightMode,
-                    onSeekFraction = { fraction ->
+                    onSeekFraction = { frac ->
                         if (!hasBeenPlayedOnce) {
-                            val target = (fraction * totalDurationMs).toInt()
-                            runCatching { mediaPlayer.seekTo(target) }
-                            currentPositionMs = target.toFloat()
+                            val targetMs = frac * totalDurationMs
+                            currentPositionMs = targetMs
+                            try {
+                                mediaPlayer.seekTo(targetMs.toInt())
+                            } catch (_: Exception) {}
                         }
                     },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .align(Alignment.CenterVertically)
                 )
+
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(text = if (isPlaying) currentTime else totalTime, color = primary, fontSize = 10.5.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
-            }
-            if (isViewOnce && hasBeenPlayedOnce) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("Opened • expired", color = secondary, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+
+                // Time Count display with high contrast
+                Text(
+                    text = if (isPlaying) curTimeStr else totTimeStr,
+                    color = if (isUser) Color.White else (if (isNightMode) Color.White else Color(0xFF0F172A)),
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
             }
         }
     }
@@ -5968,50 +6588,6 @@ fun InteractiveCallDialog(
     }
 }
 
-
-@androidx.compose.runtime.Composable
-private fun rememberProfileMediaUrl(raw: String, kind: String): String {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val trimmedRaw = raw.trim()
-
-    if (trimmedRaw.startsWith("content://") || trimmedRaw.startsWith("file://") ||
-        trimmedRaw.startsWith("/") || trimmedRaw.startsWith("http://") || trimmedRaw.startsWith("https://") ||
-        trimmedRaw.length < 128
-    ) return trimmedRaw
-
-    val resolved by androidx.compose.runtime.produceState(
-        initialValue = trimmedRaw,
-        key1 = trimmedRaw,
-        key2 = kind
-    ) {
-        this.value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val encoded = if (trimmedRaw.startsWith("data:") && trimmedRaw.contains(",")) {
-                    trimmedRaw.substringAfter(",")
-                } else trimmedRaw
-                val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                val extension = when (kind) {
-                    "Videos" -> "mp4"
-                    "Audios" -> "m4a"
-                    else -> "jpg"
-                }
-                val file = java.io.File(
-                    context.cacheDir,
-                    "profile_shared_" + kind.lowercase() + "_" + raw.hashCode() + "." + extension
-                )
-                if (!file.exists() || file.length() != bytes.size.toLong()) {
-                    file.outputStream().use { it.write(bytes) }
-                }
-                file.absolutePath
-            } catch (e: Throwable) {
-                android.util.Log.w("ChatProfileMedia", "Failed to materialize profile media: ${e.message}")
-                trimmedRaw
-            }
-        }
-    }
-    return resolved
-}
-
 @Composable
 fun ChatProfileDetailsPage(
     chatId: String,
@@ -6026,13 +6602,6 @@ fun ChatProfileDetailsPage(
     }
 
     val context = LocalContext.current
-    val mediaScope = rememberCoroutineScope()
-    var selectedMediaEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-    var mediaMenuEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-    var mediaInfoEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-    var mediaForwardEntry by remember { mutableStateOf<Triple<String, String, MessageEntity>?>(null) }
-    var mediaResolution by remember { mutableStateOf("Original") }
-
     val isGroupChat = chatName.contains("[Group]", ignoreCase = true) || chatId.startsWith("group_")
 
     val groupAvatarMap by viewModel.groupAvatarMap.collectAsState()
@@ -6487,12 +7056,6 @@ fun ChatProfileDetailsPage(
                         color = Color(0xFF2563EB),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Encrypted Direct Peer • Active Node",
-                        color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
-                        fontSize = 12.sp
                     )
                 }
 
@@ -7096,8 +7659,6 @@ fun ChatProfileDetailsPage(
                     var selectedPillTab by remember { mutableStateOf("Photos") }
                     val pills = listOf("Photos", "Videos", "Audios", "Files", "Links")
 
-
-
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -7190,21 +7751,7 @@ fun ChatProfileDetailsPage(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium
                                         )
-                                        val joinedDateStr = remember(partnerProfile?.joinedDate) {
-                                            val raw = partnerProfile?.joinedDate?.trim().orEmpty()
-                                            if (raw.isBlank()) {
-                                                "—"
-                                            } else {
-                                                runCatching {
-                                                    val parsed = when {
-                                                        raw.contains("T") -> java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(raw.take(19))
-                                                        raw.length >= 10 && raw[4] == '-' -> java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(raw.take(10))
-                                                        else -> java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US).parse(raw)
-                                                    }
-                                                    if (parsed != null) java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.US).format(parsed) else raw.take(10)
-                                                }.getOrElse { raw.take(10) }
-                                            }
-                                        }
+                                        val joinedDateStr = if (partnerProfile?.joinedDate?.isNotBlank() == true) partnerProfile!!.joinedDate else "2026"
                                         Text(
                                             text = joinedDateStr,
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
@@ -7251,438 +7798,114 @@ fun ChatProfileDetailsPage(
                         }
 
                         // Shared Media List for Direct Chat
-                        fun extractProfileMediaUrls(text: String, tab: String): List<String> {
-                            return when (tab) {
-                                "Photos" -> buildList {
-                                    when {
-                                        text.contains("[IMAGE_ALBUM|") -> addAll(text.substringAfter("[IMAGE_ALBUM|").substringBefore("]").split(",").map { it.trim() })
-                                        text.contains("[IMAGE_ATTACHMENT|") -> add(text.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim())
-                                        text.contains("[IMAGE_BASE64|") -> add(text.substringAfter("[IMAGE_BASE64|").substringBefore("|").trim())
-                                        else -> addAll(Regex("(content://\\S+|file://\\S+|https?://\\S+\\.(?:png|jpe?g|webp)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
-                                    }
-                                }.filter { it.isNotBlank() }
-                                "Videos" -> buildList {
-                                    when {
-                                        text.contains("[VIDEO_FILE|") -> add(text.substringAfter("[VIDEO_FILE|").substringBefore("|").trim())
-                                        text.contains("[VIDEO_URL|") -> add(text.substringAfter("[VIDEO_URL|").substringBefore("]").trim())
-                                        text.contains("[VIDEO_BASE64|") -> add(text.substringAfter("[VIDEO_BASE64|").substringBefore("|").trim())
-                                        else -> addAll(Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp4|mov|m4v|webm)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
-                                    }
-                                }.filter { it.isNotBlank() }
-                                "Audios" -> buildList {
-                                    when {
-                                        text.contains("[AUDIO_FILE|") -> add(text.substringAfter("[AUDIO_FILE|").substringBefore("|").trim())
-                                        text.contains("[VIEW_ONCE_AUDIO_FILE|") -> add(text.substringAfter("[VIEW_ONCE_AUDIO_FILE|").substringBefore("|").trim())
-                                        text.contains("[AUDIO_BASE64|") -> add(text.substringAfter("[AUDIO_BASE64|").substringBefore("|").trim())
-                                        text.contains("[VIEW_ONCE_AUDIO_BASE64|") -> add(text.substringAfter("[VIEW_ONCE_AUDIO_BASE64|").substringBefore("|").trim())
-                                        else -> addAll(Regex("(content://\\S+|file://\\S+|/\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?|https?://\\S+\\.(?:mp3|m4a|aac|wav|ogg)(?:\\?[^\\s]*)?)", RegexOption.IGNORE_CASE).findAll(text).map { it.value })
-                                    }
-                                }.filter { it.isNotBlank() }
-                                else -> emptyList()
+                        val directSharedItems = remember(chatMessages, selectedPillTab) {
+                            chatMessages.filter { msg ->
+                                val text = msg.text
+                                when (selectedPillTab) {
+                                    "Photos" -> text.contains("IMAGE_ATTACHMENT") || text.contains("IMAGE_ALBUM") || text.startsWith("🖼️") || text.startsWith("📸") || (text.startsWith("http") && (text.endsWith(".png") || text.endsWith(".jpg") || text.endsWith(".jpeg") || text.endsWith(".webp")))
+                                    "Videos" -> text.contains("[Video]") || text.contains("video_") || text.contains(".mp4")
+                                    "Audios" -> text.contains("Voice Note") || text.startsWith("🎙️") || text.contains("VIEW_ONCE_AUDIO") || text.contains("AUDIO_BASE64") || text.contains("AUDIO_FILE") || text.contains(".mp3")
+                                    "Files" -> text.contains("DOCUMENT_FILE") || text.contains("[Document:") || text.startsWith("📄") || text.contains(".pdf") || text.contains(".zip")
+                                    "Links" -> text.contains("http://") || text.contains("https://")
+                                    else -> false
+                                }
                             }
                         }
 
-                        val directSharedItems = remember(chatMessages, selectedPillTab) {
-                            chatMessages.asReversed().flatMap { msg ->
-                                extractProfileMediaUrls(msg.text, selectedPillTab).map { url ->
-                                    Triple(selectedPillTab, url, msg)
-                                }
-                            }.distinctBy { entry -> entry.second }.take(24)
-                        }
-
-                        if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios") {
-                            if (directSharedItems.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxWidth().height(150.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        "No shared $selectedPillTab yet",
-                                        color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8),
-                                        fontSize = 13.sp
-                                    )
-                                }
-                            } else {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    directSharedItems.chunked(3).forEach { rowItems ->
+                        if (directSharedItems.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No shared $selectedPillTab in this chat",
+                                    color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8),
+                                    fontSize = 13.sp
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val limitedDirectItems = directSharedItems.take(20)
+                                limitedDirectItems.forEach { item ->
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isNightMode) Color(0xFF161822) else Color.White
+                                        ),
+                                        border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.08f) else Color(0xFFE2E8F0)),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            rowItems.forEach { entry ->
-                                                val kind = entry.first
-                                                val mediaUrl = entry.second
-                                                val mediaMessage = entry.third
-                                                val displayMediaUrl = rememberProfileMediaUrl(mediaUrl, kind)
-                                                Box(
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .aspectRatio(1f)
-                                                        .clip(RoundedCornerShape(14.dp))
-                                                        .background(if (isNightMode) Color(0xFF171922) else Color(0xFFEFF3F8))
-                                                        .clickable {
-                                                            selectedMediaEntry = entry
-                                                            mediaResolution = "Original"
-                                                            mediaMenuEntry = null
-                                                        }
+                                            Icon(
+                                                imageVector = when (selectedPillTab) {
+                                                    "Photos" -> Icons.Default.Image
+                                                    "Videos" -> Icons.Default.Videocam
+                                                    "Audios" -> Icons.Default.Mic
+                                                    "Files" -> Icons.Default.AttachFile
+                                                    else -> Icons.Default.Link
+                                                },
+                                                contentDescription = null,
+                                                tint = if (isNightMode) Color.White else Color.Black,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = getCleanMediaPreview(item.text, selectedPillTab),
+                                                    color = if (isNightMode) Color.White else Color(0xFF0F172A),
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Text(
+                                                    text = "${item.senderName} • ${item.timestampString}",
+                                                    color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                            if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios" || selectedPillTab == "Files") {
+                                                IconButton(
+                                                    onClick = {
+                                                        Toast.makeText(context, "Downloading item to Downloads...", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.size(36.dp)
                                                 ) {
-                                                    when (kind) {
-                                                        "Photos" -> AsyncImage(
-                                                            model = if (displayMediaUrl.startsWith("/")) File(displayMediaUrl) else displayMediaUrl,
-                                                            contentDescription = "Shared photo",
-                                                            contentScale = ContentScale.Crop,
-                                                            modifier = Modifier.fillMaxSize()
-                                                        )
-                                                        "Videos" -> {
-                                                            Box(
-                                                                modifier = Modifier.fillMaxSize().background(Color(0xFF10131A)),
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                Icon(Icons.Default.Videocam, "Video", tint = Color(0xFF60A5FA), modifier = Modifier.size(38.dp))
-                                                                Box(
-                                                                    modifier = Modifier.size(40.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
-                                                                    contentAlignment = Alignment.Center
-                                                                ) {
-                                                                    Icon(Icons.Default.PlayArrow, "Play video", tint = Color.White, modifier = Modifier.size(24.dp))
-                                                                }
-                                                            }
-                                                        }
-                                                        else -> {
-                                                            Column(
-                                                                modifier = Modifier.fillMaxSize().padding(12.dp),
-                                                                horizontalAlignment = Alignment.CenterHorizontally,
-                                                                verticalArrangement = Arrangement.Center
-                                                            ) {
-                                                                Icon(Icons.Default.Mic, "Audio", tint = Color(0xFF2563EB), modifier = Modifier.size(34.dp))
-                                                                Spacer(modifier = Modifier.height(7.dp))
-                                                                Text("Voice note", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                                            }
-                  
-
-                                          }
-                                                    }
-                                                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                                                        IconButton(onClick = { mediaMenuEntry = entry }, modifier = Modifier.size(34.dp)) {
-                                                            Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
-                                                        }
-                                                        DropdownMenu(
-                                                            expanded = mediaMenuEntry == entry,
-                                                            onDismissRequest = { mediaMenuEntry = null }
-                                                        ) {
-                                                            DropdownMenuItem(
-                                                                text = { Text("Open") },
-                                                                onClick = { mediaMenuEntry = null; mediaResolution = "Original"; selectedMediaEntry = entry },
-                                                                leadingIcon = { Icon(Icons.Default.OpenInNew, null) }
-                                                            )
-                                                            DropdownMenuItem(
-                                                                text = { Text("Forward") },
-                                                                onClick = { mediaMenuEntry = null; mediaForwardEntry = entry },
-                                                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
-                                                            )
-                                                            if (kind == "Photos") {
-                                                                DropdownMenuItem(
-                                                                    text = { Text("Save") },
-                                                                    onClick = {
-                                                                        mediaMenuEntry = null
-                                                                        mediaScope.launch {
-                                                                            val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
-                                                                            Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
-                                                                        }
-                                                                    },
-                                                                    leadingIcon = { Icon(Icons.Default.Download, null) }
-                                                                )
-                                                            }
-                                                            DropdownMenuItem(
-                                                                text = { Text("Info") },
-                                                                onClick = { mediaMenuEntry = null; mediaInfoEntry = entry },
-                                                                leadingIcon = { Icon(Icons.Default.Info, null) }
-                                                            )
-                                                        }
-                                                    }
-                                                    Text(
-                                                        text = mediaMessage.timestampString,
-                                                        color = Color.White,
-                                                        fontSize = 9.sp,
-                                                        maxLines = 1,
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomStart)
-                                                            .padding(7.dp)
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(Color.Black.copy(alpha = 0.48f))
-                                                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                                                    Icon(
+                                                        imageVector = Icons.Default.Download,
+                                                        contentDescription = "Download",
+                                                        tint = if (isNightMode) Color.White else Color.Black
                                                     )
                                                 }
-                                            }
-                                            repeat(3 - rowItems.size) {
-                                                Spacer(modifier = Modifier.weight(1f).aspectRatio(1f))
+                                            } else if (selectedPillTab == "Links") {
+                                                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                                                IconButton(
+                                                    onClick = {
+                                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text))
+                                                        Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.size(36.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.ContentCopy,
+                                                        contentDescription = "Copy Link",
+                                                        tint = if (isNightMode) Color.White else Color.Black
+                                                    )
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().height(100.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Select Photos, Videos or Audios to view visual media", color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-selectedMediaEntry?.let { entry ->
-        val kind = entry.first
-        val mediaUrl = entry.second
-        val mediaMessage = entry.third
-        val displayMediaUrl = rememberProfileMediaUrl(mediaUrl, kind)
-        var showMediaMenu by remember(entry) { mutableStateOf(false) }
-        var audioReady by remember(entry) { mutableStateOf(false) }
-        var audioPlaying by remember(entry) { mutableStateOf(false) }
-        val audioPlayer = remember(entry) { MediaPlayer() }
-
-        DisposableEffect(mediaUrl, kind) {
-            if (kind == "Audios" && mediaUrl.isNotBlank()) {
-                runCatching {
-                    val uri = if (displayMediaUrl.startsWith("/")) Uri.fromFile(File(displayMediaUrl)) else Uri.parse(displayMediaUrl)
-                    audioPlayer.setDataSource(context, uri)
-                    audioPlayer.setOnPreparedListener { audioReady = true }
-                    audioPlayer.setOnCompletionListener { audioPlaying = false }
-                    audioPlayer.prepareAsync()
-                }
-            }
-            onDispose { runCatching { audioPlayer.release() } }
-        }
-
-        Dialog(onDismissRequest = { selectedMediaEntry = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    when (kind) {
-                        "Photos" -> AsyncImage(
-                            model = if (displayMediaUrl.startsWith("/")) File(displayMediaUrl) else displayMediaUrl,
-                            contentDescription = "Shared photo preview",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                            onSuccess = { state ->
-                                val drawable = state.result.drawable
-                                if (drawable.intrinsicWidth > 0 && drawable.intrinsicHeight > 0) {
-                                    mediaResolution = "${drawable.intrinsicWidth} × ${drawable.intrinsicHeight}px"
-                                }
-                            }
-                        )
-                        "Videos" -> AndroidView(
-                            factory = { ctx ->
-                                VideoView(ctx).apply {
-                                    setVideoURI(if (displayMediaUrl.startsWith("/")) Uri.fromFile(File(displayMediaUrl)) else Uri.parse(displayMediaUrl))
-                                    setOnPreparedListener { player -> player.isLooping = false; start() }
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        else -> Column(
-                            modifier = Modifier.fillMaxSize().padding(28.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(Icons.Default.Mic, null, tint = Color(0xFF60A5FA), modifier = Modifier.size(72.dp))
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Voice note", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                            Text(mediaMessage.timestampString, color = Color.White.copy(alpha = 0.65f), fontSize = 12.sp)
-                            Spacer(modifier = Modifier.height(22.dp))
-                            Button(
-                                onClick = {
-                                    if (!audioReady) return@Button
-                                    if (audioPlayer.isPlaying) {
-                                        audioPlayer.pause()
-                                        audioPlaying = false
-                                    } else {
-                                        audioPlayer.start()
-                                        audioPlaying = true
-                                    }
-                                },
-                                enabled = audioReady,
-                                shape = CircleShape,
-                                modifier = Modifier.size(64.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
-                            ) {
-                                Icon(
-                                    if (audioPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    if (audioPlaying) "Pause" else "Play",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(30.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                if (audioReady) "Tap to play / pause" else "Preparing audio…",
-                                color = Color.White.copy(alpha = 0.65f),
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { selectedMediaEntry = null }, modifier = Modifier.size(42.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)) {
-                            Icon(Icons.Default.Close, "Close", tint = Color.White)
-                        }
-                        Box {
-                            IconButton(onClick = { showMediaMenu = true }, modifier = Modifier.size(42.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)) {
-                                Icon(Icons.Default.MoreVert, "Media options", tint = Color.White)
-                            }
-                            DropdownMenu(expanded = showMediaMenu, onDismissRequest = { showMediaMenu = false }) {
-                                DropdownMenuItem(
-                                    text = { Text("Forward") },
-                                    onClick = { showMediaMenu = false; mediaForwardEntry = entry; selectedMediaEntry = null },
-                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.Forward, null) }
-                                )
-                                if (kind == "Photos") {
-                                    DropdownMenuItem(
-                                        text = { Text("Save") },
-                                        onClick = {
-                                            showMediaMenu = false
-                                            mediaScope.launch {
-                                                val ok = ImageDownloader.saveImageToDevice(context, mediaUrl)
-                                                Toast.makeText(context, if (ok) "Photo saved to gallery" else "Failed to save photo", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        leadingIcon = { Icon(Icons.Default.Download, null) }
-                                    )
-                                }
-                                DropdownMenuItem(
-                                    text = { Text("Info") },
-                                    onClick = { showMediaMenu = false; mediaInfoEntry = entry },
-                                    leadingIcon = { Icon(Icons.Default.Info, null) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    mediaInfoEntry?.let { entry ->
-        val mediaMessage = entry.third
-        AlertDialog(
-            onDismissRequest = { mediaInfoEntry = null },
-            title = { Text("Media info", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Type: ${entry.first}")
-                    Text("Sent: ${mediaMessage.timestampString}")
-                    Text("Date & time: ${java.text.SimpleDateFormat("dd/MM/yyyy • HH:mm", java.util.Locale.US).format(java.util.Date(mediaMessage.timestamp))}")
-                    Text("Resolution: ${if (entry.first == "Photos") mediaResolution else "Not applicable"}")
-                }
-            },
-            confirmButton = { TextButton(onClick = { mediaInfoEntry = null }) { Text("Close") } }
-        )
-    }
-
-    mediaForwardEntry?.let { entry ->
-        var searchQuery by remember(entry) { mutableStateOf("") }
-        val selectedIds = remember(entry) { mutableStateListOf<String>() }
-        val forwardChats = remember(allChats, searchQuery) {
-            if (searchQuery.isBlank()) allChats else allChats.filter {
-                it.name.contains(searchQuery, ignoreCase = true) || it.category.contains(searchQuery, ignoreCase = true)
-            }
-        }
-        val original = entry.third
-        val forwardText = if (entry.first == "Photos") "[IMAGE_ATTACHMENT|${entry.second}] 🖼️ Photo" else original.text
-        val synthetic = original.copy(
-            text = forwardText,
-            isForwarded = true,
-            forwardedFromMessageId = original.serverMessageId ?: original.clientMessageId
-        )
-
-        Dialog(onDismissRequest = { mediaForwardEntry = null }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing), color = if (isNightMode) Color(0xFF0D0F14) else Color(0xFFF5F7FA)) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { mediaForwardEntry = null }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = if (isNightMode) Color.White else Color(0xFF0F172A))
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Forward media", color = if (isNightMode) Color.White else Color(0xFF0F172A), fontSize = 19.sp, fontWeight = FontWeight.Bold)
-                            Text("${selectedIds.size} selected", color = Color(0xFF2563EB), fontSize = 12.sp)
-                        }
-                    }
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search chats…", color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B)) },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                            unfocusedTextColor = if (isNightMode) Color.White else Color(0xFF0F172A),
-                            focusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
-                            unfocusedContainerColor = if (isNightMode) Color(0xFF171A22) else Color.White,
-                            focusedBorderColor = Color(0xFF2563EB),
-                            unfocusedBorderColor = if (isNightMode) Color(0xFF30343E) else Color(0xFFD7DEE8)
-                        )
-                    )
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(forwardChats, key = { it.id }) { target ->
-                            val selected = selectedIds.contains(target.id)
-                            Surface(
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable {
-                                    if (selected) selectedIds.remove(target.id) else selectedIds.add(target.id)
-                                },
-                                color = if (selected) {
-                                    if (isNightMode) Color(0xFF17233D) else Color(0xFFEAF2FF)
-                                } else {
-                                    if (isNightMode) Color(0xFF151820) else Color.White
-                                },
-                                border = BorderStroke(1.dp, if (selected) Color(0xFF2563EB) else if (isNightMode) Color.White.copy(0.06f) else Color(0xFFE2E8F0))
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Box(modifier = Modifier.size(46.dp).clip(CircleShape).background(Color(0xFF2563EB)), contentAlignment = Alignment.Center) {
-                                        Text(target.name.take(1).uppercase(), color = Color.White, fontWeight = FontWeight.Bold)
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text(target.name, color = if (isNightMode) Color.White else Color(0xFF0F172A), modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Checkbox(
-                                        checked = selected,
-                                        onCheckedChange = { checked -> if (checked) selectedIds.add(target.id) else selectedIds.remove(target.id) },
-                                        colors = CheckboxDefaults.colors(checkedColor = Color(0xFF2563EB))
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars),
-                        color = if (isNightMode) Color(0xFF11131A) else Color.White,
-                        shadowElevation = 12.dp
-                    ) {
-                        Button(
-                            onClick = {
-                                viewModel.forwardMessage(synthetic, selectedIds.toList())
-                                mediaForwardEntry = null
-                                Toast.makeText(context, "Media forwarded to ${selectedIds.size} chat(s)", Toast.LENGTH_SHORT).show()
-                            },
-                            enabled = selectedIds.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).height(52.dp),
-                            shape = RoundedCornerShape(17.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Forward, null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Forward • ${selectedIds.size}", color = Color.White, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
