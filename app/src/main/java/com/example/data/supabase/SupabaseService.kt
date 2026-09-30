@@ -70,7 +70,7 @@ object SupabaseService {
             val authHeader = request.header("Authorization")
             val isAuthenticatedRequest =
                 !authHeader.isNullOrBlank() &&
-                authHeader != "Bearer \${SupabaseConfig.ANON_KEY}"
+                authHeader != "Bearer ${SupabaseConfig.ANON_KEY}"
 
             val response = chain.proceed(request)
             if (response.code != 401 || !isAuthenticatedRequest) {
@@ -89,7 +89,7 @@ object SupabaseService {
 
             val retryRequest = request.newBuilder()
                 .removeHeader("Authorization")
-                .addHeader("Authorization", "Bearer \$refreshedToken")
+                .addHeader("Authorization", "Bearer $refreshedToken")
                 .build()
             chain.proceed(retryRequest)
         }
@@ -133,7 +133,7 @@ object SupabaseService {
                 refreshToken = refreshToken,
                 user = SupabaseUser(id = uid, email = email ?: "")
             )
-            Log.d(TAG, "Restored persisted Supabase session for user: \$uid")
+            Log.d(TAG, "Restored persisted Supabase session for user: $uid")
         }
     }
 
@@ -198,7 +198,7 @@ object SupabaseService {
                     .add("refresh_token", refreshToken)
                     .build()
                 val request = Request.Builder()
-                    .url("\${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
+                    .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
                     .addHeader("Content-Type", "application/x-www-form-urlencoded")
                     .post(form)
@@ -218,7 +218,7 @@ object SupabaseService {
                 persistSession(refreshed)
                 refreshed.accessToken
             } catch (e: Exception) {
-                Log.w(TAG, "Session refresh error: \${e.message}")
+                Log.w(TAG, "Session refresh error: ${e.message}")
                 null
             }
         }
@@ -236,7 +236,7 @@ object SupabaseService {
                     .add("refresh_token", refreshToken)
                     .build()
                 val request = Request.Builder()
-                    .url("\${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
+                    .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
                     .addHeader("Content-Type", "application/x-www-form-urlencoded")
                     .post(form)
@@ -256,7 +256,7 @@ object SupabaseService {
                 persistSession(refreshed)
                 true
             } catch (e: Exception) {
-                Log.w(TAG, "Session refresh error: \${e.message}")
+                Log.w(TAG, "Session refresh error: ${e.message}")
                 false
             }
         }
