@@ -229,37 +229,49 @@ object SupabaseService {
     private suspend fun refreshSession(): Boolean = withContext(Dispatchers.IO) {
         synchronized(sessionRefreshLock) {
             val latest = currentSession
-            if (latest != null && isJwtValid(latest.accessToken)) return@withLock true
-            val refreshToken = latest?.refreshToken
-            if (refreshToken.isNullOrBlank()) return@withLock false
-            try {
-                val form = FormBody.Builder()
-                    .add("grant_type", "refresh_token")
-                    .add("refresh_token", refreshToken)
-                    .build()
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
-                    .post(form)
-                    .build()
-                val response = OkHttpClient.Builder()
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(20, TimeUnit.SECONDS)
-                    .writeTimeout(20, TimeUnit.SECONDS)
-                    .build()
-                    .newCall(request)
-                    .execute()
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful || body.isBlank()) return@withLock false
-                val refreshed = SupabaseAuthSession.fromJson(JSONObject(body))
-                if (refreshed.accessToken.isBlank() || refreshed.user?.id.isNullOrBlank()) return@withLock false
-                currentSession = refreshed
-                persistSession(refreshed)
+            if (latest != null && isJwtValid(latest.accessToken)) {
                 true
-            } catch (e: Exception) {
-                Log.w(TAG, "Session refresh error: ${e.message}")
-                false
+            } else {
+                val refreshToken = latest?.refreshToken
+                if (refreshToken.isNullOrBlank()) {
+                    false
+                } else {
+                    try {
+                        val form = FormBody.Builder()
+                            .add("grant_type", "refresh_token")
+                            .add("refresh_token", refreshToken)
+                            .build()
+                        val request = Request.Builder()
+                            .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
+                            .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                            .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                            .post(form)
+                            .build()
+                        val response = OkHttpClient.Builder()
+                            .connectTimeout(15, TimeUnit.SECONDS)
+                            .readTimeout(20, TimeUnit.SECONDS)
+                            .writeTimeout(20, TimeUnit.SECONDS)
+                            .build()
+                            .newCall(request)
+                            .execute()
+                        val body = response.body?.string().orEmpty()
+                        if (!response.isSuccessful || body.isBlank()) {
+                            false
+                        } else {
+                            val refreshed = SupabaseAuthSession.fromJson(JSONObject(body))
+                            if (refreshed.accessToken.isBlank() || refreshed.user?.id.isNullOrBlank()) {
+                                false
+                            } else {
+                                currentSession = refreshed
+                                persistSession(refreshed)
+                                true
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Session refresh error: ${e.message}")
+                        false
+                    }
+                }
             }
         }
     }
