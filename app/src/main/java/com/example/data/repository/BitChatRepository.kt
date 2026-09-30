@@ -283,10 +283,9 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun saveUserIdentity(identity: UserIdentityEntity) {
-        val uid = if (identity.supabaseUid.isNotBlank() && isValidUuid(identity.supabaseUid)) {
-            identity.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
+        val uid = identity.supabaseUid.trim()
+        require(isValidUuid(uid)) {
+            "A real authenticated Supabase user ID is required for local identity"
         }
         val cleanEmail = identity.email.trim().lowercase()
         val cleanSecEmail = identity.secondaryEmail.trim().lowercase()
@@ -354,6 +353,29 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.clearCachedProfiles()
         dao.clearSyncStates()
     }
+
+    /**
+     * Establishes a strict local-account boundary.
+     *
+     * The authenticated Supabase UID is authoritative. If a different account
+     * was previously stored on this device, discard account-scoped local state
+     * before importing the new account's server history.
+     */
+    suspend fun prepareForAuthenticatedUser(authUid: String): Boolean {
+        val canonicalUid = authUid.trim()
+        if (!isValidUuid(canonicalUid)) return false
+
+        val sessionUid = SupabaseService.getAuthenticatedUserId() ?: return false
+        if (!sessionUid.equals(canonicalUid, ignoreCase = true)) return false
+
+        val existing = dao.getUserIdentity().firstOrNull()
+        val existingUid = existing?.supabaseUid?.trim().orEmpty()
+        if (existingUid.isNotBlank() && !existingUid.equals(canonicalUid, ignoreCase = true)) {
+            clearAllLocalData()
+        }
+        return true
+    }
+
 
     suspend fun savePhoneNumber(phoneNumber: String) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity(phoneNumber = phoneNumber)
@@ -1572,8 +1594,11 @@ class BitChatRepository(val dao: BitChatDao) {
         return savedEntity
     }
 
-    suspend fun syncAllChatHistory(myUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
-        if (myUid.isBlank()) return@withContext false
+    suspend fun syncAllChatHistory(requestedUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
+        val myUid = SupabaseService.getAuthenticatedUserId() ?: return@withContext false
+        if (!requestedUid.isBlank() && !requestedUid.equals(myUid, ignoreCase = true)) {
+            Log.w("BitChatRepo", "Ignoring non-canonical history UID; using authenticated UID")
+        }
 
         val now = System.currentTimeMillis()
         val last = lastHistorySyncAt[myUid] ?: 0L
