@@ -392,11 +392,8 @@ class BitChatRepository(val dao: BitChatDao) {
 
     suspend fun saveUsernameAndVerify(username: String, profileType: String) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
-        val uid = if (current.supabaseUid.isNotBlank() && isValidUuid(current.supabaseUid)) {
-            current.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
-        }
+        val uid = SupabaseService.getAuthenticatedUserId()
+            ?: throw IllegalStateException("Cannot save username without an authenticated Supabase session")
         val updated = current.copy(
             supabaseUid = uid,
             username = username,
@@ -433,11 +430,8 @@ class BitChatRepository(val dao: BitChatDao) {
         birthDate: String = ""
     ) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
-        val uid = if (current.supabaseUid.isNotBlank() && isValidUuid(current.supabaseUid)) {
-            current.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
-        }
+        val uid = SupabaseService.getAuthenticatedUserId()
+            ?: throw IllegalStateException("Cannot update profile without an authenticated Supabase session")
         val updated = current.copy(
             supabaseUid = uid,
             fullName = fullName,
