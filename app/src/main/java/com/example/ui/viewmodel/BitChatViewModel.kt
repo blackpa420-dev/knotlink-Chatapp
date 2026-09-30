@@ -953,31 +953,33 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             try {
-                // 1. Fetch profile from Supabase Database (handles case-insensitive email match)
-                val profileRes = SupabaseService.getProfileByEmail(email)
-                var profile = profileRes.getOrNull()
-
-                // 2. Validate with Supabase Auth
-                var loginRes = SupabaseService.signInWithEmail(email, pass)
-                if (loginRes.isFailure && profile != null && profile.email.isNotBlank() && !profile.email.equals(email, ignoreCase = false)) {
-                    loginRes = SupabaseService.signInWithEmail(profile.email.trim(), pass)
-                }
+                // Authentication is authoritative. Profile data is never used as an
+                // authentication fallback or as a substitute for auth.users.id.
+                val loginRes = SupabaseService.signInWithEmail(email, pass)
 
                 if (loginRes.isSuccess) {
                     val session = loginRes.getOrNull()
-                    val uid = session?.user?.id ?: profile?.id ?: ""
-
-                    if (profile == null) {
-                        profile = SupabaseService.getProfile(uid).getOrNull()
-                            ?: SupabaseService.getProfileByEmail(email).getOrNull()
+                    val uid = session?.user?.id?.trim().orEmpty()
+                    if (uid.isBlank()) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("Authentication succeeded without a user ID")
                     }
 
-                    val finalUsername = profile?.username ?: email.substringBefore("@")
-                    val finalFullName = profile?.fullName?.ifBlank { finalUsername.removeSuffix(".link") } ?: finalUsername
+                    // Resolve the profile by the authenticated UID first. An email
+                    // lookup is only a metadata fallback after identity is established.
+                    val profile = SupabaseService.getProfile(uid).getOrNull()
 
-                    repository.saveEmail(email)
-                    val existing = repository.userIdentity.firstOrNull()
-                    val finalIdentity = (existing ?: UserIdentityEntity()).copy(
+                    if (!repository.prepareForAuthenticatedUser(uid)) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("Authenticated identity could not be established")
+                    }
+
+                    val finalUsername = profile?.username?.ifBlank { null }
+                        ?: email.substringBefore("@")
+                    val finalFullName = profile?.fullName?.ifBlank { null }
+                        ?: finalUsername.removeSuffix(".link")
+
+                    val finalIdentity = UserIdentityEntity(
                         id = 1,
                         supabaseUid = uid,
                         email = email,
@@ -990,45 +992,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         isVerified = true,
                         loginTimestamp = System.currentTimeMillis()
                     )
-                    repository.saveUserIdentity(finalIdentity)
-                    repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
-                    viewModelScope.launch {
-                        repository.syncAllChatHistory(uid, finalUsername)
-                    }
-                    _isSendingOtp.value = false
-                    showToast("Welcome back, $finalFullName!")
-                    withContext(Dispatchers.Main) {
-                        onSuccess()
-                    }
-                } else if (profile != null && profile.username.isNotBlank()) {
-                    // Fallback for previous accounts created before password authentication:
-                    // Authenticate and restore the existing account directly.
-                    val uid = profile.id
-                    val finalUsername = profile.username
-                    val finalFullName = profile.fullName.ifBlank { finalUsername.removeSuffix(".link") }
 
-                    repository.saveEmail(email)
-                    val existing = repository.userIdentity.firstOrNull()
-                    val finalIdentity = (existing ?: UserIdentityEntity()).copy(
-                        id = 1,
-                        supabaseUid = uid,
-                        email = profile.email.ifBlank { email },
-                        username = finalUsername,
-                        fullName = finalFullName,
-                        avatarPath = profile.avatarUrl ?: "",
-                        profession = profile.profession ?: "",
-                        birthDate = profile.birthDate ?: "",
-                        isEmailVerified = true,
-                        isVerified = true,
-                        loginTimestamp = System.currentTimeMillis()
-                    )
                     repository.saveUserIdentity(finalIdentity)
                     repository.recordLoginSession()
                     SupabaseRealtimeManager.startRealtime(uid, finalUsername)
-                    viewModelScope.launch {
-                        repository.syncAllChatHistory(uid, finalUsername)
-                    }
+
+                    // History import is keyed internally to the authenticated UID.
+                    repository.syncAllChatHistory(uid, finalUsername)
+
                     _isSendingOtp.value = false
                     showToast("Welcome back, $finalFullName!")
                     withContext(Dispatchers.Main) {
@@ -1410,8 +1381,12 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     failedOtpAttempts = 0
                     otpLockoutTime = 0L
                     val session = res.getOrNull()
-                    val uid = session?.user?.id ?: email
+                    val uid = session?.user?.id?.trim().orEmpty()
                     val token = session?.accessToken ?: ""
+                    if (uid.isBlank()) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("OTP verification succeeded without a user ID")
+                    }
 
                     // If user had entered a password, persist it to Supabase Auth
                     val enteredPass = _enteredPassword.value
@@ -1419,9 +1394,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         SupabaseService.updateUserPassword(token, enteredPass)
                     }
 
-                    // Check if an account already exists in Supabase
-                    val existingProfile = SupabaseService.getProfileByEmail(email).getOrNull()
-                        ?: SupabaseService.getProfile(uid).getOrNull()
+                    // Identity is established by Auth first. Profile lookup is metadata only.
+                    val existingProfile = SupabaseService.getProfile(uid).getOrNull()
+
+                    if (!repository.prepareForAuthenticatedUser(uid)) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("Authenticated identity could not be established")
+                    }
 
                     val existing = repository.userIdentity.firstOrNull()
 
@@ -1640,18 +1619,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 existingIdentity?.email?.trim()?.lowercase() ?: ""
             }
 
-            // Consolidate full identity update atomically
-            val sessionUid = SupabaseService.getCurrentUserId()
-            val authUid = if (!sessionUid.isNullOrBlank()) {
-                sessionUid
-            } else if (!existingIdentity?.supabaseUid.isNullOrBlank() && !existingIdentity!!.supabaseUid.contains("@")) {
-                existingIdentity!!.supabaseUid
-            } else if (existingEmail.isNotBlank()) {
-                val p = SupabaseService.getProfileByEmail(existingEmail).getOrNull()
-                p?.id?.ifBlank { UUID.randomUUID().toString() } ?: UUID.randomUUID().toString()
-            } else {
-                UUID.randomUUID().toString()
-            }
+            // Consolidate full identity update atomically. The Auth session is
+            // the only valid source for the immutable account UID.
+            val authUid = SupabaseService.getAuthenticatedUserId()
+                ?: throw IllegalStateException("Cannot complete profile without an authenticated Supabase session")
 
             val finalIdentity = (existingIdentity ?: UserIdentityEntity()).copy(
                 id = 1,

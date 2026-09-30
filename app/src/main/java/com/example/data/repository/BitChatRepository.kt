@@ -283,10 +283,9 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun saveUserIdentity(identity: UserIdentityEntity) {
-        val uid = if (identity.supabaseUid.isNotBlank() && isValidUuid(identity.supabaseUid)) {
-            identity.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
+        val uid = identity.supabaseUid.trim()
+        require(isValidUuid(uid)) {
+            "A real authenticated Supabase user ID is required for local identity"
         }
         val cleanEmail = identity.email.trim().lowercase()
         val cleanSecEmail = identity.secondaryEmail.trim().lowercase()
@@ -355,6 +354,29 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.clearSyncStates()
     }
 
+    /**
+     * Establishes a strict local-account boundary.
+     *
+     * The authenticated Supabase UID is authoritative. If a different account
+     * was previously stored on this device, discard account-scoped local state
+     * before importing the new account's server history.
+     */
+    suspend fun prepareForAuthenticatedUser(authUid: String): Boolean {
+        val canonicalUid = authUid.trim()
+        if (!isValidUuid(canonicalUid)) return false
+
+        val sessionUid = SupabaseService.getAuthenticatedUserId() ?: return false
+        if (!sessionUid.equals(canonicalUid, ignoreCase = true)) return false
+
+        val existing = dao.getUserIdentity().firstOrNull()
+        val existingUid = existing?.supabaseUid?.trim().orEmpty()
+        if (existingUid.isNotBlank() && !existingUid.equals(canonicalUid, ignoreCase = true)) {
+            clearAllLocalData()
+        }
+        return true
+    }
+
+
     suspend fun savePhoneNumber(phoneNumber: String) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity(phoneNumber = phoneNumber)
         val updated = current.copy(phoneNumber = phoneNumber)
@@ -370,11 +392,8 @@ class BitChatRepository(val dao: BitChatDao) {
 
     suspend fun saveUsernameAndVerify(username: String, profileType: String) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
-        val uid = if (current.supabaseUid.isNotBlank() && isValidUuid(current.supabaseUid)) {
-            current.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
-        }
+        val uid = SupabaseService.getAuthenticatedUserId()
+            ?: throw IllegalStateException("Cannot save username without an authenticated Supabase session")
         val updated = current.copy(
             supabaseUid = uid,
             username = username,
@@ -411,11 +430,8 @@ class BitChatRepository(val dao: BitChatDao) {
         birthDate: String = ""
     ) {
         val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
-        val uid = if (current.supabaseUid.isNotBlank() && isValidUuid(current.supabaseUid)) {
-            current.supabaseUid
-        } else {
-            UUID.randomUUID().toString()
-        }
+        val uid = SupabaseService.getAuthenticatedUserId()
+            ?: throw IllegalStateException("Cannot update profile without an authenticated Supabase session")
         val updated = current.copy(
             supabaseUid = uid,
             fullName = fullName,
@@ -1572,8 +1588,11 @@ class BitChatRepository(val dao: BitChatDao) {
         return savedEntity
     }
 
-    suspend fun syncAllChatHistory(myUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
-        if (myUid.isBlank()) return@withContext false
+    suspend fun syncAllChatHistory(requestedUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
+        val myUid = SupabaseService.getAuthenticatedUserId() ?: return@withContext false
+        if (!requestedUid.isBlank() && !requestedUid.equals(myUid, ignoreCase = true)) {
+            Log.w("BitChatRepo", "Ignoring non-canonical history UID; using authenticated UID")
+        }
 
         val now = System.currentTimeMillis()
         val last = lastHistorySyncAt[myUid] ?: 0L
@@ -1600,28 +1619,50 @@ class BitChatRepository(val dao: BitChatDao) {
             // Always fetch a recent server window when the app returns from a long
             // background/closed period. This is the recovery path when an FCM data
             // message was delayed, dropped, or the service process was killed.
-            val recentRes = SupabaseService.fetchUserMessages(
-                userId = myUid,
-                username = historyUsername,
-                email = historyEmail,
-                limit = 500
-            )
-            if (recentRes.isSuccess) {
-                recentRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+            // Import the complete account history in pages. Never use a fixed
+            // "latest 500" window as the user's permanent history.
+            val historyPageSize = 500
+            var historyOffset = 0
+            while (true) {
+                val pageRes = SupabaseService.fetchUserMessages(
+                    userId = myUid,
+                    username = historyUsername,
+                    email = historyEmail,
+                    limit = historyPageSize,
+                    offset = historyOffset
+                )
+                if (pageRes.isFailure) {
+                    Log.w("BitChatRepo", "History page failed at offset $historyOffset")
+                    return@withLock false
+                }
+                val page = pageRes.getOrNull().orEmpty()
+                fetchedMessages.addAll(page)
+                if (page.size < historyPageSize) break
+                historyOffset += historyPageSize
             }
 
             // Also fetch the incremental window with a small overlap so timestamp
             // boundaries and delayed delivery cannot leave a permanent hole.
             if (previousSync > 0L) {
-                val sinceRes = SupabaseService.fetchUserMessagesSince(
-                    userId = myUid,
-                    username = historyUsername,
-                    email = historyEmail,
-                    sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
-                    limit = 500
-                )
-                if (sinceRes.isSuccess) {
-                    sinceRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+                val sincePageSize = 500
+                var sinceOffset = 0
+                while (true) {
+                    val sinceRes = SupabaseService.fetchUserMessagesSince(
+                        userId = myUid,
+                        username = historyUsername,
+                        email = historyEmail,
+                        sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
+                        limit = sincePageSize,
+                        offset = sinceOffset
+                    )
+                    if (sinceRes.isFailure) {
+                        Log.w("BitChatRepo", "Incremental history page failed at offset $sinceOffset")
+                        return@withLock false
+                    }
+                    val page = sinceRes.getOrNull().orEmpty()
+                    fetchedMessages.addAll(page)
+                    if (page.size < sincePageSize) break
+                    sinceOffset += sincePageSize
                 }
             }
 
