@@ -1619,28 +1619,50 @@ class BitChatRepository(val dao: BitChatDao) {
             // Always fetch a recent server window when the app returns from a long
             // background/closed period. This is the recovery path when an FCM data
             // message was delayed, dropped, or the service process was killed.
-            val recentRes = SupabaseService.fetchUserMessages(
-                userId = myUid,
-                username = historyUsername,
-                email = historyEmail,
-                limit = 500
-            )
-            if (recentRes.isSuccess) {
-                recentRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+            // Import the complete account history in pages. Never use a fixed
+            // "latest 500" window as the user's permanent history.
+            val historyPageSize = 500
+            var historyOffset = 0
+            while (true) {
+                val pageRes = SupabaseService.fetchUserMessages(
+                    userId = myUid,
+                    username = historyUsername,
+                    email = historyEmail,
+                    limit = historyPageSize,
+                    offset = historyOffset
+                )
+                if (pageRes.isFailure) {
+                    Log.w("BitChatRepo", "History page failed at offset $historyOffset")
+                    return@withLock false
+                }
+                val page = pageRes.getOrNull().orEmpty()
+                fetchedMessages.addAll(page)
+                if (page.size < historyPageSize) break
+                historyOffset += historyPageSize
             }
 
             // Also fetch the incremental window with a small overlap so timestamp
             // boundaries and delayed delivery cannot leave a permanent hole.
             if (previousSync > 0L) {
-                val sinceRes = SupabaseService.fetchUserMessagesSince(
-                    userId = myUid,
-                    username = historyUsername,
-                    email = historyEmail,
-                    sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
-                    limit = 500
-                )
-                if (sinceRes.isSuccess) {
-                    sinceRes.getOrNull()?.let { fetchedMessages.addAll(it) }
+                val sincePageSize = 500
+                var sinceOffset = 0
+                while (true) {
+                    val sinceRes = SupabaseService.fetchUserMessagesSince(
+                        userId = myUid,
+                        username = historyUsername,
+                        email = historyEmail,
+                        sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
+                        limit = sincePageSize,
+                        offset = sinceOffset
+                    )
+                    if (sinceRes.isFailure) {
+                        Log.w("BitChatRepo", "Incremental history page failed at offset $sinceOffset")
+                        return@withLock false
+                    }
+                    val page = sinceRes.getOrNull().orEmpty()
+                    fetchedMessages.addAll(page)
+                    if (page.size < sincePageSize) break
+                    sinceOffset += sincePageSize
                 }
             }
 
