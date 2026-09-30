@@ -1227,6 +1227,162 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+
+    // Password recovery stays independent from registration and login OTP state:
+    // only a verified Supabase recovery session can call updateUserPassword().
+    private val _passwordResetError = MutableStateFlow<String?>(null)
+    val passwordResetError: StateFlow<String?> = _passwordResetError.asStateFlow()
+
+    private val _isUpdatingPassword = MutableStateFlow(false)
+    val isUpdatingPassword: StateFlow<Boolean> = _isUpdatingPassword.asStateFlow()
+
+    fun beginPasswordReset() {
+        _enteredPassword.value = ""
+        _enteredConfirmPassword.value = ""
+        _enteredOtpCode.value = ""
+        _selectedOtpIndex.value = 0
+        _passwordResetError.value = null
+        failedOtpAttempts = 0
+        otpLockoutTime = 0L
+    }
+
+    fun requestPasswordResetOtp(onSuccess: () -> Unit) {
+        val email = _enteredEmail.value.trim().lowercase()
+        _enteredEmail.value = email
+        if (!isEmailValid(email)) {
+            _passwordResetError.value = "Please enter a valid email address"
+            showToast("Please enter a valid email address", isError = true)
+            return
+        }
+
+        _passwordResetError.value = null
+        _isSendingOtp.value = true
+        viewModelScope.launch {
+            val result = SupabaseService.sendPasswordRecoveryOtp(email)
+            _isSendingOtp.value = false
+            if (result.isSuccess) {
+                _enteredOtpCode.value = ""
+                _selectedOtpIndex.value = 0
+                startOtpCountdown()
+                // Keep this generic so the UI does not reveal whether an account exists.
+                showToast("If an account exists, a reset code has been sent")
+                withContext(Dispatchers.Main) { onSuccess() }
+            } else {
+                val message = result.exceptionOrNull()?.message ?: "Unable to send reset code"
+                _passwordResetError.value = message
+                showToast(message, isError = true)
+            }
+        }
+    }
+
+    fun resendPasswordResetOtp() {
+        requestPasswordResetOtp(onSuccess = {})
+    }
+
+    fun verifyPasswordResetOtp(onSuccess: () -> Unit, onError: () -> Unit = {}) {
+        val code = _enteredOtpCode.value.trim()
+        val email = _enteredEmail.value.trim().lowercase()
+        _enteredEmail.value = email
+
+        if (System.currentTimeMillis() < otpLockoutTime) {
+            val remainingSec = ((otpLockoutTime - System.currentTimeMillis()) / 1000).coerceAtLeast(1)
+            showToast("Too many failed attempts. Try again in ${remainingSec}s.", isError = true)
+            onError()
+            return
+        }
+        if (code.length != 6 || !code.all { it.isDigit() }) {
+            showToast("Enter the 6-digit reset code", isError = true)
+            onError()
+            return
+        }
+
+        _isVerifyingOtp.value = true
+        _passwordResetError.value = null
+        viewModelScope.launch {
+            val result = SupabaseService.verifyPasswordRecoveryOtp(email, code)
+            _isVerifyingOtp.value = false
+            if (result.isSuccess) {
+                failedOtpAttempts = 0
+                otpLockoutTime = 0L
+                showToast("Code verified. Choose a new password.")
+                withContext(Dispatchers.Main) { onSuccess() }
+            } else {
+                failedOtpAttempts++
+                val message = result.exceptionOrNull()?.message ?: "Invalid or expired reset code"
+                if (failedOtpAttempts >= 5) {
+                    otpLockoutTime = System.currentTimeMillis() + (120 * 1000L)
+                    failedOtpAttempts = 0
+                    _passwordResetError.value = "Too many incorrect codes. Try again in 2 minutes."
+                } else {
+                    _passwordResetError.value = message
+                }
+                showToast(_passwordResetError.value ?: message, isError = true)
+                withContext(Dispatchers.Main) { onError() }
+            }
+        }
+    }
+
+    fun resetPassword(onSuccess: () -> Unit) {
+        val password = _enteredPassword.value
+        val confirmation = _enteredConfirmPassword.value
+        when {
+            !isPasswordLengthValid(password) -> {
+                _passwordResetError.value = "Password must be at least 8 characters"
+                showToast(_passwordResetError.value!!, isError = true)
+                return
+            }
+            !isPasswordHasUpper(password) -> {
+                _passwordResetError.value = "Password must contain at least one uppercase letter"
+                showToast(_passwordResetError.value!!, isError = true)
+                return
+            }
+            !isPasswordHasLower(password) -> {
+                _passwordResetError.value = "Password must contain at least one lowercase letter"
+                showToast(_passwordResetError.value!!, isError = true)
+                return
+            }
+            !isPasswordHasNumber(password) -> {
+                _passwordResetError.value = "Password must contain at least one number"
+                showToast(_passwordResetError.value!!, isError = true)
+                return
+            }
+            password != confirmation -> {
+                _passwordResetError.value = "Passwords do not match"
+                showToast(_passwordResetError.value!!, isError = true)
+                return
+            }
+        }
+
+        val recoveryToken = SupabaseService.getSession()?.accessToken
+        if (!SupabaseService.isJwtValid(recoveryToken)) {
+            _passwordResetError.value = "Verify a reset code before choosing a new password"
+            showToast(_passwordResetError.value!!, isError = true)
+            return
+        }
+
+        _passwordResetError.value = null
+        _isUpdatingPassword.value = true
+        viewModelScope.launch {
+            val result = SupabaseService.updateUserPassword(recoveryToken.orEmpty(), password)
+            _isUpdatingPassword.value = false
+            if (result.isSuccess) {
+                // Recovery sessions are only for this transition; require a normal
+                // login afterward so existing login/session behaviour stays intact.
+                SupabaseService.signOut()
+                _enteredPassword.value = ""
+                _enteredConfirmPassword.value = ""
+                _enteredOtpCode.value = ""
+                _selectedOtpIndex.value = 0
+                showToast("Password updated. You can now log in.")
+                withContext(Dispatchers.Main) { onSuccess() }
+            } else {
+                val message = result.exceptionOrNull()?.message ?: "Unable to update password"
+                _passwordResetError.value = message
+                showToast(message, isError = true)
+            }
+        }
+    }
+
     // Number Verification State
     private val _enteredPhoneNumber = MutableStateFlow("")
     val enteredPhoneNumber: StateFlow<String> = _enteredPhoneNumber.asStateFlow()

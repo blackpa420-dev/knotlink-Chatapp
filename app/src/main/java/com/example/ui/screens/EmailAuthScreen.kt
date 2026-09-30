@@ -94,6 +94,7 @@ fun EmailAuthScreen(
     onBackClick: () -> Unit,
     onOtpSent: () -> Unit = {},
     onLoginSuccess: () -> Unit = {},
+    onForgotPasswordClick: () -> Unit = {},
     onNextClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -706,6 +707,20 @@ fun EmailAuthScreen(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                if (isLoginMode) {
+                    Text(
+                        text = "Forgot password?",
+                        color = BitPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onForgotPasswordClick)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
 
                 // Switch Mode Helper Text
                 Text(

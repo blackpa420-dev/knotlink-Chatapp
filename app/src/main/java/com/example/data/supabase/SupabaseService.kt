@@ -435,6 +435,103 @@ object SupabaseService {
         Result.failure(lastError ?: Exception("Invalid or expired verification code"))
     }
 
+    /**
+     * Starts Supabase's password-recovery flow. The Auth API intentionally
+     * returns success even when the address has no account, which prevents
+     * account enumeration. The recovery email template must include {{ .Token }}
+     * for the app's six-digit-code UI.
+     */
+    suspend fun sendPasswordRecoveryOtp(email: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase()
+        if (normalizedEmail.isBlank()) {
+            return@withContext Result.failure(Exception("Please enter your email address"))
+        }
+
+        try {
+            val url = "${SupabaseConfig.AUTH_BASE_URL}/recover"
+            val bodyObj = JSONObject().apply {
+                put("email", normalizedEmail)
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(response.body?.string().orEmpty(), "Unable to send reset code"))
+                    )
+                }
+            }
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to start password recovery")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Exchanges a recovery-only email OTP for the short-lived authenticated
+     * session required by /user. Do not route recovery codes through the
+     * signup or passwordless-login verifier.
+     */
+    suspend fun verifyPasswordRecoveryOtp(
+        email: String,
+        token: String
+    ): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
+        val normalizedEmail = email.trim().lowercase()
+        val normalizedToken = token.trim()
+        if (normalizedEmail.isBlank() || normalizedToken.length != 6 || !normalizedToken.all { it.isDigit() }) {
+            return@withContext Result.failure(Exception("Enter the 6-digit reset code"))
+        }
+
+        try {
+            val url = "${SupabaseConfig.AUTH_BASE_URL}/verify"
+            val bodyObj = JSONObject().apply {
+                put("email", normalizedEmail)
+                put("token", normalizedToken)
+                put("type", "recovery")
+            }
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                .addHeader("Content-Type", "application/json")
+                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Invalid or expired reset code"))
+                    )
+                }
+
+                val session = SupabaseAuthSession.fromJson(JSONObject(responseBody))
+                if (session.accessToken.isBlank() || session.accessToken == SupabaseConfig.ANON_KEY) {
+                    return@withContext Result.failure(Exception("Password recovery did not create a valid session"))
+                }
+                if (!session.user?.email.orEmpty().equals(normalizedEmail, ignoreCase = true)) {
+                    return@withContext Result.failure(Exception("The reset code is for a different email address"))
+                }
+
+                // Keep a recovery session in memory only. It is sufficient for
+                // the immediate password update and must not become a restored
+                // application login if the flow is abandoned.
+                currentSession = session
+                Result.success(session)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Password recovery verification failed")
+            Result.failure(e)
+        }
+    }
+
     suspend fun resendEmailOtp(
         email: String,
         type: String = "signup"
@@ -647,7 +744,7 @@ object SupabaseService {
 
     suspend fun updateUserPassword(accessToken: String, newPass: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (newPass.isBlank()) return@withContext Result.success(true)
+            if (newPass.isBlank()) return@withContext Result.failure(Exception("Password cannot be empty"))
             val url = "${SupabaseConfig.AUTH_BASE_URL}/user"
             val bodyObj = JSONObject().apply {
                 put("password", newPass)
@@ -661,14 +758,18 @@ object SupabaseService {
                 .put(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                Log.d(TAG, "Successfully updated user password in Supabase Auth")
-                Result.success(true)
-            } else {
-                val errStr = response.body?.string() ?: ""
-                Log.w(TAG, "Failed to update user password: $errStr")
-                Result.failure(Exception(parseErrorMessage(errStr, "Failed to set password")))
+            httpClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    Log.d(TAG, "Successfully updated user password in Supabase Auth")
+                    Result.success(true)
+                } else {
+                    val errorMessage = parseErrorMessage(
+                        response.body?.string().orEmpty(),
+                        "Failed to set password"
+                    )
+                    Log.w(TAG, "Failed to update user password: HTTP ${response.code}")
+                    Result.failure(Exception(errorMessage))
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error updating user password", e)
