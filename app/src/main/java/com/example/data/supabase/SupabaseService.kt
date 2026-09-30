@@ -56,7 +56,7 @@ object SupabaseService {
 
     private var currentSession: SupabaseAuthSession? = null
     private var prefs: android.content.SharedPreferences? = null
-    private val sessionRefreshMutex = Mutex()
+    private val sessionRefreshLock = Any()
 
     // Authenticated requests must never silently fall back to ANON_KEY.
     // A 401 triggers one refresh-token attempt, then the original failure is surfaced.
@@ -191,7 +191,7 @@ object SupabaseService {
     private fun refreshSessionBlocking(): String? {
         val refreshToken = currentSession?.refreshToken ?: return null
         if (refreshToken.isBlank()) return null
-        synchronized(sessionRefreshMutex) {
+        synchronized(sessionRefreshLock) {
             val latest = currentSession
             if (latest != null && isJwtValid(latest.accessToken)) return latest.accessToken
             return try {
@@ -227,7 +227,7 @@ object SupabaseService {
     }
 
     private suspend fun refreshSession(): Boolean = withContext(Dispatchers.IO) {
-        sessionRefreshMutex.withLock {
+        synchronized(sessionRefreshLock) {
             val latest = currentSession
             if (latest != null && isJwtValid(latest.accessToken)) return@withLock true
             val refreshToken = latest?.refreshToken
