@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.FormBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -53,6 +54,12 @@ object SupabaseService {
         }
     }
 
+    private var currentSession: SupabaseAuthSession? = null
+    private var prefs: android.content.SharedPreferences? = null
+    private val sessionRefreshMutex = Mutex()
+
+    // Authenticated requests must never silently fall back to ANON_KEY.
+    // A 401 triggers one refresh-token attempt, then the original failure is surfaced.
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -60,22 +67,33 @@ object SupabaseService {
         .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
             val request = chain.request()
-            var response = chain.proceed(request)
-            // If response is 401 Unauthorized (e.g. expired JWT), retry with ANON_KEY
-            if (response.code == 401) {
-                response.close()
-                val retryRequest = request.newBuilder()
-                    .removeHeader("Authorization")
-                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                    .build()
-                response = chain.proceed(retryRequest)
+            val authHeader = request.header("Authorization")
+            val isAuthenticatedRequest =
+                !authHeader.isNullOrBlank() &&
+                authHeader != "Bearer \${SupabaseConfig.ANON_KEY}"
+
+            val response = chain.proceed(request)
+            if (response.code != 401 || !isAuthenticatedRequest) {
+                return@addInterceptor response
             }
-            response
+
+            if (currentSession?.refreshToken.isNullOrBlank()) {
+                return@addInterceptor response
+            }
+
+            response.close()
+            val refreshedToken = refreshSessionBlocking()
+            if (refreshedToken.isNullOrBlank()) {
+                return@addInterceptor chain.proceed(request)
+            }
+
+            val retryRequest = request.newBuilder()
+                .removeHeader("Authorization")
+                .addHeader("Authorization", "Bearer \$refreshedToken")
+                .build()
+            chain.proceed(retryRequest)
         }
         .build()
-
-    private var currentSession: SupabaseAuthSession? = null
-    private var prefs: android.content.SharedPreferences? = null
 
     fun init(context: android.content.Context) {
         if (prefs == null) {
@@ -106,24 +124,33 @@ object SupabaseService {
 
     private fun restoreSession() {
         val token = prefs?.getString("access_token", null)
+        val refreshToken = prefs?.getString("refresh_token", null)
         val uid = prefs?.getString("user_id", null)
         val email = prefs?.getString("user_email", null)
-        if (!token.isNullOrBlank()) {
-            val user = if (!uid.isNullOrBlank()) SupabaseUser(id = uid, email = email ?: "") else null
-            val validToken = if (isJwtValid(token)) token else SupabaseConfig.ANON_KEY
-            currentSession = SupabaseAuthSession(accessToken = validToken, user = user)
-            Log.d(TAG, "Restored persisted Supabase session for user: $uid")
+        if (!token.isNullOrBlank() && !uid.isNullOrBlank()) {
+            currentSession = SupabaseAuthSession(
+                accessToken = token,
+                refreshToken = refreshToken,
+                user = SupabaseUser(id = uid, email = email ?: "")
+            )
+            Log.d(TAG, "Restored persisted Supabase session for user: \$uid")
         }
     }
 
     private fun persistSession(session: SupabaseAuthSession?) {
         val editor = prefs?.edit() ?: return
-        if (session != null && session.accessToken.isNotBlank() && session.accessToken != SupabaseConfig.ANON_KEY) {
+        if (session != null &&
+            session.accessToken.isNotBlank() &&
+            session.accessToken != SupabaseConfig.ANON_KEY &&
+            !session.user?.id.isNullOrBlank()
+        ) {
             editor.putString("access_token", session.accessToken)
+            editor.putString("refresh_token", session.refreshToken)
             editor.putString("user_id", session.user?.id)
             editor.putString("user_email", session.user?.email)
         } else if (session == null) {
             editor.remove("access_token")
+            editor.remove("refresh_token")
             editor.remove("user_id")
             editor.remove("user_email")
         }
@@ -146,7 +173,93 @@ object SupabaseService {
     }
 
     fun getCurrentUserId(): String? {
-        return currentSession?.user?.id
+        val session = currentSession ?: return null
+        if (!isJwtValid(session.accessToken)) return null
+        return session.user?.id
+    }
+
+    suspend fun getAuthenticatedUserId(): String? = withContext(Dispatchers.IO) {
+        if (currentSession == null) return@withContext null
+        if (!isJwtValid(currentSession?.accessToken)) {
+            if (!refreshSession()) return@withContext null
+        }
+        currentSession?.user?.id
+    }
+
+    private fun refreshSessionBlocking(): String? {
+        val refreshToken = currentSession?.refreshToken ?: return null
+        if (refreshToken.isBlank()) return null
+        synchronized(sessionRefreshMutex) {
+            val latest = currentSession
+            if (latest != null && isJwtValid(latest.accessToken)) return latest.accessToken
+            return try {
+                val form = FormBody.Builder()
+                    .add("grant_type", "refresh_token")
+                    .add("refresh_token", refreshToken)
+                    .build()
+                val request = Request.Builder()
+                    .url("\${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                    .post(form)
+                    .build()
+                val response = OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(20, TimeUnit.SECONDS)
+                    .writeTimeout(20, TimeUnit.SECONDS)
+                    .build()
+                    .newCall(request)
+                    .execute()
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful || body.isBlank()) return null
+                val refreshed = SupabaseAuthSession.fromJson(JSONObject(body))
+                if (refreshed.accessToken.isBlank() || refreshed.user?.id.isNullOrBlank()) return null
+                currentSession = refreshed
+                persistSession(refreshed)
+                refreshed.accessToken
+            } catch (e: Exception) {
+                Log.w(TAG, "Session refresh error: \${e.message}")
+                null
+            }
+        }
+    }
+
+    private suspend fun refreshSession(): Boolean = withContext(Dispatchers.IO) {
+        sessionRefreshMutex.withLock {
+            val latest = currentSession
+            if (latest != null && isJwtValid(latest.accessToken)) return@withLock true
+            val refreshToken = latest?.refreshToken
+            if (refreshToken.isNullOrBlank()) return@withLock false
+            try {
+                val form = FormBody.Builder()
+                    .add("grant_type", "refresh_token")
+                    .add("refresh_token", refreshToken)
+                    .build()
+                val request = Request.Builder()
+                    .url("\${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
+                    .post(form)
+                    .build()
+                val response = OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(20, TimeUnit.SECONDS)
+                    .writeTimeout(20, TimeUnit.SECONDS)
+                    .build()
+                    .newCall(request)
+                    .execute()
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful || body.isBlank()) return@withLock false
+                val refreshed = SupabaseAuthSession.fromJson(JSONObject(body))
+                if (refreshed.accessToken.isBlank() || refreshed.user?.id.isNullOrBlank()) return@withLock false
+                currentSession = refreshed
+                persistSession(refreshed)
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "Session refresh error: \${e.message}")
+                false
+            }
+        }
     }
 
     // ==========================================
