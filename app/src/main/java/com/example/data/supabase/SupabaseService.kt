@@ -1111,7 +1111,8 @@ object SupabaseService {
         username: String? = null,
         email: String? = null,
         sinceTimestamp: Long,
-        limit: Int = 200
+        limit: Int = 200,
+        offset: Int = 0
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             val ids = mutableListOf(userId)
@@ -1126,7 +1127,9 @@ object SupabaseService {
                 listOf("recipient_id.eq.$enc", "sender_id.eq.$enc")
             }
             if (orParts.isEmpty()) return@withContext Result.success(emptyList())
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
+            val safeOffset = offset.coerceAtLeast(0)
+            val safeLimit = limit.coerceIn(1, 500)
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
