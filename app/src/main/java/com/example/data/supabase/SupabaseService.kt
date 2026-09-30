@@ -166,7 +166,9 @@ object SupabaseService {
 
     fun getAccessToken(): String {
         val token = currentSession?.accessToken
-        if (!token.isNullOrBlank() && token != SupabaseConfig.ANON_KEY && isJwtValid(token)) {
+        // Return the current session token even when it is near/just past expiry.
+        // The HTTP interceptor can then perform a single refresh-token exchange.
+        if (!token.isNullOrBlank() && token != SupabaseConfig.ANON_KEY) {
             return token
         }
         return SupabaseConfig.ANON_KEY
