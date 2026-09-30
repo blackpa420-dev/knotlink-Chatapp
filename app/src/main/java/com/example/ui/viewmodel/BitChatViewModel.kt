@@ -967,10 +967,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                     // Resolve the profile by the authenticated UID first. An email
                     // lookup is only a metadata fallback after identity is established.
-                    var profile = SupabaseService.getProfile(uid).getOrNull()
-                    if (profile == null) {
-                        profile = SupabaseService.getProfileByEmail(email).getOrNull()
-                    }
+                    val profile = SupabaseService.getProfile(uid).getOrNull()
 
                     if (!repository.prepareForAuthenticatedUser(uid)) {
                         SupabaseService.setSession(null)
@@ -1399,7 +1396,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                     // Identity is established by Auth first. Profile lookup is metadata only.
                     val existingProfile = SupabaseService.getProfile(uid).getOrNull()
-                        ?: SupabaseService.getProfileByEmail(email).getOrNull()
 
                     if (!repository.prepareForAuthenticatedUser(uid)) {
                         SupabaseService.setSession(null)
