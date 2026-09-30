@@ -1180,7 +1180,13 @@ object SupabaseService {
         Result.success(emptyList())
     }
 
-    suspend fun fetchUserMessages(userId: String, username: String? = null, email: String? = null, limit: Int = 50): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
+    suspend fun fetchUserMessages(
+        userId: String,
+        username: String? = null,
+        email: String? = null,
+        limit: Int = 50,
+        offset: Int = 0
+    ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             val ids = mutableListOf(userId)
             if (!username.isNullOrBlank()) {
@@ -1199,7 +1205,9 @@ object SupabaseService {
             }
             if (orParts.isEmpty()) return@withContext Result.success(emptyList())
 
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&order=created_at.desc&limit=$limit&select=*"
+            val safeOffset = offset.coerceAtLeast(0)
+            val safeLimit = limit.coerceIn(1, 500)
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&order=created_at.desc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
