@@ -90,6 +90,65 @@ fun UsernameAvailabilityScreen(
     onBack: () -> Unit,
     onApplyUsername: ((newUsername: String) -> Unit)? = null
 ) {
+    val lockedUsername = user?.username?.trim().orEmpty()
+    if (lockedUsername.isNotBlank()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = if (isNightMode) Color(0xFF07080B) else Color(0xFFF1F5F9)
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 20.dp, vertical = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Username locked",
+                    tint = Color(0xFF2563EB),
+                    modifier = Modifier.size(52.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Username is permanently locked",
+                    color = if (isNightMode) Color.White else Color(0xFF0F172A),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = lockedUsername,
+                    color = Color(0xFF2563EB),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Your username cannot be changed after it is assigned.",
+                    color = if (isNightMode) Color(0xFF9CA3AF) else Color(0xFF64748B),
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "Back",
+                    color = Color(0xFF2563EB),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF2563EB).copy(alpha = 0.12f))
+                        .clickable(onClick = onBack)
+                        .padding(horizontal = 28.dp, vertical = 12.dp)
+                )
+            }
+        }
+        return
+    }
+
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val clipboardManager = LocalClipboardManager.current
