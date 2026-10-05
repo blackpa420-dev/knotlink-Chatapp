@@ -1208,8 +1208,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             try {
-                // Ensure no previous session token interferes with new user OTP request
+                // A new registration is a hard account boundary. Clear any previous
+                // account's local identity/profile cache before beginning signup so the new
+                // registration cannot inherit the old username/avatar/chats.
                 SupabaseService.setSession(null)
+                repository.clearAllLocalData()
 
                 // 1. Try signup with email and password first so password identity is created in Supabase Auth
                 val signUpRes = SupabaseService.signUpWithEmail(email, pass, "", "")
