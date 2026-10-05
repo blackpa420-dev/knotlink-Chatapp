@@ -575,7 +575,6 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentUid = currentIdentity?.supabaseUid?.trim()
             ?.ifBlank { currentIdentity.email?.trim().orEmpty() }
             .orEmpty()
-        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         // Do not throw here. A stale local identity can exist after an account/database reset;
         // the remote write will be rejected safely and the message will be marked FAILED.
         val mySenderName = if (isFromUser) {
