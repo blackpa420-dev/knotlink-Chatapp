@@ -96,6 +96,7 @@ fun RegisterIdentityScreen(
     var rawPickedImageUri by remember { mutableStateOf<Uri?>(null) }
     var showCropModal by remember { mutableStateOf(false) }
 
+    var showPhotoError by remember { mutableStateOf(false) }
     var showNameError by remember { mutableStateOf(false) }
     var showUsernameError by remember { mutableStateOf(false) }
 
@@ -135,6 +136,7 @@ fun RegisterIdentityScreen(
             onCropConfirmed = { croppedUri ->
                 selectedImageUri = croppedUri
                 bitChatViewModel.updateAvatarPath(croppedUri.toString())
+                showPhotoError = false
                 showCropModal = false
                 Toast.makeText(context, "Photo cropped & selected!", Toast.LENGTH_SHORT).show()
             }
@@ -335,6 +337,34 @@ fun RegisterIdentityScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showPhotoError,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = "Error",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Profile photo is required",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFEF4444)
+                        )
                     }
                 }
 
@@ -587,7 +617,10 @@ fun RegisterIdentityScreen(
                                 )
                             )
                             .clickable(enabled = !isSavingIdentity) {
-                                if (enteredFullName.isBlank()) {
+                                if (selectedImageUri == null) {
+                                    showPhotoError = true
+                                    Toast.makeText(context, "Please add a profile photo", Toast.LENGTH_SHORT).show()
+                                } else if (enteredFullName.isBlank()) {
                                     showNameError = true
                                     Toast.makeText(context, "Please enter your full name", Toast.LENGTH_SHORT).show()
                                 } else if (enteredUsername.isBlank() || enteredUsername.length < 3) {
