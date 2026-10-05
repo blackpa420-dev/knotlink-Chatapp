@@ -1025,7 +1025,15 @@ class BitChatRepository(val dao: BitChatDao) {
         // ONE canonical remote profile-search system for both manual search and QR.
         // There is intentionally no local-contact resolver here.
         val supaResults = try {
-            SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
+            val remote = SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
+            // QR payloads carry the canonical Auth UUID. Keep a direct profile
+            // lookup as a deterministic fallback so a UUID QR never depends on
+            // the broader search query parser.
+            if (remote.isEmpty() && cleanQuery.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
+                SupabaseService.getProfile(cleanQuery).getOrNull()?.let { listOf(it) } ?: emptyList()
+            } else {
+                remote
+            }
         } catch (e: Exception) {
             Log.d("BitChatRepo", "Canonical user search error: ${e.message}")
             emptyList()
