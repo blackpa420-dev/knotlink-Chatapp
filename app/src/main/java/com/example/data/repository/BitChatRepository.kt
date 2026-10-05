@@ -536,12 +536,16 @@ class BitChatRepository(val dao: BitChatDao) {
             val cached = getLocalProfile(cand)
             if (cached?.id?.matches(uuidRegex) == true) return cached.id
 
-            val prof = if (cand.contains("@") && cand.contains(".")) {
-                SupabaseService.getProfileByEmail(cand).getOrNull()
-            } else {
-                SupabaseService.getProfile(cand).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(cand).getOrNull()
-            }
+            // Always try the canonical profile resolver first. A KnotLink username
+            // such as @drdoom.link contains both "@" and ".", so treating every
+            // dotted identifier as an email can silently lose the real UUID.
+            val prof = SupabaseService.getProfile(cand).getOrNull()
+                ?: SupabaseService.getProfileByUsername(cand).getOrNull()
+                ?: if (cand.contains("@")) {
+                    SupabaseService.getProfileByEmail(cand).getOrNull()
+                } else {
+                    null
+                }
             if (prof != null && prof.id.isNotBlank() && prof.id.matches(uuidRegex)) {
                 cacheProfileLocally(prof)
                 return prof.id
