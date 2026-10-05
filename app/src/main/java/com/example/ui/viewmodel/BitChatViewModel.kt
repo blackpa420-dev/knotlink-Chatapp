@@ -900,6 +900,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _phoneCheckError.value = null
         _enteredUsername.value = ""
         _usernameAvailability.value = null
+        if (!isLogin) {
+            // A brand-new registration must never inherit the previous account's
+            // profile photo/name/username state on this device.
+            _enteredFullName.value = ""
+            _enteredAvatarPath.value = null
+            _selectedProfileType.value = "Private Profile"
+            _enteredProfession.value = "🎓 Student"
+        }
         SupabaseService.setSession(null)
     }
 
