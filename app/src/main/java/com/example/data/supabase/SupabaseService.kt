@@ -770,60 +770,65 @@ object SupabaseService {
         try {
             val q = query.trim().removePrefix("@").lowercase()
             if (q.isBlank()) return@withContext Result.success(emptyList())
-            val base = q.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val withSuffix = "$base.link"
 
+            val base = q.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
             val list = mutableListOf<SupabaseProfile>()
             val seenIds = mutableSetOf<String>()
 
-            // 1. Direct canonical query: stable UID + username + legacy public_id.
-            try {
-                val encoded = java.net.URLEncoder.encode(base, "UTF-8")
-                val encodedFull = java.net.URLEncoder.encode(q, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(id.eq.$encoded,username.ilike.%25$encoded%25,username.ilike.%25$encodedFull%25,full_name.ilike.%25$encoded%25,email.ilike.%25$encoded%25,public_id.ilike.%25$encoded%25,public_id.ilike.%25$encodedFull%25)&limit=50&select=*"
+            fun addProfiles(json: String) {
+                val arr = JSONArray(json)
+                for (i in 0 until arr.length()) {
+                    val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
+                    if (profile.id.isNotBlank() && seenIds.add(profile.id)) {
+                        list.add(profile)
+                    }
+                }
+            }
+
+            fun get(path: String): String {
                 val request = Request.Builder()
-                    .url(url)
+                    .url(path)
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
                     .addHeader("Authorization", "Bearer ${getAccessToken()}")
                     .get()
                     .build()
-
                 val response = httpClient.newCall(request).execute()
-                val resStr = response.body?.string() ?: ""
-
-                if (response.isSuccessful && resStr.isNotBlank()) {
-                    val jsonArray = JSONArray(resStr)
-                    for (i in 0 until jsonArray.length()) {
-                        val prof = SupabaseProfile.fromJson(jsonArray.getJSONObject(i))
-                        if (prof.id.isNotBlank() && seenIds.add(prof.id)) {
-                            list.add(prof)
-                        }
-                    }
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Profile search HTTP ${response.code}: $body")
+                    return ""
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "PostgREST search warning: ${e.message}")
+                return body
             }
 
-            // 2. Also search all registered directory profiles for complete matching
-            try {
-                val allRes = fetchAllProfiles().getOrNull() ?: emptyList()
-                for (p in allRes) {
-                    val pUser = p.username.trim().lowercase().removePrefix("@")
-                    val pBase = pUser.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-                    val matches = pUser.contains(base) ||
-                                  pUser.contains(q) ||
-                                  pBase == base ||
-                                  p.fullName.contains(q, ignoreCase = true) ||
-                                  p.fullName.contains(base, ignoreCase = true) ||
-                                  p.email.contains(q, ignoreCase = true) ||
-                                  p.id.equals(q, ignoreCase = true) ||
-                                  p.publicId.contains(q, ignoreCase = true)
-                    if (matches && p.id.isNotBlank() && seenIds.add(p.id)) {
-                        list.add(p)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Directory search fallback warning: ${e.message}")
+            val isUuid = q.matches(
+                Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+            )
+
+            // Canonical identifier lookup: QR UIDs are resolved directly by profiles.id.
+            if (isUuid) {
+                val encodedId = java.net.URLEncoder.encode(q, "UTF-8")
+                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
+                    "?id=eq.$encodedId&select=*&limit=1"
+                val body = get(url)
+                if (body.isNotBlank()) addProfiles(body)
+                return@withContext Result.success(list)
+            }
+
+            // Canonical username lookup: the same endpoint is used by manual search and QR.
+            val encodedBase = java.net.URLEncoder.encode(base, "UTF-8")
+            val usernameUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
+                "?or=(username.ilike.$encodedBase,username.ilike.${encodedBase}.link)&select=*&limit=50"
+            val usernameBody = get(usernameUrl)
+            if (usernameBody.isNotBlank()) addProfiles(usernameBody)
+
+            // One canonical fallback for legacy public_id / display-name / email searches.
+            if (list.isEmpty()) {
+                val encodedQ = java.net.URLEncoder.encode(q, "UTF-8")
+                val fallbackUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
+                    "?or=(username.ilike.%25$encodedQ%25,full_name.ilike.%25$encodedQ%25,email.ilike.%25$encodedQ%25,public_id.ilike.%25$encodedQ%25)&select=*&limit=50"
+                val body = get(fallbackUrl)
+                if (body.isNotBlank()) addProfiles(body)
             }
 
             Result.success(list)
