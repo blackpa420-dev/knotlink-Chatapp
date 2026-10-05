@@ -3102,9 +3102,23 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         // This avoids the text-search parser entirely for the one identifier that must be
         // deterministic: Supabase Auth UUID.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        val profile = if (publicId.matches(uuidRegex)) {
-            com.example.data.supabase.SupabaseService.getProfile(publicId).getOrNull()
-                ?: repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+        val profile: PublicUserProfile? = if (publicId.matches(uuidRegex)) {
+            val supa = com.example.data.supabase.SupabaseService.getProfile(publicId).getOrNull()
+            if (supa != null) {
+                PublicUserProfile(
+                    uid = supa.id,
+                    publicId = supa.publicId.ifBlank { supa.username.ifBlank { supa.id } },
+                    username = supa.username,
+                    displayName = supa.fullName.ifBlank { supa.username },
+                    avatarUrl = supa.avatarUrl,
+                    bio = supa.bio.ifBlank { "Verified KnotLink User" },
+                    profession = supa.profession.ifBlank { "✨ KnotLink Member" },
+                    mutualGroups = listOf("KnotLink Network"),
+                    avatarType = supa.avatarUrl?.ifBlank { "default" } ?: "default"
+                )
+            } else {
+                repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+            }
         } else {
             repository.searchUsers(publicId, exactMatch = true).firstOrNull()
         }

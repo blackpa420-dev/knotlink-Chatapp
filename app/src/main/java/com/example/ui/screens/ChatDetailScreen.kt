@@ -7012,6 +7012,9 @@ fun ChatProfileDetailsPage(
                                 }
                             }
                         }
+                    }
+                }
+            }
 
             // Fully Scrollable Screen Body
             Column(
@@ -8727,6 +8730,8 @@ fun ChatProfileDetailsPage(
             }
         }
     }
+}
+}
 }
 
 @Composable
