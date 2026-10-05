@@ -990,119 +990,29 @@ class BitChatRepository(val dao: BitChatDao) {
         }
     }
 
-    suspend fun findUserByPublicIdentity(identifier: String): PublicUserProfile? {
-        val clean = identifier.trim().removePrefix("@")
-        if (clean.isBlank()) return null
-
-        try {
-            // 1. Supabase Profile Lookup by username
-            val supaProf = SupabaseService.getProfileByUsername(clean).getOrNull()
-                ?: SupabaseService.getProfile(clean).getOrNull()
-            if (supaProf != null) {
-                return PublicUserProfile(
-                    uid = supaProf.id,
-                    publicId = supaProf.username.ifBlank { supaProf.id },
-                    username = supaProf.username,
-                    displayName = supaProf.fullName.ifBlank { supaProf.username },
-                    avatarUrl = supaProf.avatarUrl,
-                    bio = supaProf.bio.ifBlank { "Verified KnotLink User" },
-                    profession = supaProf.profession.ifBlank { "✨ KnotLink Member" },
-                    mutualGroups = listOf("KnotLink Network"),
-                    avatarType = supaProf.avatarUrl?.ifBlank { "default" } ?: "default"
-                )
-            }
-
-            // 2. Use the same Supabase directory search path as manual user search.
-            // Manual search can resolve public_id through the directory fallback, while
-            // the old QR path stopped after username/UUID lookup. Keep this exact-match
-            // fallback so QR and manual ID search resolve the same registered account.
-            try {
-                val directoryProfiles = SupabaseService.searchProfiles(clean).getOrNull().orEmpty()
-                val normalized = clean.lowercase().removePrefix("@")
-                val normalizedBase = normalized
-                    .removeSuffix(".link")
-                    .removeSuffix(".bit")
-                    .removeSuffix(".chat")
-
-                val exactProfile = directoryProfiles.firstOrNull { profile ->
-                    val profileUsername = profile.username.trim().lowercase().removePrefix("@")
-                    val profileBase = profileUsername
-                        .removeSuffix(".link")
-                        .removeSuffix(".bit")
-                        .removeSuffix(".chat")
-                    profile.id.equals(clean, ignoreCase = true) ||
-                            profile.publicId.equals(clean, ignoreCase = true) ||
-                            profile.username.equals(clean, ignoreCase = true) ||
-                            profileUsername == normalized ||
-                            profileBase == normalizedBase ||
-                            profile.email.equals(clean, ignoreCase = true)
-                }
-
-                if (exactProfile != null) {
-                    val profile = PublicUserProfile(
-                        uid = exactProfile.id,
-                        publicId = exactProfile.publicId.ifBlank { exactProfile.username.ifBlank { exactProfile.id } },
-                        username = exactProfile.username,
-                        displayName = exactProfile.fullName.ifBlank { exactProfile.username },
-                        avatarUrl = exactProfile.avatarUrl,
-                        bio = exactProfile.bio.ifBlank { "Verified KnotLink User" },
-                        profession = exactProfile.profession.ifBlank { "✨ KnotLink Member" },
-                        mutualGroups = listOf("KnotLink Network"),
-                        avatarType = exactProfile.avatarUrl?.ifBlank { "default" } ?: "default"
-                    )
-                    return profile
-                }
-            } catch (e: Exception) {
-                Log.d("BitChatRepo", "QR directory identity lookup fallback error: " + e.message)
-            }
-
-            // 3. Check local contacts in Room DB
-            val contacts = dao.getAllContacts().firstOrNull() ?: emptyList()
-            val matchingContact = contacts.find {
-                it.id.equals(clean, ignoreCase = true) ||
-                        it.name.equals(clean, ignoreCase = true)
-            }
-            if (matchingContact != null) {
-                return PublicUserProfile(
-                    uid = matchingContact.id,
-                    publicId = matchingContact.id,
-                    username = matchingContact.name.lowercase().replace(" ", "_"),
-                    displayName = matchingContact.name,
-                    avatarUrl = "",
-                    bio = "KnotLink Contact",
-                    profession = "✨ KnotLink Member",
-                    mutualGroups = listOf("KnotLink Network"),
-                    avatarType = matchingContact.avatarType
-                )
-            }
-
-            // Never fabricate a profile for an unresolved identifier.
-            // A QR/ID must resolve to a real registered profile before a user is shown or a chat is created.
-        } catch (e: Exception) {
-            Log.w("BitChatRepo", "Identity resolution error: ${e.message}")
-        }
-        return null
-    }
-
-    suspend fun searchUsers(query: String): List<PublicUserProfile> {
+    /**
+     * Canonical public-user search used by BOTH manual search and QR scanning.
+     * QR passes exactMatch=true so the scanned identifier must resolve to the
+     * same real profile that this search flow would return manually.
+     */
+    suspend fun searchUsers(query: String, exactMatch: Boolean = false): List<PublicUserProfile> {
         val cleanQuery = query.trim().lowercase().removePrefix("@")
         if (cleanQuery.isEmpty()) return emptyList()
 
-        val results = mutableListOf<PublicUserProfile>()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
         val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: ""
-        val blockedList = allBlockedUsers.firstOrNull() ?: emptyList()
-        val blockedUids = blockedList.map { it.targetUid }.toSet()
+        val blockedUids = (allBlockedUsers.firstOrNull() ?: emptyList()).map { it.targetUid }.toSet()
+        val results = mutableListOf<PublicUserProfile>()
 
-        // 1. Query Supabase profiles via search and direct lookup
+        // ONE canonical remote search path shared by manual search and QR.
         try {
-            val supaResults = SupabaseService.searchProfiles(cleanQuery).getOrNull() ?: emptyList()
+            val supaResults = SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
             for (p in supaResults) {
-                if (p.id == currentUid || blockedUids.contains(p.id)) continue
+                if (p.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(p.id)) continue
                 results.add(
                     PublicUserProfile(
                         uid = p.id,
-                        publicId = p.username.ifBlank { p.id },
+                        publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
                         username = p.username,
                         displayName = p.fullName.ifBlank { p.username },
                         avatarUrl = p.avatarUrl,
@@ -1113,37 +1023,15 @@ class BitChatRepository(val dao: BitChatDao) {
                     )
                 )
             }
-
-            // Also attempt direct profile by username/UID/handle
-            val directProfile = SupabaseService.getProfileByUsername(cleanQuery).getOrNull()
-                ?: SupabaseService.getProfileByUsername("$cleanQuery.link").getOrNull()
-                ?: SupabaseService.getProfile(cleanQuery).getOrNull()
-            if (directProfile != null && directProfile.id != currentUid && !blockedUids.contains(directProfile.id)) {
-                if (results.none { it.uid == directProfile.id }) {
-                    results.add(
-                        PublicUserProfile(
-                            uid = directProfile.id,
-                            publicId = directProfile.username.ifBlank { directProfile.id },
-                            username = directProfile.username,
-                            displayName = directProfile.fullName.ifBlank { directProfile.username },
-                            avatarUrl = directProfile.avatarUrl,
-                            bio = directProfile.bio.ifBlank { "Verified KnotLink User" },
-                            profession = directProfile.profession.ifBlank { "✨ KnotLink Member" },
-                            mutualGroups = listOf("KnotLink Network"),
-                            avatarType = directProfile.avatarUrl?.ifBlank { "default" } ?: "default"
-                        )
-                    )
-                }
-            }
         } catch (e: Exception) {
-            Log.d("BitChatRepo", "Supabase profile search error: ${e.message}")
+            Log.d("BitChatRepo", "Canonical user search error: " + e.message)
         }
 
-        // 2. Also search local contacts (real saved contacts)
+        // Local contacts are only a local cache/fallback; never fabricate users.
         try {
             val localContacts = allContacts.firstOrNull() ?: emptyList()
             for (contact in localContacts) {
-                if (contact.id == currentUid || blockedUids.contains(contact.id)) continue
+                if (contact.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(contact.id)) continue
                 if (contact.name.contains(cleanQuery, ignoreCase = true) || contact.id.contains(cleanQuery, ignoreCase = true)) {
                     if (results.none { it.uid == contact.id }) {
                         results.add(
@@ -1163,12 +1051,29 @@ class BitChatRepository(val dao: BitChatDao) {
                 }
             }
         } catch (e: Exception) {
-            Log.d("BitChatRepo", "Local contact search error: ${e.message}")
+            Log.d("BitChatRepo", "Local contact search error: " + e.message)
         }
 
-        return results.distinctBy { it.uid }
-    }
+        val distinct = results.distinctBy { it.uid }
+        if (!exactMatch) return distinct
 
+        // QR uses the same results, but only accepts an exact identifier match.
+        val normalized = cleanQuery.removePrefix("@").lowercase()
+        val normalizedBase = normalized.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+
+        return distinct.filter { profile ->
+            val username = profile.username.trim().lowercase().removePrefix("@")
+            val usernameBase = username.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+            val publicId = profile.publicId.trim().lowercase().removePrefix("@")
+            val publicIdBase = publicId.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+
+            profile.uid.equals(normalized, ignoreCase = true) ||
+                    publicId == normalized ||
+                    publicIdBase == normalizedBase ||
+                    username == normalized ||
+                    usernameBase == normalizedBase
+        }
+    }
     suspend fun findOrCreateCanonicalChat(
         chatId: String,
         opponentUid: String,
