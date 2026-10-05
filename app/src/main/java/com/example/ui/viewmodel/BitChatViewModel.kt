@@ -1009,35 +1009,54 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         throw IllegalStateException("Authenticated identity could not be established")
                     }
 
-                    val finalUsername = profile?.username?.ifBlank { null }
-                        ?: email.substringBefore("@")
-                    val finalFullName = profile?.fullName?.ifBlank { null }
-                        ?: finalUsername.removeSuffix(".link")
+                    // Authentication alone is NOT a completed KnotLink account.
+                    // Never synthesize a username/full name from the email and never
+                    // enter Chats when the public profile is missing/incomplete.
+                    val profileComplete = profile != null &&
+                        profile.isVerified &&
+                        profile.username.isNotBlank() &&
+                        profile.fullName.isNotBlank() &&
+                        !profile.avatarUrl.isNullOrBlank()
 
                     val finalIdentity = UserIdentityEntity(
                         id = 1,
                         supabaseUid = uid,
                         email = email,
-                        username = finalUsername,
-                        fullName = finalFullName,
-                        avatarPath = profile?.avatarUrl ?: "",
-                        profession = profile?.profession ?: "",
-                        birthDate = profile?.birthDate ?: "",
+                        username = if (profileComplete) profile!!.username else "",
+                        fullName = if (profileComplete) profile!!.fullName else "",
+                        avatarPath = if (profileComplete) profile!!.avatarUrl.orEmpty() else "",
+                        profession = if (profileComplete) profile!!.profession else "",
+                        birthDate = if (profileComplete) profile!!.birthDate else "",
                         isEmailVerified = true,
-                        isVerified = true,
-                        loginTimestamp = System.currentTimeMillis()
+                        isVerified = profileComplete,
+                        loginTimestamp = if (profileComplete) System.currentTimeMillis() else 0L
                     )
 
                     lastKnownOldPassword = pass
                     repository.saveUserIdentity(finalIdentity)
+
+                    if (!profileComplete) {
+                        _isSendingOtp.value = false
+                        showToast(
+                            "Profile setup is incomplete. Please add your photo, full name, and username.",
+                            isError = true
+                        )
+                        // Do not start Realtime, restore chat history, or record a completed
+                        // login session until the mandatory public profile exists.
+                        withContext(Dispatchers.Main) {
+                            onSuccess()
+                        }
+                        return@launch
+                    }
+
                     repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(uid, finalUsername)
+                    SupabaseRealtimeManager.startRealtime(uid, profile!!.username)
 
                     // History import is keyed internally to the authenticated UID.
-                    repository.syncAllChatHistory(uid, finalUsername)
+                    repository.syncAllChatHistory(uid, profile.username)
 
                     _isSendingOtp.value = false
-                    showToast("Welcome back, $finalFullName!")
+                    showToast("Welcome back, ${profile.fullName}!")
                     withContext(Dispatchers.Main) {
                         onSuccess()
                     }
