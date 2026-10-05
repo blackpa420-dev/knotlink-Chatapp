@@ -230,12 +230,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             try {
                 val dbPref = application.getSharedPreferences("knotlink_migration_pref", android.content.Context.MODE_PRIVATE)
-                val migrated = dbPref.getBoolean("v2_new_db_reset_done", false)
-                if (!migrated) {
+                // One-time client cleanup for the Supabase identity/database reset.
+                // Existing devices may still hold a deleted account session in local storage;
+                // clear it so the app cannot reopen as an orphan account.
+                val resetDone = dbPref.getBoolean("v3_identity_database_reset_done", false)
+                if (!resetDone) {
                     SupabaseService.signOut()
                     repository.clearAllLocalData()
-                    dbPref.edit().putBoolean("v2_new_db_reset_done", true).apply()
-                    Log.d("BitChat_Debug", "Successfully performed clean auto-logout for new database migration")
+                    dbPref.edit().putBoolean("v3_identity_database_reset_done", true).apply()
+                    Log.d("BitChat_Debug", "Performed one-time auto-logout after identity/database reset")
                 }
             } catch (e: Throwable) {
                 Log.w("BitChat_Debug", "Session reset error: ${e.message}")
