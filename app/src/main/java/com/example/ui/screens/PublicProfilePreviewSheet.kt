@@ -126,7 +126,9 @@ fun PublicProfilePreviewSheet(
             Spacer(modifier = Modifier.height(5.dp))
 
             Text(
-                text = "@${profile.username.removePrefix("@")}",
+                text = profile.username.trim().let { username ->
+                    if (username.startsWith("@")) username else "@$username"
+                },
                 color = Color(0xFF60A5FA),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
