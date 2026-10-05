@@ -2231,13 +2231,13 @@ fun SearchOverlayScreen(
                 if (searchHistoryList.isNotEmpty()) {
                     IconButton(
                         onClick = { showDeleteHistoryModal = true },
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(42.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.DeleteSweep,
                             contentDescription = "Clear History",
                             tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(25.dp)
                         )
                     }
                 }
@@ -2245,16 +2245,17 @@ fun SearchOverlayScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Minimalist Search Bar with instant focus activation
+            // Beautiful Search Bar with instant focus activation
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
                     .background(searchBarBgColor)
                     .border(
                         width = 1.5.dp,
                         color = searchBarBorderColor,
-                        shape = RoundedCornerShape(20.dp)
+                        shape = RoundedCornerShape(16.dp)
                     )
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -2262,28 +2263,34 @@ fun SearchOverlayScreen(
                     ) {
                         focusRequester.requestFocus()
                         keyboardController?.show()
-                    }
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    },
+                contentAlignment = Alignment.CenterStart
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = if (isNightMode) Color(0xFF71717A) else Color(0xFF3B82F6),
-                        modifier = Modifier.size(20.dp)
+                        tint = if (isNightMode) Color(0xFF9EA3B0) else Color(0xFF2563EB),
+                        modifier = Modifier.size(22.dp)
                     )
 
                     Spacer(modifier = Modifier.width(12.dp))
 
-                    Box(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
                         if (searchInput.isEmpty()) {
                             Text(
-                                text = "Search contacts, messages...",
-                                color = subTextColor,
-                                fontSize = 14.sp
+                                text = "@username",
+                                color = subTextColor.copy(alpha = 0.6f),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal
                             )
                         }
                         BasicTextField(
@@ -2293,8 +2300,8 @@ fun SearchOverlayScreen(
                                 .fillMaxWidth()
                                 .focusRequester(focusRequester),
                             textStyle = TextStyle(
-                                color = textColor,
-                                fontSize = 14.sp,
+                                color = if (isNightMode) Color.White else Color.Black,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium
                             ),
                             cursorBrush = SolidColor(Color(0xFF2563EB)),
@@ -2305,13 +2312,13 @@ fun SearchOverlayScreen(
                     if (searchInput.isNotEmpty()) {
                         IconButton(
                             onClick = { searchInput = "" },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(28.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Clear Input",
                                 tint = subTextColor,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                     }

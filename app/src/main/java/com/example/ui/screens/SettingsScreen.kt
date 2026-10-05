@@ -1349,7 +1349,7 @@ fun DeletedChatsSheet(
                             imageVector = Icons.Default.DeleteSweep,
                             contentDescription = null,
                             tint = if (isNightMode) Color(0xFF3F3F46) else Color(0xFFCBD5E1),
-                            modifier = Modifier.size(64.dp)
+                            modifier = Modifier.size(76.dp)
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
@@ -1397,6 +1397,7 @@ fun SettingsSectionCard(
     subtitle: String? = null,
     badgeText: String? = null,
     isNightMode: Boolean,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
     onClick: () -> Unit
 ) {
     val bgColor = if (isNightMode) Color(0xFF0C0D12) else Color.White
@@ -1429,7 +1430,7 @@ fun SettingsSectionCard(
                     imageVector = icon,
                     contentDescription = title,
                     tint = iconTint,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(iconSize)
                 )
             }
 
@@ -1610,6 +1611,7 @@ fun BasicSettingsPage(
                     title = "Deleted Chats (Recycle Bin)",
                     subtitle = "${deletedChats.size} Deleted items (Stored for 24h)",
                     isNightMode = isNightMode,
+                    iconSize = 25.dp,
                     onClick = { showDeletedChatsSheet = true }
                 )
 

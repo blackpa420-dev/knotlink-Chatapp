@@ -166,35 +166,44 @@ fun ContactsScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp),
-                cornerRadius = 24.dp,
+                cornerRadius = 16.dp,
                 isNightMode = isNightMode
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .height(56.dp)
                         .padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = Color(0xFF2563EB),
-                        modifier = Modifier.size(20.dp)
+                        tint = if (isNightMode) Color(0xFF9EA3B0) else Color(0xFF2563EB),
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Box(modifier = Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search for people or groups...",
-                                color = animSubTextColor.copy(alpha = 0.7f),
-                                fontSize = 14.sp
+                                text = "@username",
+                                color = animSubTextColor.copy(alpha = 0.6f),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal
                             )
                         }
                         BasicTextField(
                             value = searchQuery,
                             onValueChange = { viewModel.setSearchQuery(it) },
-                            textStyle = TextStyle(color = animTextColor, fontSize = 14.sp),
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = TextStyle(
+                                color = if (isNightMode) Color.White else Color.Black,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            ),
                             cursorBrush = SolidColor(Color(0xFF2563EB)),
                             singleLine = true
                         )
