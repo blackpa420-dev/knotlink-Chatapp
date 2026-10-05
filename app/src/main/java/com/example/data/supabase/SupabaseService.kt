@@ -287,7 +287,7 @@ object SupabaseService {
             .removeSuffix(".link")
             .removeSuffix(".bit")
             .removeSuffix(".chat")
-            .filter { it.isLetterOrDigit() || it == '_' }
+            .filter { it in 'a'..'z' || it.isDigit() || it == '_' }
         return if (base.isBlank()) "" else "@$base.link"
     }
 
