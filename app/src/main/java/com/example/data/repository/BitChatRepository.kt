@@ -754,7 +754,11 @@ class BitChatRepository(val dao: BitChatDao) {
             // Persist remotely first. Realtime broadcast is only emitted after the
             // authoritative database write succeeds, preventing phantom delivery.
             val sendResult = SupabaseService.sendMessage(supaMsg).getOrNull()
-                ?: throw IllegalStateException("Message was not accepted by Supabase.")
+            if (sendResult == null) {
+                // Never throw from the message-send coroutine: a server/RLS/auth failure
+                // must become a failed local message, not an application crash.
+                throw MessageSendFailureException("Message was not accepted by Supabase.")
+            }
             val finalServerId = sendResult.id.ifBlank { serverMsgId }
 
             // Now that the authoritative write succeeded, notify the peer immediately.
