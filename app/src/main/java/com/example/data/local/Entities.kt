@@ -40,9 +40,12 @@ data class UserIdentityEntity(
     val publicId: String
         get() = if (username.isNotBlank()) username.removePrefix("@") else "usr_8921"
 
+    // QR is an identity credential, not a username alias. Only the canonical
+    // Supabase Auth UUID is allowed here.
     val qrIdentifier: String
-        get() = supabaseUid.trim().takeIf { it.isNotBlank() && !it.equals("user_me", ignoreCase = true) }
-            ?: username.trim().removePrefix("@")
+        get() = supabaseUid.trim().takeIf {
+            it.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+        }.orEmpty()
 }
 
 @Entity(tableName = "contacts")
