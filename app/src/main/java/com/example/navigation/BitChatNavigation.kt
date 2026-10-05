@@ -363,8 +363,24 @@ fun BitChatNavHost(
                     navController.navigate(BitChatRoutes.VERIFY_OTP)
                 },
                 onAuthSuccess = {
-                    navController.navigate(BitChatRoutes.CHATS) {
-                        popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
+                    // Email/password authentication is not enough to enter the app.
+                    // An account without a completed public profile must resume the
+                    // mandatory profile setup instead of being sent to Chats.
+                    val identity = bitChatViewModel.userIdentity.value
+                    val profileComplete = identity != null &&
+                        identity.isVerified &&
+                        identity.username.isNotBlank() &&
+                        identity.fullName.isNotBlank() &&
+                        identity.avatarPath.isNotBlank()
+
+                    if (profileComplete) {
+                        navController.navigate(BitChatRoutes.CHATS) {
+                            popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate(BitChatRoutes.REGISTER_IDENTITY) {
+                            popUpTo(BitChatRoutes.WELCOME) { inclusive = false }
+                        }
                     }
                 }
             )
