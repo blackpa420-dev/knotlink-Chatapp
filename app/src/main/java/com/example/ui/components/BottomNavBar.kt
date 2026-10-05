@@ -59,7 +59,7 @@ fun BitChatBottomNavBar(
     currentTab: BitChatNavTab,
     onTabSelected: (BitChatNavTab) -> Unit,
     modifier: Modifier = Modifier,
-    isNightMode: Boolean = true,
+    isNightMode: Boolean = false,
     unreadChatsCount: Int = 0
 ) {
     val haptic = LocalHapticFeedback.current

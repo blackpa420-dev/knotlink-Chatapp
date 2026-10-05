@@ -17,7 +17,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -31,49 +32,60 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.BitOnSurface
-import com.example.ui.theme.BitPrimary
-import com.example.ui.theme.BitSurfaceContainer
 
 @Composable
 fun NothingNumpad(
     onDigitClick: (String) -> Unit,
     onBackspaceClick: () -> Unit,
     onMoreClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDarkTheme: Boolean = false
 ) {
+    val haptic = LocalHapticFeedback.current
     val digits = listOf(
         listOf("1", "2", "3"),
         listOf("4", "5", "6"),
         listOf("7", "8", "9")
     )
 
+    val keyBg = if (isDarkTheme) Color(0xFF16181E) else Color(0xFFF1F5F9)
+    val keyBorder = if (isDarkTheme) Color(0xFF23262F) else Color(0xFFCBD5E1)
+    val textColor = if (isDarkTheme) Color(0xFFF4F4F6) else Color(0xFF0F172A)
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         digits.forEach { row ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 row.forEach { digit ->
                     NumpadKeyButton(
-                        onClick = { onDigitClick(digit) },
-                        modifier = Modifier.weight(1f)
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onDigitClick(digit)
+                        },
+                        modifier = Modifier.weight(1f),
+                        backgroundColor = keyBg,
+                        borderColor = keyBorder
                     ) {
                         Text(
                             text = digit,
-                            color = BitOnSurface,
-                            fontSize = 24.sp,
+                            color = textColor,
+                            fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.SansSerif
                         )
                     }
                 }
@@ -83,47 +95,58 @@ fun NothingNumpad(
         // Bottom row: More/Extra, 0, Backspace
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Extra / Blank key
             NumpadKeyButton(
                 onClick = { onMoreClick?.invoke() },
                 modifier = Modifier.weight(1f),
-                backgroundColor = Color.Transparent
+                backgroundColor = if (onMoreClick != null) keyBg else Color.Transparent,
+                borderColor = if (onMoreClick != null) keyBorder else Color.Transparent
             ) {
                 if (onMoreClick != null) {
                     Icon(
                         imageVector = Icons.Default.MoreHoriz,
                         contentDescription = "More",
-                        tint = BitOnSurface.copy(alpha = 0.4f)
+                        tint = if (isDarkTheme) Color(0xFF8E8E93) else Color(0xFF64748B)
                     )
                 }
             }
 
             // Zero key
             NumpadKeyButton(
-                onClick = { onDigitClick("0") },
-                modifier = Modifier.weight(1f)
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onDigitClick("0")
+                },
+                modifier = Modifier.weight(1f),
+                backgroundColor = keyBg,
+                borderColor = keyBorder
             ) {
                 Text(
                     text = "0",
-                    color = BitOnSurface,
-                    fontSize = 24.sp,
+                    color = textColor,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.SansSerif
                 )
             }
 
             // Backspace key
             NumpadKeyButton(
-                onClick = onBackspaceClick,
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onBackspaceClick()
+                },
                 modifier = Modifier.weight(1f),
-                backgroundColor = BitSurfaceContainer.copy(alpha = 0.35f)
+                backgroundColor = keyBg,
+                borderColor = keyBorder
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Backspace,
                     contentDescription = "Backspace",
-                    tint = BitPrimary
+                    tint = if (isDarkTheme) Color(0xFFF4F4F6) else Color(0xFF334155),
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -134,14 +157,15 @@ fun NothingNumpad(
 private fun NumpadKeyButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = BitSurfaceContainer.copy(alpha = 0.6f),
+    backgroundColor: Color,
+    borderColor: Color,
     content: @Composable () -> Unit
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     val animatedScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.92f else 1.0f,
+        targetValue = if (isPressed) 0.93f else 1.0f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow
@@ -150,27 +174,27 @@ private fun NumpadKeyButton(
     )
 
     val animatedBgColor by animateColorAsState(
-        targetValue = if (isPressed) BitPrimary.copy(alpha = 0.22f) else backgroundColor,
-        animationSpec = tween(120),
+        targetValue = if (isPressed && backgroundColor != Color.Transparent) Color(0xFF2563EB).copy(alpha = 0.15f) else backgroundColor,
+        animationSpec = tween(110),
         label = "NumpadKeyBg"
     )
 
     val animatedBorderColor by animateColorAsState(
-        targetValue = if (isPressed) BitPrimary.copy(alpha = 0.5f) else Color.Transparent,
-        animationSpec = tween(120),
+        targetValue = if (isPressed && borderColor != Color.Transparent) Color(0xFF2563EB) else borderColor,
+        animationSpec = tween(110),
         label = "NumpadKeyBorder"
     )
 
     Box(
         modifier = modifier
-            .height(64.dp)
+            .height(44.dp)
             .scale(animatedScale)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(CircleShape)
             .background(animatedBgColor)
             .border(
                 width = 1.dp,
                 color = animatedBorderColor,
-                shape = RoundedCornerShape(18.dp)
+                shape = CircleShape
             )
             .clickable(
                 interactionSource = interactionSource,
@@ -182,4 +206,3 @@ private fun NumpadKeyButton(
         content()
     }
 }
-

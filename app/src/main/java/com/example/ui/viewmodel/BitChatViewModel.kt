@@ -747,8 +747,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    // App-wide Day/Night theme state
-    private val _isNightMode = MutableStateFlow(true)
+    // App-wide Day/Night theme state (defaults to Day Mode)
+    private val _isNightMode = MutableStateFlow(false)
     val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
 
     fun toggleNightMode() {
@@ -875,6 +875,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private val _emailAuthError = MutableStateFlow<String?>(null)
     val emailAuthError: StateFlow<String?> = _emailAuthError.asStateFlow()
 
+    private val _isForgotPasswordMode = MutableStateFlow(false)
+    val isForgotPasswordMode: StateFlow<Boolean> = _isForgotPasswordMode.asStateFlow()
+
+    private var lastKnownOldPassword: String = ""
+
+    fun setForgotPasswordMode(isForgot: Boolean) {
+        _isForgotPasswordMode.value = isForgot
+        _emailAuthError.value = null
+    }
+
     fun setLoginMode(isLogin: Boolean) {
         _isLoginMode.value = isLogin
         _enteredEmail.value = ""
@@ -922,8 +932,30 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     fun isPasswordHasNumber(pass: String = _enteredPassword.value): Boolean = pass.any { it.isDigit() }
     fun isPasswordMatching(): Boolean = _enteredPassword.value.isNotEmpty() && _enteredPassword.value == _enteredConfirmPassword.value
 
-    fun isPasswordAllValid(pass: String = _enteredPassword.value): Boolean =
-        isPasswordLengthValid(pass) && isPasswordHasUpper(pass) && isPasswordHasLower(pass) && isPasswordHasNumber(pass)
+    fun generateStrongPassword(): String {
+        val uppercase = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        val lowercase = "abcdefghijkmnopqrstuvwxyz"
+        val numbers = "23456789"
+        val symbols = "!@#$%"
+        val random = java.security.SecureRandom()
+
+        val pass = StringBuilder()
+        pass.append(uppercase[random.nextInt(uppercase.length)])
+        pass.append(lowercase[random.nextInt(lowercase.length)])
+        pass.append(numbers[random.nextInt(numbers.length)])
+        pass.append(symbols[random.nextInt(symbols.length)])
+
+        val allChars = uppercase + lowercase + numbers + symbols
+        for (i in 0..5) {
+            pass.append(allChars[random.nextInt(allChars.length)])
+        }
+
+        val generated = pass.toString().toCharArray().apply { shuffle(kotlin.random.Random.Default) }.joinToString("")
+        _enteredPassword.value = generated
+        _enteredConfirmPassword.value = generated
+        _emailAuthError.value = null
+        return generated
+    }
 
     fun isEmailValid(email: String = _enteredEmail.value): Boolean =
         email.isNotBlank() && android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
@@ -993,6 +1025,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         loginTimestamp = System.currentTimeMillis()
                     )
 
+                    lastKnownOldPassword = pass
                     repository.saveUserIdentity(finalIdentity)
                     repository.recordLoginSession()
                     SupabaseRealtimeManager.startRealtime(uid, finalUsername)
@@ -1051,10 +1084,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 _enteredEmail.value = targetEmail
                 repository.saveEmail(targetEmail)
 
-                var res = SupabaseService.sendOtpToEmail(targetEmail)
-                if (res.isFailure) {
-                    res = SupabaseService.resendEmailOtp(targetEmail, "email")
-                }
+                // Try sending recovery/email OTP directly with proper type on first attempt
+                val otpType = if (_isForgotPasswordMode.value) "recovery" else "email"
+                val res = SupabaseService.sendOtpToEmail(targetEmail, otpType)
 
                 _isSendingOtp.value = false
                 if (res.isSuccess) {
@@ -1126,27 +1158,25 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 // 1. Try signup with email and password first so password identity is created in Supabase Auth
                 val signUpRes = SupabaseService.signUpWithEmail(email, pass, "", "")
-                var otpDispatched = signUpRes.isSuccess
 
-                if (!otpDispatched) {
-                    val errStr = signUpRes.exceptionOrNull()?.message ?: ""
-                    // If already registered or rate limited or security delay, send OTP directly
-                    val otpRes = SupabaseService.sendOtpToEmail(email)
-                    if (otpRes.isSuccess ||
-                        errStr.contains("already registered", ignoreCase = true) ||
-                        errStr.contains("already exists", ignoreCase = true) ||
-                        errStr.contains("security", ignoreCase = true) ||
-                        errStr.contains("rate", ignoreCase = true) ||
-                        errStr.contains("limit", ignoreCase = true) ||
-                        errStr.contains("seconds", ignoreCase = true) ||
-                        errStr.contains("60", ignoreCase = true)
-                    ) {
-                        otpDispatched = true
-                    } else {
-                        _isSendingOtp.value = false
-                        _emailAuthError.value = errStr.ifBlank { "Failed to send verification code" }
-                        showToast(errStr.ifBlank { "Failed to send verification code" }, isError = true)
-                        return@launch
+                if (!signUpRes.isSuccess) {
+                    // User already exists in Supabase Auth, dispatch OTP via /resend
+                    val otpRes = SupabaseService.sendOtpToEmail(email, "signup")
+                    if (!otpRes.isSuccess) {
+                        val errStr = signUpRes.exceptionOrNull()?.message ?: otpRes.exceptionOrNull()?.message ?: ""
+                        if (!errStr.contains("already registered", ignoreCase = true) &&
+                            !errStr.contains("already exists", ignoreCase = true) &&
+                            !errStr.contains("security", ignoreCase = true) &&
+                            !errStr.contains("rate", ignoreCase = true) &&
+                            !errStr.contains("limit", ignoreCase = true) &&
+                            !errStr.contains("seconds", ignoreCase = true) &&
+                            !errStr.contains("60", ignoreCase = true)
+                        ) {
+                            _isSendingOtp.value = false
+                            _emailAuthError.value = errStr.ifBlank { "Failed to send verification code" }
+                            showToast(errStr.ifBlank { "Failed to send verification code" }, isError = true)
+                            return@launch
+                        }
                     }
                 }
 
@@ -1185,13 +1215,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
         _isSendingOtp.value = true
         viewModelScope.launch {
-            var res = SupabaseService.sendOtpToEmail(email)
-            if (res.isFailure) {
-                res = SupabaseService.resendEmailOtp(email, if (_isLoginMode.value) "email" else "signup")
-            }
+            val type = if (_isForgotPasswordMode.value) "recovery" else if (_isLoginMode.value) "email" else "signup"
+            val res = SupabaseService.sendOtpToEmail(email, type)
             _isSendingOtp.value = false
-            startOtpCountdown()
-            showToast("Verification code resent to $email")
+            if (res.isSuccess) {
+                startOtpCountdown()
+                showToast("Verification code resent to $email")
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Failed to resend code"
+                showToast(err, isError = true)
+            }
         }
     }
 
@@ -1375,8 +1408,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _isVerifyingOtp.value = true
         viewModelScope.launch {
             try {
-                val otpType = if (_isLoginMode.value) "email" else "signup"
-                val res = SupabaseService.verifyEmailOtp(email, code, otpType)
+                val primaryType = if (_isForgotPasswordMode.value) "recovery" else if (_isLoginMode.value) "email" else "signup"
+                var res = SupabaseService.verifyEmailOtp(email, code, primaryType)
+                if (res.isFailure && _isForgotPasswordMode.value) {
+                    res = SupabaseService.verifyEmailOtp(email, code, "email")
+                }
+                if (res.isFailure && _isForgotPasswordMode.value) {
+                    res = SupabaseService.verifyEmailOtp(email, code, "magiclink")
+                }
+
                 if (res.isSuccess) {
                     failedOtpAttempts = 0
                     otpLockoutTime = 0L
@@ -1404,14 +1444,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                     val existing = repository.userIdentity.firstOrNull()
 
-                    if (existingProfile != null && existingProfile.username.isNotBlank()) {
-                        // Existing account: restore full identity and log in
+                    val isProfileFullyCompleted = existingProfile != null &&
+                            existingProfile.isVerified &&
+                            existingProfile.username.isNotBlank() &&
+                            existingProfile.fullName.isNotBlank() &&
+                            !existingProfile.avatarUrl.isNullOrBlank()
+
+                    if (isProfileFullyCompleted) {
+                        // Existing completed account: restore full identity and log in
                         val restored = (existing ?: UserIdentityEntity()).copy(
                             id = 1,
                             supabaseUid = uid,
                             email = email,
-                            username = existingProfile.username,
-                            fullName = existingProfile.fullName.ifBlank { existingProfile.username.removeSuffix(".link") },
+                            username = existingProfile!!.username,
+                            fullName = existingProfile.fullName,
                             avatarPath = existingProfile.avatarUrl ?: "",
                             profession = existingProfile.profession,
                             birthDate = existingProfile.birthDate,
@@ -1428,7 +1474,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         _isVerifyingOtp.value = false
                         showToast("Welcome back, ${restored.fullName}!")
                     } else {
-                        // New user: proceed to identity registration
+                        // Incomplete profile or new user: force completion on RegisterIdentityScreen
                         val updated = (existing ?: UserIdentityEntity()).copy(
                             id = 1,
                             supabaseUid = uid,
@@ -1476,6 +1522,73 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         verifyOtp(onSuccess, onError)
     }
 
+    fun resetPasswordWithValidation(
+        newPass: String,
+        confirmPass: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (newPass.length < 8) {
+            val err = "Password must be at least 8 characters long"
+            _emailAuthError.value = err
+            showToast(err, isError = true)
+            onError(err)
+            return
+        }
+        if (!isPasswordHasUpper(newPass) || !isPasswordHasNumber(newPass)) {
+            val err = "Password must contain at least one uppercase letter (A-Z) and one number (0-9)"
+            _emailAuthError.value = err
+            showToast(err, isError = true)
+            onError(err)
+            return
+        }
+        if (newPass != confirmPass) {
+            val err = "Passwords do not match"
+            _emailAuthError.value = err
+            showToast(err, isError = true)
+            onError(err)
+            return
+        }
+        if (lastKnownOldPassword.isNotBlank() && newPass == lastKnownOldPassword) {
+            val err = "Old password cannot be reused as a new password. Please choose another password."
+            _emailAuthError.value = err
+            showToast(err, isError = true)
+            onError(err)
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val session = SupabaseService.getSession()
+                val token = session?.accessToken.orEmpty()
+                if (token.isNotBlank()) {
+                    val res = SupabaseService.updateUserPassword(token, newPass)
+                    if (res.isFailure) {
+                        val err = res.exceptionOrNull()?.message ?: "Failed to update password"
+                        _emailAuthError.value = err
+                        showToast(err, isError = true)
+                        onError(err)
+                        return@launch
+                    }
+                }
+                lastKnownOldPassword = newPass
+                _enteredPassword.value = newPass
+                _enteredConfirmPassword.value = newPass
+                _isForgotPasswordMode.value = false
+                _emailAuthError.value = null
+                showToast("Password updated successfully! Please log in with your new password.")
+                withContext(Dispatchers.Main) {
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                val err = e.message ?: "Failed to reset password"
+                _emailAuthError.value = err
+                showToast(err, isError = true)
+                onError(err)
+            }
+        }
+    }
+
     // Identity Registration State
     private val _enteredFullName = MutableStateFlow("")
     val enteredFullName: StateFlow<String> = _enteredFullName.asStateFlow()
@@ -1495,10 +1608,17 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private val _selectedProfileType = MutableStateFlow("Private Profile")
     val selectedProfileType: StateFlow<String> = _selectedProfileType.asStateFlow()
 
+    private val _enteredProfession = MutableStateFlow("🎓 Student")
+    val enteredProfession: StateFlow<String> = _enteredProfession.asStateFlow()
+
     private var usernameCheckJob: Job? = null
 
     fun updateFullName(input: String) {
         _enteredFullName.value = input
+    }
+
+    fun updateProfession(profession: String) {
+        _enteredProfession.value = profession
     }
 
     fun updateAvatarPath(path: String?) {
@@ -1624,13 +1744,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             val authUid = SupabaseService.getAuthenticatedUserId()
                 ?: throw IllegalStateException("Cannot complete profile without an authenticated Supabase session")
 
+            val selectedProfession = _enteredProfession.value.ifBlank { "🎓 Student" }
+
             val finalIdentity = (existingIdentity ?: UserIdentityEntity()).copy(
                 id = 1,
                 supabaseUid = authUid,
                 fullName = fullName,
                 username = fullUsername,
                 avatarPath = publicAvatarUrl,
-                profession = "🎓 Student",
+                profession = selectedProfession,
                 email = existingEmail,
                 isEmailVerified = existingEmail.isNotBlank(),
                 profileType = "KnotLink",
@@ -1647,7 +1769,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 username = fullUsername,
                 fullName = fullName,
                 avatarUrl = publicAvatarUrl,
-                profession = "🎓 Student",
+                profession = selectedProfession,
                 isVerified = true
             )
             val upsertRes = SupabaseService.upsertProfile(supabaseProf)

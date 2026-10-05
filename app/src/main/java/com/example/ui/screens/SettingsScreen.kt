@@ -166,7 +166,6 @@ fun SettingsScreen(
     var showFingerprintLockPage by remember { mutableStateOf(false) }
     var showUsernameAvailabilityPage by remember { mutableStateOf(false) }
 
-    var showPremiumSheet by remember { mutableStateOf(false) }
     var showBasicSettingsPage by remember { mutableStateOf(false) }
     var showAdvanceSettingsPage by remember { mutableStateOf(false) }
     var showSupportCareSheet by remember { mutableStateOf(false) }
@@ -509,15 +508,7 @@ fun SettingsScreen(
                     subTextColor = animSubTextColor
                 )
 
-                // 4 Main Section Cards requested by user (Sleek titles without mini text)
-                SettingsSectionCard(
-                    icon = Icons.Default.Star,
-                    iconTint = Color(0xFFF59E0B),
-                    title = "KnotLink Premium",
-                    isNightMode = isNightMode,
-                    onClick = { showPremiumSheet = true }
-                )
-
+                // Main Section Cards requested by user
                 SettingsSectionCard(
                     icon = Icons.Default.Person,
                     iconTint = Color(0xFF00C6FF),
@@ -608,11 +599,16 @@ fun SettingsScreen(
 
     // Deleted Chats Sheet Modal
     if (showDeletedChatsSheet) {
-        DeletedChatsSheet(
-            viewModel = viewModel,
-            isNightMode = isNightMode,
-            onDismiss = { showDeletedChatsSheet = false }
-        )
+        Dialog(
+            onDismissRequest = { showDeletedChatsSheet = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            DeletedChatsSheet(
+                viewModel = viewModel,
+                isNightMode = isNightMode,
+                onDismiss = { showDeletedChatsSheet = false }
+            )
+        }
     }
 
     // 4 New Section Pages & Modals
@@ -621,14 +617,6 @@ fun SettingsScreen(
             viewModel = viewModel,
             isNightMode = isNightMode,
             onBack = { showBasicSettingsPage = false }
-        )
-    }
-
-    if (showPremiumSheet) {
-        BitChatPremiumPage(
-            viewModel = viewModel,
-            isNightMode = isNightMode,
-            onDismiss = { showPremiumSheet = false }
         )
     }
 
@@ -1531,13 +1519,14 @@ fun BasicSettingsPage(
                 .navigationBarsPadding(),
             color = bgColor
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
                 // Top Navigation Bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1915,8 +1904,6 @@ fun BasicSettingsPage(
                     )
                 }
             }
-        }
-    }
 
     // Archive Sheet
     if (showArchivedChatsSheet) {
@@ -1953,17 +1940,18 @@ fun BasicSettingsPage(
                     }
                 }
             }
+
+            // Deleted Chats Sheet inline full-screen overlay
+            if (showDeletedChatsSheet) {
+                DeletedChatsSheet(
+                    viewModel = viewModel,
+                    isNightMode = isNightMode,
+                    onDismiss = { showDeletedChatsSheet = false }
+                )
+            }
         }
     }
-
-    // Deleted Chats Sheet
-    if (showDeletedChatsSheet) {
-        DeletedChatsSheet(
-            viewModel = viewModel,
-            isNightMode = isNightMode,
-            onDismiss = { showDeletedChatsSheet = false }
-        )
-    }
+}
 
     // Blocked Chats Sheet
     if (showBlockedChatsSheet) {
@@ -2038,6 +2026,8 @@ fun BasicSettingsPage(
             }
         }
     }
+}
+}
 }
 
 @Composable
@@ -2162,8 +2152,6 @@ fun AdvanceSettingsPage(
     onDismiss: () -> Unit,
     onOpenFingerprintLock: () -> Unit
 ) {
-    var showCryptographicKeysPage by remember { mutableStateOf(false) }
-    var showPrivacyMeshPage by remember { mutableStateOf(false) }
     var showPrivacyControlsPage by remember { mutableStateOf(false) }
     var showActiveDevicesPage by remember { mutableStateOf(false) }
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
@@ -2257,22 +2245,6 @@ fun AdvanceSettingsPage(
                         )
                         Divider(color = cardBorderColor)
                         SettingsOptionRow(
-                            icon = Icons.Default.Security,
-                            title = "Cryptographic Keys",
-                            textColor = textColor,
-                            isNightMode = isNightMode,
-                            onClick = { showCryptographicKeysPage = true }
-                        )
-                        Divider(color = cardBorderColor)
-                        SettingsOptionRow(
-                            icon = Icons.Default.Lock,
-                            title = "Privacy & Mesh Relays",
-                            textColor = textColor,
-                            isNightMode = isNightMode,
-                            onClick = { showPrivacyMeshPage = true }
-                        )
-                        Divider(color = cardBorderColor)
-                        SettingsOptionRow(
                             icon = Icons.Default.Delete,
                             title = "Delete Account",
                             textColor = Color(0xFFEF4444),
@@ -2298,23 +2270,6 @@ fun AdvanceSettingsPage(
             viewModel = viewModel,
             isNightMode = isNightMode,
             onBack = { showActiveDevicesPage = false }
-        )
-    }
-
-    if (showCryptographicKeysPage) {
-        CryptographicKeysSubPage(
-            viewModel = viewModel,
-            user = user,
-            isNightMode = isNightMode,
-            onBack = { showCryptographicKeysPage = false }
-        )
-    }
-
-    if (showPrivacyMeshPage) {
-        PrivacyMeshRelaysSubPage(
-            viewModel = viewModel,
-            isNightMode = isNightMode,
-            onBack = { showPrivacyMeshPage = false }
         )
     }
 

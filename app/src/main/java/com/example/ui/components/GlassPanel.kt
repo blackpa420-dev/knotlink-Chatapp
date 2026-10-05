@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -22,7 +23,7 @@ fun GlassPanel(
     borderColor: Color = Color.Unspecified,
     borderWidth: Dp = 1.dp,
     backgroundColor: Color = Color.Unspecified,
-    isNightMode: Boolean = true,
+    isNightMode: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
@@ -40,6 +41,18 @@ fun GlassPanel(
 
     val shape = RoundedCornerShape(cornerRadius)
     var boxModifier = modifier
+        .then(
+            if (!isNightMode) {
+                Modifier.shadow(
+                    elevation = 3.dp,
+                    shape = shape,
+                    ambientColor = Color(0x140F172A),
+                    spotColor = Color(0x140F172A)
+                )
+            } else {
+                Modifier
+            }
+        )
         .clip(shape)
         .background(actualBgColor, shape)
         .border(borderWidth, actualBorderColor, shape)
@@ -59,7 +72,7 @@ fun GlowingGlassPanel(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 16.dp,
     glowColor: Color = BitPrimary.copy(alpha = 0.3f),
-    isNightMode: Boolean = true,
+    isNightMode: Boolean = false,
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {

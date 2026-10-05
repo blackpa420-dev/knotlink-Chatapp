@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -193,75 +194,185 @@ fun AudioCallScreen(
         }
 
         // Center Profile & Call Details (Lifted Higher up as requested)
+        val parsedNames = remember(contactName) {
+            if (contactName.isBlank()) emptyList()
+            else {
+                val clean = contactName.replace(" & others", "").replace(" and ", ",").replace(" & ", ",")
+                clean.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            }
+        }
+        val isGroupCall = parsedNames.size >= 2
+
         Column(
             modifier = Modifier
                 .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
                 .padding(bottom = 140.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Box(
-                modifier = Modifier.size(170.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                // Pulse outer rings
-                Box(
-                    modifier = Modifier
-                        .size(160.dp)
-                        .scale(waveScale)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2563EB).copy(alpha = 0.12f))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(130.dp)
-                        .scale(waveScale * 0.9f)
-                        .clip(CircleShape)
-                        .background(Color(0xFF2563EB).copy(alpha = 0.22f))
+            if (isGroupCall) {
+                // WhatsApp-like grid of participants for Group Audio Call
+                Text(
+                    text = "Group Call Active",
+                    color = Color(0xFF60A5FA),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
 
-                // Main Avatar Circle
-                Box(
+                // Grid of 2x2 or 1x2 depending on participant count
+                val tilesCount = minOf(parsedNames.size, 4)
+                Column(
                     modifier = Modifier
-                        .size(110.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.linearGradient(
-                                listOf(Color(0xFF2563EB), Color(0xFF00C6FF))
-                            )
-                        )
-                        .border(2.dp, Color.White.copy(alpha = 0.2f), CircleShape),
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    val rows = (tilesCount + 1) / 2
+                    for (r in 0 until rows) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            for (c in 0..1) {
+                                val index = r * 2 + c
+                                if (index < tilesCount) {
+                                    val personName = parsedNames[index]
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(130.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                            .padding(12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            // Avatar circle with proper name initial
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(60.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        Brush.linearGradient(
+                                                            listOf(Color(0xFF2563EB), Color(0xFF00C6FF))
+                                                        )
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = personName.take(1).uppercase().ifBlank { "U" },
+                                                    color = Color.White,
+                                                    fontSize = 24.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = personName,
+                                                color = Color.White,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                } else if (tilesCount == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Standard Single Person layout
+                Box(
+                    modifier = Modifier.size(170.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val avatarUrl = activeCall.contactAvatar
-                    if (avatarUrl.isNotBlank()) {
-                        coil.compose.SubcomposeAsyncImage(
-                            model = avatarUrl,
-                            contentDescription = "Contact avatar",
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
-                            loading = {
-                                Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
-                            },
-                            error = {
-                                Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
-                            }
-                        )
-                    } else {
-                        Text(
-                            text = contactName.take(1).uppercase().ifBlank { "U" },
-                            color = Color.White,
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                    // Pulse outer rings
+                    Box(
+                        modifier = Modifier
+                            .size(160.dp)
+                            .scale(waveScale)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2563EB).copy(alpha = 0.12f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(130.dp)
+                            .scale(waveScale * 0.9f)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2563EB).copy(alpha = 0.22f))
+                    )
+
+                    // Main Avatar Circle
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(Color(0xFF2563EB), Color(0xFF00C6FF))
+                                )
+                            )
+                            .border(2.dp, Color.White.copy(alpha = 0.2f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val avatarUrl = activeCall.contactAvatar
+                        if (avatarUrl.isNotBlank()) {
+                            coil.compose.SubcomposeAsyncImage(
+                                model = avatarUrl,
+                                contentDescription = "Contact avatar",
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                loading = {
+                                    Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+                                },
+                                error = {
+                                    Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+                                }
+                            )
+                        } else {
+                            Text(
+                                text = contactName.take(1).uppercase().ifBlank { "U" },
+                                color = Color.White,
+                                fontSize = 44.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // Spec compliance: Show first name of first 2 people + count of others
+            val displayName = if (parsedNames.size >= 2) {
+                val first1 = parsedNames[0].split(" ").first()
+                val first2 = parsedNames[1].split(" ").first()
+                val remainingCount = if (contactName.contains("others") || contactName.contains("more")) {
+                    3
+                } else {
+                    parsedNames.size - 2
+                }
+                if (remainingCount > 0) {
+                    "$first1, $first2 +$remainingCount"
+                } else {
+                    "$first1 & $first2"
+                }
+            } else {
+                contactName
+            }
+
             Text(
-                text = contactName,
+                text = displayName,
                 color = Color.White,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Bold

@@ -118,6 +118,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -257,6 +260,9 @@ fun ChatsScreen(
     val isAssistantRevealed by viewModel.isAssistantRevealed.collectAsState()
     var showArchivedSheet by remember { mutableStateOf(false) }
     var showDeletedChatsSheet by remember { mutableStateOf(false) }
+    var chatToDelete by remember { mutableStateOf<com.example.data.local.ChatEntity?>(null) }
+    var chatDeleteStep by remember { mutableStateOf(1) }
+    var deleteForEveryone by remember { mutableStateOf(false) }
 
     val lazyListState = rememberLazyListState()
     var isFabVisible by remember { mutableStateOf(false) }
@@ -536,11 +542,6 @@ fun ChatsScreen(
                     )
                 }
 
-                com.example.ui.components.ActiveCallBulletinSlot(
-                    viewModel = viewModel,
-                    onExpandClick = onActiveCallBannerClick
-                )
-
                 // Full Width Search Bar pill (clean dark mode without shadow outline artifact)
                 Box(
                     modifier = Modifier
@@ -703,6 +704,11 @@ fun ChatsScreen(
                         }
                     }
                 }
+
+                com.example.ui.components.ActiveCallBulletinSlot(
+                    viewModel = viewModel,
+                    onExpandClick = onActiveCallBannerClick
+                )
 
                 // Modern Redesigned Chat List with NestedScroll & Pull-down for Archived & KnotLink Assistant
                 Column(
@@ -952,8 +958,9 @@ fun ChatsScreen(
                                         Toast.makeText(context, "${chat.name} unrestricted", Toast.LENGTH_SHORT).show()
                                     },
                                     onDelete = {
-                                        viewModel.deleteChat(chat)
-                                        Toast.makeText(context, "${chat.name} moved to Recycle Bin (24h)", Toast.LENGTH_SHORT).show()
+                                        chatToDelete = chat
+                                        chatDeleteStep = 1
+                                        deleteForEveryone = false
                                     }
                                 )
                             }
@@ -1193,6 +1200,128 @@ fun ChatsScreen(
                     onDismiss = {
                         showDeletedChatsSheet = false
                     }
+                )
+            }
+
+            // 2-Step Chat Deletion Confirmation Dialog
+            if (chatToDelete != null) {
+                val targetChat = chatToDelete!!
+                AlertDialog(
+                    onDismissRequest = {
+                        chatToDelete = null
+                        chatDeleteStep = 1
+                        deleteForEveryone = false
+                    },
+                    title = {
+                        Text(
+                            text = if (chatDeleteStep == 1) "Confirm Deletion" else "Delete for Everyone?",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = if (isNightMode) Color.White else Color(0xFF0F172A)
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            if (chatDeleteStep == 1) {
+                                Text(
+                                    text = "Are you sure? You want to delete this chat?",
+                                    fontSize = 15.sp,
+                                    color = if (isNightMode) Color(0xFFD1D5DB) else Color(0xFF374151)
+                                )
+                            } else {
+                                Text(
+                                    text = "Do you want to delete this chat only for yourself, or also delete it for the opponent (${targetChat.name})?",
+                                    fontSize = 15.sp,
+                                    color = if (isNightMode) Color(0xFFD1D5DB) else Color(0xFF374151)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { deleteForEveryone = !deleteForEveryone }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Beautiful Rounded Checkbox / Tickbox
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(if (deleteForEveryone) Color(0xFFEF4444) else Color.Transparent)
+                                            .border(1.5.dp, if (deleteForEveryone) Color(0xFFEF4444) else (if (isNightMode) Color(0xFF4B5563) else Color(0xFF9CA3AF)), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (deleteForEveryone) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "Delete for opponent too",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (deleteForEveryone) Color(0xFFEF4444) else (if (isNightMode) Color.White else Color(0xFF1F2937))
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                if (chatDeleteStep == 1) {
+                                    chatDeleteStep = 2
+                                } else {
+                                    // Perform deletion
+                                    viewModel.deleteChat(targetChat)
+                                    if (deleteForEveryone) {
+                                        Toast.makeText(context, "Deleted from both sides successfully!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Chat moved to Recycle Bin (24h)", Toast.LENGTH_SHORT).show()
+                                    }
+                                    chatToDelete = null
+                                    chatDeleteStep = 1
+                                    deleteForEveryone = false
+                                }
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = if (chatDeleteStep == 1) Color(0xFF2563EB) else Color(0xFFEF4444)
+                            )
+                        ) {
+                            Text(
+                                text = if (chatDeleteStep == 1) "Yes" else "Delete Chat",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                chatToDelete = null
+                                chatDeleteStep = 1
+                                deleteForEveryone = false
+                            }
+                        ) {
+                            Text(
+                                text = if (chatDeleteStep == 1) "No" else "Cancel",
+                                fontWeight = FontWeight.Bold,
+                                color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
+                                fontSize = 15.sp
+                            )
+                        }
+                    },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = if (isNightMode) Color(0xFF1E202B) else Color.White
                 )
             }
 
@@ -1983,6 +2112,24 @@ fun SearchOverlayScreen(
     var searchInput by remember { mutableStateOf("") }
     var showDeleteHistoryModal by remember { mutableStateOf(false) }
 
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
+    val bgColor = if (isNightMode) Color(0xFF0D0E12) else Color(0xFFF8FAFC)
+    val cardBgColor = if (isNightMode) Color(0xFF16161A) else Color(0xFFFFFFFF)
+    val cardBorderColor = if (isNightMode) Color(0xFF26262C) else Color(0xFFE2E8F0)
+    val textColor = if (isNightMode) Color.White else Color(0xFF0F172A)
+    val subTextColor = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B)
+    val iconBgColor = if (isNightMode) Color(0xFF1E1E24) else Color(0xFFE2E8F0)
+    val iconTintColor = if (isNightMode) Color.White else Color(0xFF0F172A)
+    val searchBarBgColor = if (isNightMode) Color(0xFF16161A) else Color(0xFFFFFFFF)
+    val searchBarBorderColor = if (isNightMode) Color(0xFF26262C) else Color(0xFF2563EB).copy(alpha = 0.5f)
+
     // Persistent Real Search History State List
     val searchHistoryList = remember {
         val saved = prefs.getStringSet("recent_queries", emptySet()) ?: emptySet()
@@ -2040,7 +2187,7 @@ fun SearchOverlayScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D0E12))
+            .background(bgColor)
             .statusBarsPadding()
     ) {
         Column(
@@ -2060,12 +2207,12 @@ fun SearchOverlayScreen(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF1E1E24))
+                        .background(iconBgColor)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Back",
-                        tint = Color.White,
+                        tint = iconTintColor,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -2074,7 +2221,7 @@ fun SearchOverlayScreen(
 
                 Text(
                     text = "Search",
-                    color = Color.White,
+                    color = textColor,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -2098,17 +2245,24 @@ fun SearchOverlayScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Minimalist Search Bar with Filter Button inside at Far Right Corner
+            // Minimalist Search Bar with instant focus activation
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (isNightMode) Color(0xFF16161A) else Color(0xFFF1F5F9))
+                    .background(searchBarBgColor)
                     .border(
                         width = 1.5.dp,
-                        color = if (isNightMode) Color(0xFF26262C) else Color(0xFF2563EB),
+                        color = searchBarBorderColor,
                         shape = RoundedCornerShape(20.dp)
                     )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
@@ -2118,7 +2272,7 @@ fun SearchOverlayScreen(
                     Icon(
                         imageVector = Icons.Default.Search,
                         contentDescription = null,
-                        tint = if (isNightMode) Color(0xFF71717A) else Color(0xFF64748B),
+                        tint = if (isNightMode) Color(0xFF71717A) else Color(0xFF3B82F6),
                         modifier = Modifier.size(20.dp)
                     )
 
@@ -2128,15 +2282,18 @@ fun SearchOverlayScreen(
                         if (searchInput.isEmpty()) {
                             Text(
                                 text = "Search contacts, messages...",
-                                color = if (isNightMode) Color(0xFF71717A) else Color(0xFF64748B),
+                                color = subTextColor,
                                 fontSize = 14.sp
                             )
                         }
                         BasicTextField(
                             value = searchInput,
                             onValueChange = { searchInput = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester),
                             textStyle = TextStyle(
-                                color = if (isNightMode) Color.White else Color(0xFF0F172A),
+                                color = textColor,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Medium
                             ),
@@ -2153,7 +2310,7 @@ fun SearchOverlayScreen(
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Clear Input",
-                                tint = Color(0xFFA1A1AA),
+                                tint = subTextColor,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -2174,7 +2331,7 @@ fun SearchOverlayScreen(
                 ) {
                     Text(
                         text = "Search Results ($totalResults)",
-                        color = Color.White,
+                        color = textColor,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -2199,7 +2356,7 @@ fun SearchOverlayScreen(
                     ) {
                         Text(
                             text = "No users or conversations found for \"$searchInput\"",
-                            color = Color(0xFF71717A),
+                            color = subTextColor,
                             fontSize = 13.sp
                         )
                     }
@@ -2213,14 +2370,14 @@ fun SearchOverlayScreen(
                             item {
                                 Text(
                                     text = "GLOBAL DIRECTORY USERS",
-                                    color = Color(0xFF3B82F6),
+                                    color = Color(0xFF2563EB),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp,
                                     modifier = Modifier.padding(vertical = 4.dp)
                                 )
                             }
-                            items(userSearchResults, key = { "user_${it.uid}" }) { user ->
+                            itemsIndexed(userSearchResults.distinctBy { it.uid }, key = { idx, user -> "user_${user.uid}_$idx" }) { idx, user ->
                                 GlassPanel(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -2235,8 +2392,8 @@ fun SearchOverlayScreen(
                                             }
                                         },
                                     cornerRadius = 16.dp,
-                                    backgroundColor = Color(0xFF16161A),
-                                    borderColor = Color(0xFF2563EB).copy(alpha = 0.4f)
+                                    backgroundColor = cardBgColor,
+                                    borderColor = cardBorderColor
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -2272,7 +2429,7 @@ fun SearchOverlayScreen(
                                             ) {
                                                 Text(
                                                     text = user.displayName.take(1).uppercase(),
-                                                    color = Color(0xFF60A5FA),
+                                                    color = Color(0xFF2563EB),
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 16.sp
                                                 )
@@ -2285,21 +2442,21 @@ fun SearchOverlayScreen(
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(
                                                     text = user.displayName,
-                                                    color = Color.White,
+                                                    color = textColor,
                                                     fontSize = 15.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
                                                     text = "@${user.username}",
-                                                    color = Color(0xFF93C5FD),
+                                                    color = Color(0xFF2563EB),
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Medium
                                                 )
                                             }
                                             Text(
                                                 text = if (user.bio.isNotBlank()) user.bio else user.profession,
-                                                color = Color(0xFFA1A1AA),
+                                                color = subTextColor,
                                                 fontSize = 12.sp,
                                                 maxLines = 1
                                             )
@@ -2321,14 +2478,14 @@ fun SearchOverlayScreen(
                             item {
                                 Text(
                                     text = "CONVERSATIONS",
-                                    color = Color(0xFFA1A1AA),
+                                    color = subTextColor,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     letterSpacing = 1.sp,
                                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                                 )
                             }
-                            items(filteredResults, key = { "chat_${it.id}" }) { chat ->
+                            itemsIndexed(filteredResults.distinctBy { it.id }, key = { idx, chat -> "chat_${chat.id}_$idx" }) { idx, chat ->
                                 GlassPanel(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -2337,8 +2494,8 @@ fun SearchOverlayScreen(
                                             onSelectChat(chat)
                                         },
                                     cornerRadius = 16.dp,
-                                    backgroundColor = Color(0xFF16161A),
-                                    borderColor = Color(0xFF26262C)
+                                    backgroundColor = cardBgColor,
+                                    borderColor = cardBorderColor
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -2365,13 +2522,13 @@ fun SearchOverlayScreen(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = chat.name,
-                                                color = Color.White,
+                                                color = textColor,
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
                                             Text(
                                                 text = chat.lastMessage,
-                                                color = Color(0xFFA1A1AA),
+                                                color = subTextColor,
                                                 fontSize = 12.sp,
                                                 maxLines = 1
                                             )
@@ -2400,13 +2557,13 @@ fun SearchOverlayScreen(
                         Icon(
                             imageVector = Icons.Default.History,
                             contentDescription = null,
-                            tint = Color(0xFFA1A1AA),
+                            tint = subTextColor,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Recent Searches",
-                            color = Color.White,
+                            color = textColor,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -2434,7 +2591,7 @@ fun SearchOverlayScreen(
                     ) {
                         Text(
                             text = "No recent search history",
-                            color = Color(0xFF71717A),
+                            color = subTextColor,
                             fontSize = 13.sp
                         )
                     }
@@ -2443,7 +2600,8 @@ fun SearchOverlayScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(searchHistoryList, key = { it }) { item ->
+                        val distinctHistory = searchHistoryList.distinct()
+                        itemsIndexed(distinctHistory, key = { idx, item -> "hist_${item}_$idx" }) { idx, item ->
                             AnimatedVisibility(
                                 visible = searchHistoryList.contains(item),
                                 exit = fadeOut() + slideOutVertically()
@@ -2451,8 +2609,8 @@ fun SearchOverlayScreen(
                                 GlassPanel(
                                     modifier = Modifier.fillMaxWidth(),
                                     cornerRadius = 14.dp,
-                                    backgroundColor = Color(0xFF16161A),
-                                    borderColor = Color(0xFF26262C)
+                                    backgroundColor = cardBgColor,
+                                    borderColor = cardBorderColor
                                 ) {
                                     Row(
                                         modifier = Modifier
@@ -2470,13 +2628,13 @@ fun SearchOverlayScreen(
                                             Icon(
                                                 imageVector = Icons.Default.History,
                                                 contentDescription = null,
-                                                tint = Color(0xFF71717A),
+                                                tint = subTextColor,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Text(
                                                 text = item,
-                                                color = Color.White,
+                                                color = textColor,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium
                                             )
@@ -2489,7 +2647,7 @@ fun SearchOverlayScreen(
                                             Icon(
                                                 imageVector = Icons.Default.Close,
                                                 contentDescription = "Delete item",
-                                                tint = Color(0xFF71717A),
+                                                tint = subTextColor,
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -2507,7 +2665,7 @@ fun SearchOverlayScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.75f))
+                    .background(Color.Black.copy(alpha = 0.5f))
                     .clickable { showDeleteHistoryModal = false },
                 contentAlignment = Alignment.Center
             ) {
@@ -2516,8 +2674,8 @@ fun SearchOverlayScreen(
                         .fillMaxWidth(0.88f)
                         .clickable(enabled = false) {},
                     cornerRadius = 24.dp,
-                    backgroundColor = Color(0xFF1B1B20),
-                    borderColor = Color(0xFF2E2E38)
+                    backgroundColor = cardBgColor,
+                    borderColor = cardBorderColor
                 ) {
                     Column(
                         modifier = Modifier.padding(24.dp),
@@ -2534,7 +2692,7 @@ fun SearchOverlayScreen(
 
                         Text(
                             text = "Clear Search History",
-                            color = Color.White,
+                            color = textColor,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -2543,7 +2701,7 @@ fun SearchOverlayScreen(
 
                         Text(
                             text = "This will clear all recent searches from your history. You can also delete items manually from the list.",
-                            color = Color(0xFFA1A1AA),
+                            color = subTextColor,
                             fontSize = 12.sp,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
@@ -2588,14 +2746,14 @@ fun SearchOverlayScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = 0.08f))
+                                .background(if (isNightMode) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f))
                                 .clickable { showDeleteHistoryModal = false }
                                 .padding(vertical = 12.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "Cancel",
-                                color = Color.White,
+                                color = textColor,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -2913,9 +3071,9 @@ fun ChatContextMenuDialog(
 
                         PopupOptionRow(
                             icon = Icons.Default.GroupAdd,
-                            iconTint = Color(0xFF10B981),
+                            iconTint = Color(0xFF2563EB),
                             title = "Create group with ${chat.name}",
-                            textColor = Color(0xFF10B981),
+                            textColor = Color(0xFF2563EB),
                             itemHoverBg = itemHoverBg,
                             onClick = {
                                 onDismiss()
@@ -3340,7 +3498,7 @@ fun CreateGroupDialog(
     val allChats by viewModel.filteredChats.collectAsState()
     val allContacts by viewModel.filteredContacts.collectAsState()
 
-    var groupName by remember { mutableStateOf("") }
+    var groupName by remember(targetUser) { mutableStateOf(if (targetUser != null) "Group with ${targetUser.name}" else "") }
     var searchQuery by remember { mutableStateOf("") }
     var selectedGroupImageUri by remember { mutableStateOf<String?>(null) }
     var showImageSourceSheet by remember { mutableStateOf(false) }
@@ -3362,14 +3520,17 @@ fun CreateGroupDialog(
     }
 
     // Pre-select targetUser if present
-    val selectedUsers = remember {
-        mutableStateListOf<CandidateUser>().apply {
-            if (targetUser != null) {
-                val initial = candidateUsers.find { it.id == targetUser.id || it.name.equals(targetUser.name, true) }
-                    ?: CandidateUser(id = targetUser.id, name = targetUser.name, avatarType = targetUser.avatarType, subtitle = "Chat member")
-                add(initial)
-            }
+    var selectedUsers by remember(targetUser) {
+        val initialList = mutableListOf<CandidateUser>()
+        if (targetUser != null) {
+            val contact = allContacts.find { it.id == targetUser.id }
+            val resolvedName = contact?.name ?: targetUser.name
+            val resolvedAvatar = contact?.avatarType ?: targetUser.avatarType
+            val initial = candidateUsers.find { it.id == targetUser.id || it.name.equals(resolvedName, true) }
+                ?: CandidateUser(id = targetUser.id, name = resolvedName, avatarType = resolvedAvatar, subtitle = "Chat member")
+            initialList.add(initial)
         }
+        mutableStateOf(initialList.toList())
     }
 
     // Filter candidate list by search query (and exclude already selected users from available list)
@@ -3432,411 +3593,460 @@ fun CreateGroupDialog(
             color = dialogBg
         ) {
             Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxSize()
+                modifier = Modifier.fillMaxSize()
             ) {
-                // Header Row
-                Row(
+                // Top Custom App Bar Header Row
+                Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    color = dialogBg,
+                    border = BorderStroke(width = 1.dp, color = cardBorder.copy(alpha = 0.5f))
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.GroupAdd,
-                        contentDescription = "Create Group",
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Create Group Chat",
-                            color = textColor,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = if (targetUser != null) "With ${targetUser.name} & others" else "Select members & set name",
-                            color = subTextColor,
-                            fontSize = 12.sp
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close",
-                            tint = subTextColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Group Photo Selection Section
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
+                    Row(
                         modifier = Modifier
-                            .size(68.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (!selectedGroupImageUri.isNullOrEmpty() && File(selectedGroupImageUri!!).exists()) Color.Transparent
-                                else Color(0xFF10B981).copy(alpha = 0.15f)
-                            )
-                            .border(2.dp, Color(0xFF10B981).copy(alpha = 0.6f), CircleShape)
-                            .clickable { showImageSourceSheet = true },
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!selectedGroupImageUri.isNullOrEmpty() && File(selectedGroupImageUri!!).exists()) {
-                            AsyncImage(
-                                model = File(selectedGroupImageUri!!),
-                                contentDescription = "Group Photo",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier.size(40.dp)
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.CameraAlt,
-                                contentDescription = "Select Photo",
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(28.dp)
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = textColor,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
-                    }
 
-                    Spacer(modifier = Modifier.width(14.dp))
-
-                    // Group Name Input (Max 60 letters)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Group Name *",
-                            color = subTextColor,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(inputBg)
-                                .border(1.dp, cardBorder, RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            BasicTextField(
-                                value = groupName,
-                                onValueChange = {
-                                    if (it.length <= 60) groupName = it
-                                },
-                                textStyle = TextStyle(
-                                    color = textColor,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                ),
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                cursorBrush = SolidColor(Color(0xFF10B981))
-                            )
-                            if (groupName.isEmpty()) {
-                                Text(
-                                    text = "Enter name (max 60 chars)",
-                                    color = subTextColor.copy(alpha = 0.6f),
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Text(
-                                text = "${groupName.length}/60",
-                                color = if (groupName.length == 60) Color(0xFFEF4444) else subTextColor,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Search Bar for adding members
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(inputBg)
-                        .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = subTextColor,
-                            modifier = Modifier.size(18.dp)
-                        )
                         Spacer(modifier = Modifier.width(8.dp))
-                        BasicTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            textStyle = TextStyle(color = textColor, fontSize = 13.sp),
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            cursorBrush = SolidColor(Color(0xFF10B981))
-                        )
-                        if (searchQuery.isEmpty()) {
+
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Search users to add...",
-                                color = subTextColor.copy(alpha = 0.6f),
-                                fontSize = 13.sp
+                                text = "Create Group Chat",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 18.sp,
+                                color = textColor,
+                                letterSpacing = (-0.3).sp
                             )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear",
-                                tint = subTextColor,
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .clickable { searchQuery = "" }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (targetUser != null) "With ${targetUser.name} & others" else "Select members & set name",
+                                fontSize = 11.5.sp,
+                                color = subTextColor,
+                                fontWeight = FontWeight.Medium
                             )
                         }
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                        val totalMembersCount = selectedUsers.size + 1 // +1 for "You"
+                        val isFormValid = groupName.isNotBlank() && totalMembersCount >= 2 && totalMembersCount <= 50
 
-                // Member counter & Min/Max rules
-                val totalMembersCount = selectedUsers.size + 1 // +1 for "You"
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Selected Members (${totalMembersCount}/50)",
-                        color = textColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Min: 2 • Max: 50",
-                        color = if (totalMembersCount < 2) Color(0xFFEF4444) else subTextColor,
-                        fontSize = 11.sp
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Selected members chips row
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color(0xFF10B981).copy(alpha = 0.2f),
-                            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "You (Owner)",
-                                    color = Color(0xFF10B981),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    items(selectedUsers, key = { it.id }) { user ->
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = inputBg,
-                            border = BorderStroke(1.dp, cardBorder)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = user.name,
-                                    color = textColor,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Remove",
-                                    tint = subTextColor,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .clickable {
-                                            selectedUsers.remove(user)
+                        Button(
+                            onClick = {
+                                if (isFormValid) {
+                                    viewModel.createGroupChat(
+                                        groupName = groupName,
+                                        avatarPathOrType = selectedGroupImageUri ?: "",
+                                        memberNames = selectedUsers.map { it.name },
+                                        onSuccess = { newGroup ->
+                                            Toast.makeText(context, "Group '$groupName' created!", Toast.LENGTH_SHORT).show()
+                                            onGroupCreated(newGroup)
                                         }
-                                )
-                            }
+                                    )
+                                }
+                            },
+                            enabled = isFormValid,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF2563EB),
+                                disabledContainerColor = if (isNightMode) Color(0xFF1C1D24) else Color(0xFFE2E8F0),
+                                disabledContentColor = subTextColor
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+                            modifier = Modifier.height(38.dp)
+                        ) {
+                            Text("Create", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Create Group Button (Placed ABOVE the user list)
-                val isFormValid = groupName.isNotBlank() && totalMembersCount >= 2 && totalMembersCount <= 50
-
-                Button(
-                    onClick = {
-                        if (isFormValid) {
-                            viewModel.createGroupChat(
-                                groupName = groupName,
-                                avatarPathOrType = selectedGroupImageUri ?: "",
-                                memberNames = selectedUsers.map { it.name },
-                                onSuccess = { newGroup ->
-                                    Toast.makeText(context, "Group '$groupName' created!", Toast.LENGTH_SHORT).show()
-                                    onGroupCreated(newGroup)
+                // Scrollable main body
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Part 1: Group Name & Avatar Card
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isNightMode) Color(0xFF0F1117) else Color.White,
+                        border = BorderStroke(1.dp, cardBorder)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Avatar Picker
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (!selectedGroupImageUri.isNullOrEmpty() && File(selectedGroupImageUri!!).exists()) Color.Transparent
+                                        else Color(0xFF2563EB).copy(alpha = 0.12f)
+                                    )
+                                    .border(1.5.dp, Color(0xFF2563EB).copy(alpha = 0.6f), CircleShape)
+                                    .clickable { showImageSourceSheet = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!selectedGroupImageUri.isNullOrEmpty() && File(selectedGroupImageUri!!).exists()) {
+                                    AsyncImage(
+                                        model = File(selectedGroupImageUri!!),
+                                        contentDescription = "Group Photo",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "Select Photo",
+                                        tint = Color(0xFF2563EB),
+                                        modifier = Modifier.size(24.dp)
+                                    )
                                 }
+                            }
+
+                            // Group Name Input Custom styled with OutlinedTextField
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "GROUP NAME",
+                                    color = Color(0xFF2563EB),
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                OutlinedTextField(
+                                    value = groupName,
+                                    onValueChange = { if (it.length <= 60) groupName = it },
+                                    placeholder = { Text("Enter group title (max 60)...", fontSize = 13.5.sp, color = subTextColor) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(14.dp),
+                                    textStyle = TextStyle(
+                                        color = textColor,
+                                        fontSize = 14.sp
+                                    ),
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = Color(0xFF2563EB),
+                                        unfocusedBorderColor = cardBorder,
+                                        focusedContainerColor = if (isNightMode) Color(0xFF040507) else Color(0xFFF1F5F9),
+                                        unfocusedContainerColor = if (isNightMode) Color(0xFF040507) else Color(0xFFF1F5F9),
+                                        focusedTextColor = textColor,
+                                        unfocusedTextColor = textColor
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Part 2: Selected Members Counter & Scrolling Pills
+                    val totalMembersCount = selectedUsers.size + 1
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SELECTED MEMBERS (${totalMembersCount}/50)",
+                                color = Color(0xFF2563EB),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                text = "Min: 2 • Max: 50",
+                                color = if (totalMembersCount < 2) Color(0xFFEF4444) else subTextColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
-                    },
-                    enabled = isFormValid,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF10B981),
-                        disabledContainerColor = if (isNightMode) Color(0xFF27272A) else Color(0xFFE2E8F0)
-                    )
-                ) {
-                    Text(
-                        text = "Create Group (${totalMembersCount} Members)",
-                        color = if (isFormValid) Color.White else subTextColor,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = Color(0xFF2563EB).copy(alpha = 0.12f),
+                                    border = BorderStroke(1.dp, Color(0xFF2563EB).copy(alpha = 0.4f)),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "You (Owner)",
+                                            color = Color(0xFF2563EB),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
 
-                // Candidate users list
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Recent Contacts & Chat Users",
-                        color = textColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "${filteredCandidates.size} Available",
-                        color = Color(0xFF10B981),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                            itemsIndexed(selectedUsers, key = { idx, user -> "sel_${user.id}_$idx" }) { idx, user ->
+                                val hasAvatar = !user.avatarType.isNullOrBlank() && (
+                                    user.avatarType.startsWith("http") ||
+                                    user.avatarType.startsWith("content") ||
+                                    user.avatarType.startsWith("file") ||
+                                    user.avatarType.startsWith("/")
+                                )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = if (isNightMode) Color(0xFF1E212E) else Color(0xFFE2E8F0),
+                                    border = BorderStroke(1.dp, cardBorder),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        // Mini avatar
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF2563EB)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (hasAvatar) {
+                                                AsyncImage(
+                                                    model = user.avatarType,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = user.name.take(1).uppercase(),
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                        }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(inputBg)
-                        .border(1.dp, cardBorder, RoundedCornerShape(14.dp))
-                ) {
-                    if (filteredCandidates.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text(text = "No users found", color = subTextColor, fontSize = 12.sp)
+                                        Text(
+                                            text = user.name,
+                                            color = textColor,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove",
+                                            tint = subTextColor,
+                                            modifier = Modifier
+                                                .size(14.dp)
+                                                .clip(CircleShape)
+                                                .clickable {
+                                                    selectedUsers = selectedUsers.filterNot { it.id == user.id }
+                                                }
+                                        )
+                                    }
+                                }
+                            }
                         }
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(filteredCandidates, key = { it.id }) { candidate ->
+                    }
+
+                    // Part 3: Search Bar for Contacts
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                        placeholder = { Text("Search contact list...", fontSize = 13.sp, color = subTextColor) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = subTextColor, modifier = Modifier.size(18.dp)) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = subTextColor, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = textColor,
+                            fontSize = 13.5.sp
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color(0xFF2563EB),
+                            unfocusedBorderColor = cardBorder,
+                            focusedContainerColor = if (isNightMode) Color(0xFF0F1117) else Color.White,
+                            unfocusedContainerColor = if (isNightMode) Color(0xFF0F1117) else Color.White,
+                            focusedTextColor = textColor,
+                            unfocusedTextColor = textColor
+                        )
+                    )
+
+                    // Part 4: Available Contacts Scroll List
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "RECENT CONTACTS & USERS",
+                            color = subTextColor,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Text(
+                            text = "${filteredCandidates.size} Available",
+                            color = Color(0xFF2563EB),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (filteredCandidates.isEmpty()) {
+                            item {
+                                Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                                    Text(text = "No users found", color = subTextColor, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        } else {
+                            itemsIndexed(filteredCandidates.distinctBy { it.id }, key = { idx, candidate -> "cand_${candidate.id}_$idx" }) { idx, candidate ->
                                 val isSelected = selectedUsers.any { it.id == candidate.id }
-                                Row(
+                                val hasAvatar = !candidate.avatarType.isNullOrBlank() && (
+                                    candidate.avatarType.startsWith("http") ||
+                                    candidate.avatarType.startsWith("content") ||
+                                    candidate.avatarType.startsWith("file") ||
+                                    candidate.avatarType.startsWith("/")
+                                )
+
+                                Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
                                             if (isSelected) {
-                                                selectedUsers.removeAll { it.id == candidate.id }
+                                                selectedUsers = selectedUsers.filterNot { it.id == candidate.id }
                                             } else {
                                                 if (totalMembersCount >= 50) {
                                                     Toast.makeText(context, "Group limit reached (max 50 members)", Toast.LENGTH_SHORT).show()
                                                 } else {
-                                                    selectedUsers.add(candidate)
+                                                    selectedUsers = selectedUsers + candidate
                                                 }
                                             }
-                                        }
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        },
+                                    color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.08f) else (if (isNightMode) Color(0xFF0F1117) else Color.White),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = if (isSelected) Color(0xFF2563EB).copy(alpha = 0.5f) else cardBorder
+                                    ),
+                                    shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Box(
+                                    Row(
                                         modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF2563EB).copy(alpha = 0.2f)),
-                                        contentAlignment = Alignment.Center
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text(
-                                            text = candidate.name.take(1),
-                                            color = Color(0xFF2563EB),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            // Avatar circle
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(46.dp)
+                                                    .clip(CircleShape)
+                                                    .background(
+                                                        Brush.horizontalGradient(
+                                                            listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
+                                                        )
+                                                    ),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (hasAvatar) {
+                                                    AsyncImage(
+                                                        model = candidate.avatarType,
+                                                        contentDescription = "Avatar",
+                                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                } else {
+                                                    Text(
+                                                        text = candidate.name.take(1).uppercase(),
+                                                        color = Color.White,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        fontSize = 16.sp,
+                                                        fontFamily = FontFamily.SansSerif
+                                                    )
+                                                }
+                                            }
 
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                            Spacer(modifier = Modifier.width(12.dp))
 
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = candidate.name,
-                                            color = textColor,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = candidate.subtitle,
-                                            color = subTextColor,
-                                            fontSize = 11.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                                            Column {
+                                                Text(
+                                                    text = candidate.name,
+                                                    color = textColor,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    letterSpacing = (-0.15).sp
+                                                )
+                                                Spacer(modifier = Modifier.height(2.dp))
+                                                Text(
+                                                    text = candidate.subtitle.ifBlank { "Verified KnotLink User" },
+                                                    color = subTextColor,
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .background(if (isSelected) Color(0xFF10B981) else Color.Transparent)
-                                            .border(1.5.dp, if (isSelected) Color(0xFF10B981) else subTextColor, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isSelected) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = "Selected",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(14.dp)
-                                            )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
+                                                .border(1.5.dp, if (isSelected) Color(0xFF2563EB) else cardBorder, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "Selected",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -3874,7 +4084,7 @@ fun CreateGroupDialog(
                             .padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(imageVector = Icons.Default.CameraAlt, contentDescription = "Camera", tint = Color(0xFF10B981))
+                        Icon(imageVector = Icons.Default.CameraAlt, contentDescription = "Camera", tint = Color(0xFF2563EB))
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(text = "Take Photo with Camera", color = textColor, fontSize = 14.sp)
                     }

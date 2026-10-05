@@ -4,6 +4,7 @@ import android.widget.Toast
 import java.io.File
 import coil.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
@@ -26,6 +27,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.PaddingValues
@@ -49,6 +52,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -74,6 +78,8 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Switch
@@ -112,9 +118,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import com.example.ui.theme.AppFontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.activity.compose.BackHandler
 import com.example.ui.components.BitChatBottomNavBar
 import com.example.ui.components.BitChatNavTab
 import com.example.ui.components.GlassPanel
@@ -206,23 +215,24 @@ fun CallsScreen(
         label = "calls_subtext"
     )
 
-    Scaffold(
-        modifier = modifier.pointerInput(Unit) {
-            var totalDragX = 0f
-            detectHorizontalDragGestures(
-                onDragStart = { totalDragX = 0f },
-                onDragEnd = {
-                    if (totalDragX < -120f) {
-                        onTabSelected(BitChatNavTab.QR_SCAN)
-                    } else if (totalDragX > 120f) {
-                        onTabSelected(BitChatNavTab.CHATS)
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.pointerInput(Unit) {
+                var totalDragX = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDragX = 0f },
+                    onDragEnd = {
+                        if (totalDragX < -120f) {
+                            onTabSelected(BitChatNavTab.QR_SCAN)
+                        } else if (totalDragX > 120f) {
+                            onTabSelected(BitChatNavTab.CHATS)
+                        }
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        totalDragX += dragAmount
                     }
-                },
-                onHorizontalDrag = { change, dragAmount ->
-                    totalDragX += dragAmount
-                }
-            )
-        },
+                )
+            },
         bottomBar = {
             BitChatBottomNavBar(
                 currentTab = BitChatNavTab.CALLS,
@@ -1731,32 +1741,91 @@ fun CallsScreen(
         }
     }
 
-    // Start New Call & Call Link Screen
-    if (showStartCallDialog) {
+    // Start New Call & Call Link Screen (True Full Screen Overlay)
+    AnimatedVisibility(
+        visible = showStartCallDialog,
+        enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
+        exit = fadeOut() + slideOutVertically(targetOffsetY = { it })
+    ) {
+        BackHandler(enabled = showStartCallDialog) {
+            showStartCallDialog = false
+        }
+
         val generatedCallLink = remember { "https://bitchat.app/call/join-" + java.util.UUID.randomUUID().toString().take(6) }
         var hostApprovalRequired by remember { mutableStateOf(true) }
         var newCallSearchQuery by remember { mutableStateOf("") }
+        var selectedCallUserIds by remember { mutableStateOf(setOf<String>()) }
 
-        Dialog(
-            onDismissRequest = { showStartCallDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = if (isNightMode) Color(0xFF12131A) else Color(0xFFF8FAFC)
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding(),
-                color = if (isNightMode) Color(0xFF12131A) else Color(0xFFF8FAFC)
-            ) {
+                // Contacts & Chat List for New Call (Filtering out KnotLink Assistant completely)
+                data class CallPersonItem(val id: String, val name: String, val handle: String, val avatarUrl: String? = null)
+
+                val chatPeopleList = remember(allChats, contacts, newCallSearchQuery) {
+                    val itemsList = if (allChats.isNotEmpty()) {
+                        allChats.map { chat ->
+                            val contact = contacts.find { it.id == chat.id }
+                            val isKnotLink = chat.id == "bitassistant" || chat.id == "ai_assistant" || chat.id == "assistant" || chat.id == "bot" ||
+                                    chat.name.contains("Assistant", ignoreCase = true) || chat.name.contains("KnotLink", ignoreCase = true) ||
+                                    chat.name.contains("Bot", ignoreCase = true)
+                            val displayName = if (isKnotLink) "KnotLink Assistant" else (contact?.name ?: chat.name)
+                            CallPersonItem(
+                                id = chat.id,
+                                name = displayName,
+                                handle = displayName.lowercase().replace(" ", "").ifBlank { "user" },
+                                avatarUrl = contact?.avatarType ?: chat.avatarType
+                            )
+                        }
+                    } else if (contacts.isNotEmpty()) {
+                        contacts.map { c ->
+                            val isKnotLink = c.id == "bitassistant" || c.id == "ai_assistant" || c.id == "assistant" || c.id == "bot" ||
+                                    c.name.contains("Assistant", ignoreCase = true) || c.name.contains("KnotLink", ignoreCase = true) ||
+                                    c.name.contains("Bot", ignoreCase = true)
+                            val displayName = if (isKnotLink) "KnotLink Assistant" else c.name
+                            CallPersonItem(
+                                id = c.id,
+                                name = displayName,
+                                handle = displayName.lowercase().replace(" ", "").ifBlank { "contact" },
+                                avatarUrl = c.avatarType
+                            )
+                        }
+                    } else {
+                        listOf(
+                            CallPersonItem("alex", "Alex Rivera", "alex_rivera", null),
+                            CallPersonItem("sarah", "Sarah Chen", "sarah_c", null),
+                            CallPersonItem("evelyn", "Evelyn Vance", "evelyn_vance", null)
+                        )
+                    }
+
+                    val filteredList = itemsList.filter { item ->
+                        val isKnotLink = item.id == "bitassistant" || item.id == "ai_assistant" || item.id == "assistant" || item.id == "bot" ||
+                                item.name.contains("Assistant", ignoreCase = true) || item.name.contains("KnotLink", ignoreCase = true) ||
+                                item.name.contains("Bot", ignoreCase = true) || item.handle.contains("assistant", ignoreCase = true) ||
+                                item.handle.contains("bot", ignoreCase = true)
+                        !isKnotLink
+                    }
+
+                    if (newCallSearchQuery.isBlank()) filteredList
+                    else filteredList.filter {
+                        it.name.contains(newCallSearchQuery, ignoreCase = true) ||
+                        it.handle.contains(newCallSearchQuery, ignoreCase = true)
+                    }
+                }
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .statusBarsPadding()
+                        .padding(start = 16.dp, top = 8.dp, end = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Header Bar
+                    // Header Bar (Fixed at Top, NEVER gets cut off or scrolls!)
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, bottom = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1764,33 +1833,36 @@ fun CallsScreen(
                             IconButton(
                                 onClick = { showStartCallDialog = false },
                                 modifier = Modifier
-                                    .size(40.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(if (isNightMode) Color(0xFF1E202C) else Color(0xFFE2E8F0))
+                                    .background(if (isNightMode) Color(0xFF1F2937) else Color(0xFFF1F5F9))
+                                    .border(1.5.dp, if (isNightMode) Color(0xFF374151) else Color(0xFFCBD5E1), CircleShape)
                             ) {
                                 Icon(
-                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
                                     tint = animTextColor,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "New Call & Call Link",
-                                    color = animTextColor,
-                                    fontSize = 19.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "Start encrypted call or share link",
-                                    color = animSubTextColor,
-                                    fontSize = 12.sp
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(
+                                text = "Place A New Call",
+                                color = animTextColor,
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
                         }
                     }
+
+                    // Unified Scrollable Content Area (Full screen page content scrolls smoothly under the fixed top bar)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
 
                     // Compact Call Link Card Section
                     Column(
@@ -1812,47 +1884,33 @@ fun CallsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF2563EB).copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Link, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(16.dp))
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Create Call Link", color = animTextColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Icon(
+                                    imageVector = Icons.Default.Link,
+                                    contentDescription = null,
+                                    tint = Color(0xFF2563EB),
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Create Call Link", color = animTextColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             }
-                            Text("WhatsApp style", color = animSubTextColor, fontSize = 10.sp)
                         }
 
-                        // Link Display Box
+                        // Link Display Box - Text displays larger and copy icon is removed
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(if (isNightMode) Color(0xFF262838) else Color(0xFFF1F5F9))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = generatedCallLink,
                                 color = Color(0xFF2563EB),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 12.sp,
-                                modifier = Modifier.weight(1f)
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                modifier = Modifier.fillMaxWidth()
                             )
-                            IconButton(
-                                onClick = {
-                                    clipboardManager.setText(AnnotatedString(generatedCallLink))
-                                    Toast.makeText(context, "Call link copied to clipboard!", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Link", tint = Color(0xFF2563EB), modifier = Modifier.size(16.dp))
-                            }
                         }
 
                         // Host Approval Required Switch Option
@@ -1862,60 +1920,62 @@ fun CallsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Lock, contentDescription = null, tint = animSubTextColor, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Call Approval Needed", color = animTextColor, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                Icon(Icons.Default.Lock, contentDescription = null, tint = animSubTextColor, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Call Approval Needed", color = animTextColor, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             }
                             Switch(
                                 checked = hostApprovalRequired,
                                 onCheckedChange = { hostApprovalRequired = it },
                                 colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF2563EB)),
-                                modifier = Modifier.scale(0.8f)
+                                modifier = Modifier.scale(0.85f)
                             )
                         }
 
-                        // Action Buttons: Copy Link | Share Link to People | Send to All Chats
-                        Row(
+                        // Action Buttons: Copy Link (Full width) | Share Link & Send to All below
+                        Column(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Button(
                                 onClick = {
                                     clipboardManager.setText(AnnotatedString(generatedCallLink))
                                     Toast.makeText(context, "Call link copied!", Toast.LENGTH_SHORT).show()
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB).copy(alpha = 0.12f), contentColor = Color(0xFF2563EB)),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1f).height(36.dp)
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB), contentColor = Color.White),
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth().height(46.dp)
                             ) {
-                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Copy", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Copy Call Link", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
 
-                            Button(
-                                onClick = { showShareLinkSheet = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981).copy(alpha = 0.12f), contentColor = Color(0xFF10B981)),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1.3f).height(36.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Share Link", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
+                                Button(
+                                    onClick = { showShareLinkSheet = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.weight(1f).height(46.dp)
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Share Link", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
 
-                            Button(
-                                onClick = { showConfirmSendAllChatsDialog = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444).copy(alpha = 0.12f), contentColor = Color(0xFFEF4444)),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.weight(1.3f).height(36.dp)
-                            ) {
-                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Send to All", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Button(
+                                    onClick = { showConfirmSendAllChatsDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEF4444), contentColor = Color.White),
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier.weight(1f).height(46.dp)
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Send to All", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
                             }
                         }
                     }
@@ -1926,8 +1986,19 @@ fun CallsScreen(
                         onValueChange = { newCallSearchQuery = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
-                        placeholder = { Text("Search chat list by name or @username...", fontSize = 12.sp, color = animSubTextColor) },
+                            .height(60.dp),
+                        textStyle = TextStyle(
+                            color = if (isNightMode) Color.White else Color.Black,
+                            fontSize = 15.sp,
+                            fontFamily = AppFontFamily
+                        ),
+                        placeholder = { 
+                            Text(
+                                text = "@username", 
+                                fontSize = 15.sp, 
+                                color = if (isNightMode) Color.White.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.4f)
+                            ) 
+                        },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = animSubTextColor, modifier = Modifier.size(18.dp)) },
                         trailingIcon = {
                             if (newCallSearchQuery.isNotEmpty()) {
@@ -1939,6 +2010,8 @@ fun CallsScreen(
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = if (isNightMode) Color.White else Color.Black,
+                            unfocusedTextColor = if (isNightMode) Color.White else Color.Black,
                             focusedBorderColor = Color(0xFF2563EB),
                             unfocusedBorderColor = if (isNightMode) Color(0xFF2A2D3D) else Color(0xFFE2E8F0),
                             focusedContainerColor = if (isNightMode) Color(0xFF1C1E2B) else Color.White,
@@ -1946,27 +2019,92 @@ fun CallsScreen(
                         )
                     )
 
-                    // Contacts List Header
-                    val chatPeopleList = remember(allChats, contacts, newCallSearchQuery) {
-                        val itemsList = if (allChats.isNotEmpty()) {
-                            allChats.map { chat -> Triple(chat.id, chat.name, chat.id) }
-                        } else if (contacts.isNotEmpty()) {
-                            contacts.map { c -> Triple(c.id, c.name, c.id) }
-                        } else {
-                            listOf(
-                                Triple("alex", "Alex Rivera", "alex_rivera"),
-                                Triple("sarah", "Sarah Chen", "sarah_c"),
-                                Triple("evelyn", "Evelyn Vance", "evelyn_vance")
-                            )
-                        }
+                    // Elegant Audio/Video Call buttons with slightly rounded corners below the search bar when profiles are selected
+                    if (selectedCallUserIds.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Premium Red Audio Call Button (Slightly rounded corners)
+                            Button(
+                                onClick = {
+                                    val firstSelectedId = selectedCallUserIds.first()
+                                    val selectedNames = chatPeopleList.filter { selectedCallUserIds.contains(it.id) }.map { it.name }
+                                    val combinedName = if (selectedNames.size > 1) {
+                                        selectedNames.take(2).joinToString(", ") + if (selectedNames.size > 2) " & others" else ""
+                                    } else {
+                                        selectedNames.firstOrNull() ?: "Group Call"
+                                    }
+                                    showStartCallDialog = false
+                                    viewModel.startCall(firstSelectedId, combinedName, "AUDIO")
+                                    onStartAudioCallClick(firstSelectedId)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFDC2626), // Premium vibrant Crimson Red
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Call,
+                                    contentDescription = "Audio Call",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Audio Call",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color.White
+                                )
+                            }
 
-                        if (newCallSearchQuery.isBlank()) itemsList
-                        else itemsList.filter {
-                            it.second.contains(newCallSearchQuery, ignoreCase = true) ||
-                            it.third.contains(newCallSearchQuery, ignoreCase = true)
+                            // Premium Blue Video Call Button (Slightly rounded corners)
+                            Button(
+                                onClick = {
+                                    val firstSelectedId = selectedCallUserIds.first()
+                                    val selectedNames = chatPeopleList.filter { selectedCallUserIds.contains(it.id) }.map { it.name }
+                                    val combinedName = if (selectedNames.size > 1) {
+                                        selectedNames.take(2).joinToString(", ") + if (selectedNames.size > 2) " & others" else ""
+                                    } else {
+                                        selectedNames.firstOrNull() ?: "Group Call"
+                                    }
+                                    showStartCallDialog = false
+                                    viewModel.startCall(firstSelectedId, combinedName, "VIDEO")
+                                    onStartVideoCallClick(firstSelectedId)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF1D4ED8),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Videocam,
+                                    contentDescription = "Video Call",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Video Call",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
 
+                    // People list section title
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1979,118 +2117,152 @@ fun CallsScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${chatPeopleList.size} People",
+                            text = "${chatPeopleList.size} Available",
                             color = Color(0xFF2563EB),
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
-                    // Full Screen Scrollable Chat List
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    // List of available contacts (directly in main scrollable container)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(chatPeopleList, key = { it.first }, contentType = { "person" }) { (personId, personName, handle) ->
-                            Row(
+                        chatPeopleList.distinctBy { it.id }.forEachIndexed { idx, person ->
+                            val isSelected = selectedCallUserIds.contains(person.id)
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(if (isNightMode) Color(0xFF1C1E2B) else Color.White)
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isNightMode) Color(0xFF282B3D) else Color(0xFFF1F5F9),
-                                        shape = RoundedCornerShape(14.dp)
-                                    )
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .clickable {
+                                        selectedCallUserIds = if (isSelected) {
+                                            selectedCallUserIds - person.id
+                                        } else {
+                                            selectedCallUserIds + person.id
+                                        }
+                                    },
+                                colors = androidx.compose.material3.CardDefaults.cardColors(
+                                    containerColor = if (isSelected) {
+                                        Color(0xFF2563EB).copy(alpha = 0.08f)
+                                    } else if (isNightMode) {
+                                        Color(0xFF1B1D2A)
+                                    } else {
+                                        Color.White
+                                    }
+                                ),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) {
+                                        Color(0xFF2563EB)
+                                    } else if (isNightMode) {
+                                        Color.White.copy(0.08f)
+                                    } else {
+                                        Color(0xFFE2E8F0)
+                                    }
+                                ),
+                                shape = RoundedCornerShape(18.dp)
                             ) {
                                 Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        val avatar = person.avatarUrl
+                                        val hasImage = !avatar.isNullOrBlank() && (avatar.startsWith("http") || avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/"))
+                                        val isKnotLink = person.id == "bitassistant" || person.id == "ai_assistant" || person.id == "assistant" || person.id == "bot" || person.name.contains("Assistant", ignoreCase = true) || person.name.contains("KnotLink", ignoreCase = true)
+
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(CircleShape)
+                                                .then(
+                                                    if (hasImage) Modifier.background(Color.Transparent)
+                                                    else if (isKnotLink) Modifier.background(
+                                                        Brush.linearGradient(
+                                                            listOf(Color(0xFF8B5CF6), Color(0xFF6366F1))
+                                                        )
+                                                    )
+                                                    else Modifier.background(
+                                                        Brush.linearGradient(
+                                                            listOf(Color(0xFF2563EB), Color(0xFF7C3AED))
+                                                        )
+                                                    )
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (hasImage) {
+                                                AsyncImage(
+                                                    model = avatar,
+                                                    contentDescription = "Avatar",
+                                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else if (isKnotLink) {
+                                                Icon(
+                                                    imageVector = Icons.Default.SmartToy,
+                                                    contentDescription = "KnotLink",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = person.name.take(1).uppercase(),
+                                                    color = Color.White,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontSize = 18.sp
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .padding(end = 8.dp),
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Text(
+                                                text = person.name,
+                                                color = animTextColor,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+
+                                    // Beautiful Rounded Checkbox / Tickbox
                                     Box(
                                         modifier = Modifier
-                                            .size(42.dp)
+                                            .size(24.dp)
                                             .clip(CircleShape)
-                                            .background(
-                                                Brush.linearGradient(
-                                                    listOf(Color(0xFF2563EB), Color(0xFF8B5CF6))
-                                                )
-                                            ),
+                                            .background(if (isSelected) Color(0xFF2563EB) else Color.Transparent)
+                                            .border(1.5.dp, if (isSelected) Color(0xFF2563EB) else animSubTextColor, CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            text = personName.take(1).uppercase(),
-                                            color = Color.White,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text(
-                                            text = personName,
-                                            color = animTextColor,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = if (handle.startsWith("@")) handle else "@$handle",
-                                            color = animSubTextColor,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            showStartCallDialog = false
-                                            viewModel.startCall(personId, personName, "AUDIO")
-                                            onStartAudioCallClick(personId)
-                                        },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF10B981))
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Call,
-                                            contentDescription = "Audio Call",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(15.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            showStartCallDialog = false
-                                            viewModel.startCall(personId, personName, "VIDEO")
-                                            onStartVideoCallClick(personId)
-                                        },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFF2563EB))
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Videocam,
-                                            contentDescription = "Video Call",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(15.dp)
-                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = "Selected",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                }
+                    } // Close contacts list Column
+
+                    // Bottom Spacer inside the scrollable Column to handle gesture bars gracefully and prevent fixed whitespace
+                    Spacer(modifier = Modifier.height(30.dp).navigationBarsPadding())
+                } // Close scrollable inner Column
             }
         }
     }
@@ -2162,8 +2334,19 @@ fun CallsScreen(
                         onValueChange = { shareSearchQuery = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
-                        placeholder = { Text("Search contact name...", fontSize = 12.sp, color = animSubTextColor) },
+                            .height(60.dp),
+                        textStyle = TextStyle(
+                            color = if (isNightMode) Color.White else Color.Black,
+                            fontSize = 15.sp,
+                            fontFamily = AppFontFamily
+                        ),
+                        placeholder = { 
+                            Text(
+                                text = "Search contact name...", 
+                                fontSize = 15.sp, 
+                                color = if (isNightMode) Color.White.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.4f)
+                            ) 
+                        },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = animSubTextColor, modifier = Modifier.size(18.dp)) },
                         trailingIcon = {
                             if (shareSearchQuery.isNotEmpty()) {
@@ -2175,6 +2358,8 @@ fun CallsScreen(
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = if (isNightMode) Color.White else Color.Black,
+                            unfocusedTextColor = if (isNightMode) Color.White else Color.Black,
                             focusedBorderColor = Color(0xFF2563EB),
                             unfocusedBorderColor = if (isNightMode) Color(0xFF2A2D3D) else Color(0xFFE2E8F0),
                             focusedContainerColor = if (isNightMode) Color(0xFF1C1E2B) else Color.White,
@@ -2182,11 +2367,24 @@ fun CallsScreen(
                         )
                     )
 
-                    val sharePeople = remember(allChats, shareSearchQuery) {
+                    val sharePeople = remember(allChats, contacts, shareSearchQuery) {
                         val baseList = if (allChats.isNotEmpty()) {
-                            allChats.map { Pair(it.id, it.name) }
+                            allChats.map { chat ->
+                                val contact = contacts.find { it.id == chat.id }
+                                val isKnotLink = chat.id == "bitassistant" || chat.id == "ai_assistant" || chat.name.contains("Assistant", ignoreCase = true) || chat.name.contains("KnotLink", ignoreCase = true)
+                                val displayName = if (isKnotLink) "KnotLink Assistant" else (contact?.name ?: chat.name)
+                                Triple(
+                                    chat.id,
+                                    displayName,
+                                    contact?.avatarType ?: chat.avatarType
+                                )
+                            }
                         } else {
-                            listOf(Pair("alex", "Alex Rivera"), Pair("sarah", "Sarah Chen"), Pair("evelyn", "Evelyn Vance"))
+                            listOf(
+                                Triple("alex", "Alex Rivera", ""),
+                                Triple("sarah", "Sarah Chen", ""),
+                                Triple("evelyn", "Evelyn Vance", "")
+                            )
                         }
                         if (shareSearchQuery.isBlank()) baseList
                         else baseList.filter { it.second.contains(shareSearchQuery, ignoreCase = true) }
@@ -2229,7 +2427,7 @@ fun CallsScreen(
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(sharePeople, key = { it.first }, contentType = { "share_person" }) { (id, name) ->
+                        items(sharePeople, key = { it.first }, contentType = { "share_person" }) { (id, name, avatar) ->
                             val isChecked = selectedShareChatIds.contains(id)
                             Row(
                                 modifier = Modifier
@@ -2249,14 +2447,37 @@ fun CallsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val hasImage = !avatar.isNullOrBlank() && (avatar.startsWith("http") || avatar.startsWith("content://") || avatar.startsWith("file://") || avatar.startsWith("/"))
+                                    val isKnotLink = id == "bitassistant" || id == "ai_assistant" || name.contains("Assistant", ignoreCase = true) || name.contains("KnotLink", ignoreCase = true)
+
                                     Box(
                                         modifier = Modifier
                                             .size(38.dp)
                                             .clip(CircleShape)
-                                            .background(Color(0xFF2563EB).copy(alpha = 0.15f)),
+                                            .background(
+                                                if (hasImage) Color.Transparent
+                                                else if (isKnotLink) Color(0xFF8B5CF6).copy(alpha = 0.2f)
+                                                else Color(0xFF2563EB).copy(alpha = 0.15f)
+                                            ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(name.take(1).uppercase(), color = Color(0xFF2563EB), fontWeight = FontWeight.Bold)
+                                        if (hasImage) {
+                                            AsyncImage(
+                                                model = avatar,
+                                                contentDescription = "Avatar",
+                                                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else if (isKnotLink) {
+                                            Icon(
+                                                imageVector = Icons.Default.SmartToy,
+                                                contentDescription = "KnotLink",
+                                                tint = Color(0xFF8B5CF6),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        } else {
+                                            Text(name.take(1).uppercase(), color = Color(0xFF2563EB), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        }
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(name, color = animTextColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -2371,6 +2592,7 @@ fun CallsScreen(
             }
         }
     }
+}
 }
 
 @Composable

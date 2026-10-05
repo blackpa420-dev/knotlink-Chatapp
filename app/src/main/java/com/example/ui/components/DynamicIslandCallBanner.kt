@@ -17,6 +17,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,86 +74,96 @@ fun DynamicIslandCallBanner(
             label = "bannerGradientProgress"
         )
 
-    val darkGradientBrush = Brush.horizontalGradient(
-            colors = listOf(
-                Color(0xFF06101E), // Ultra dark Navy
-                Color(0xFF022C22), // Deep Dark Emerald
-                Color(0xFF1E1B4B), // Deep Dark Indigo
-                Color(0xFF0F172A)  // Dark Slate
-            ),
-            startX = animatedProgress * 500f,
-            endX = animatedProgress * 500f + 700f,
-            tileMode = TileMode.Mirror
-        )
+    val blueGlassBrush = Brush.horizontalGradient(
+        colors = listOf(
+            Color(0xDD1E3A8A), // Translucent Deep Royal Blue
+            Color(0xDD2563EB), // Translucent Vibrant Blue
+            Color(0xDD3B82F6), // Translucent Sky Blue
+            Color(0xDD1D4ED8)  // Translucent Navy Blue
+        ),
+        startX = animatedProgress * 500f,
+        endX = animatedProgress * 500f + 700f,
+        tileMode = TileMode.Mirror
+    )
 
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
     androidx.compose.material3.Surface(
-            modifier = modifier
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 2.dp)
+            .scale(if (isPressed) 0.985f else 1f),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent,
+        shadowElevation = 0.dp,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            Brush.horizontalGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.35f),
+                    Color(0xFF60A5FA).copy(alpha = 0.6f),
+                    Color.White.copy(alpha = 0.35f)
+                )
+            )
+        )
+    ) {
+        Box(
+            modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp)
-                .scale(if (isPressed) 0.985f else 1f),
-            shape = RoundedCornerShape(24.dp),
-            shadowElevation = 8.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.15f))
+                .background(blueGlassBrush)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onExpandClick
+                )
+                .padding(horizontal = 12.dp, vertical = 5.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(darkGradientBrush)
-                    .clickable(
-                        interactionSource = interactionSource,
-                        indication = null,
-                        onClick = onExpandClick
-                    )
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10B981)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF10B981)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Call,
-                                contentDescription = "Active Call",
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = if (callState.isConnected) "Voice Call • ${callState.contactName.ifBlank { "Voice Call" }}" else "Calling... • ${callState.contactName.ifBlank { "Voice Call" }}",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        Icon(
+                            imageVector = Icons.Default.Call,
+                            contentDescription = "Active Call",
+                            tint = Color.White,
+                            modifier = Modifier.size(17.dp)
                         )
                     }
-
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = timeFormatted,
-                        color = Color(0xFF34D399),
-                        fontSize = 14.sp,
+                        text = if (callState.isConnected) "Call • ${callState.contactName.ifBlank { "Voice Call" }}" else "Calling... • ${callState.contactName.ifBlank { "Voice Call" }}",
+                        color = Color.White,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        modifier = Modifier.padding(start = 8.dp)
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+
+                Text(
+                    text = timeFormatted,
+                    color = Color(0xFF6EE7B7),
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                )
             }
         }
+    }
 }
 
 

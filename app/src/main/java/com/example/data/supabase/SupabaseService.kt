@@ -415,74 +415,110 @@ object SupabaseService {
         Result.failure(lastError ?: Exception("Invalid or expired verification code"))
     }
 
-    suspend fun resendEmailOtp(
+    suspend fun sendOtpToEmail(
         email: String,
         type: String = "signup"
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val otpRes = sendOtpToEmail(email)
-            if (otpRes.isSuccess) {
-                return@withContext Result.success(true)
+            val cleanEmail = email.trim().lowercase()
+            val typesToTry = listOf(type, "signup", "email", "recovery").distinct()
+            var lastErrStr = ""
+
+            for (t in typesToTry) {
+                try {
+                    val resendUrl = "${SupabaseConfig.AUTH_BASE_URL}/resend"
+                    val resendBody = JSONObject().apply {
+                        put("email", cleanEmail)
+                        put("type", t)
+                    }
+                    val resendReq = Request.Builder()
+                        .url(resendUrl)
+                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                        .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                        .addHeader("Content-Type", "application/json")
+                        .post(resendBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                        .build()
+
+                    val resendResp = httpClient.newCall(resendReq).execute()
+                    val resendStr = resendResp.body?.string() ?: ""
+
+                    if (resendResp.isSuccessful) {
+                        Log.d(TAG, "OTP dispatched successfully via /resend ($t) to $cleanEmail")
+                        return@withContext Result.success(true)
+                    }
+
+                    val err = parseErrorMessage(resendStr, "")
+                    lastErrStr = err
+                    val isRateLimited = resendResp.code == 429 || resendResp.code == 422 ||
+                            err.contains("security", ignoreCase = true) ||
+                            err.contains("rate", ignoreCase = true) ||
+                            err.contains("seconds", ignoreCase = true) ||
+                            err.contains("limit", ignoreCase = true) ||
+                            err.contains("60", ignoreCase = true) ||
+                            err.contains("already", ignoreCase = true)
+
+                    if (isRateLimited) {
+                        Log.d(TAG, "OTP active/rate limited for $cleanEmail ($err)")
+                        return@withContext Result.success(true)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error trying /resend type=$t for $cleanEmail", e)
+                }
             }
 
-            val url = "${SupabaseConfig.AUTH_BASE_URL}/resend"
-            val bodyObj = JSONObject().apply {
-                put("email", email.trim())
-                put("type", type)
+            // Fallback to /otp endpoint
+            try {
+                val otpUrl = "${SupabaseConfig.AUTH_BASE_URL}/otp"
+                val otpBody = JSONObject().apply {
+                    put("email", cleanEmail)
+                    put("create_user", true)
+                }
+                val otpReq = Request.Builder()
+                    .url(otpUrl)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                    .addHeader("Content-Type", "application/json")
+                    .post(otpBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                val otpResp = httpClient.newCall(otpReq).execute()
+                val otpStr = otpResp.body?.string() ?: ""
+
+                if (otpResp.isSuccessful) {
+                    Log.d(TAG, "OTP dispatched successfully via /otp to $cleanEmail")
+                    return@withContext Result.success(true)
+                }
+
+                val otpErr = parseErrorMessage(otpStr, "Failed to send verification code")
+                val isOtpRateLimited = otpResp.code == 429 || otpResp.code == 422 ||
+                        otpErr.contains("security", ignoreCase = true) ||
+                        otpErr.contains("rate", ignoreCase = true) ||
+                        otpErr.contains("seconds", ignoreCase = true) ||
+                        otpErr.contains("limit", ignoreCase = true) ||
+                        otpErr.contains("60", ignoreCase = true) ||
+                        otpErr.contains("already", ignoreCase = true)
+
+                if (isOtpRateLimited) {
+                    Log.d(TAG, "OTP active/rate limited for $cleanEmail ($otpErr)")
+                    return@withContext Result.success(true)
+                }
+                lastErrStr = otpErr
+            } catch (e: Exception) {
+                Log.w(TAG, "Error trying /otp for $cleanEmail", e)
             }
 
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(resStr, "Failed to resend code")
-                return@withContext Result.failure(Exception(errorMsg))
-            }
-
-            Result.success(true)
+            Result.failure(Exception(lastErrStr.ifBlank { "Failed to send verification code" }))
         } catch (e: Exception) {
-            Log.e(TAG, "Error in resendEmailOtp", e)
+            Log.e(TAG, "Error sending OTP to $email", e)
             Result.failure(e)
         }
     }
 
-    suspend fun sendOtpToEmail(email: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val url = "${SupabaseConfig.AUTH_BASE_URL}/otp"
-            val bodyObj = JSONObject().apply {
-                put("email", email.trim())
-            }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(resStr, "Failed to send OTP code")
-                // If rate limited (e.g. 60 seconds restriction), OTP was already dispatched recently
-                if (response.code == 429 || errorMsg.contains("security", ignoreCase = true) || errorMsg.contains("rate", ignoreCase = true) || errorMsg.contains("seconds", ignoreCase = true) || errorMsg.contains("limit", ignoreCase = true)) {
-                    Log.d(TAG, "OTP already sent recently to $email (rate limited)")
-                    return@withContext Result.success(true)
-                }
-                return@withContext Result.failure(Exception(errorMsg))
-            }
-            Result.success(true)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    suspend fun resendEmailOtp(
+        email: String,
+        type: String = "signup"
+    ): Result<Boolean> {
+        return sendOtpToEmail(email, type)
     }
 
     suspend fun signOut(): Result<Boolean> = withContext(Dispatchers.IO) {

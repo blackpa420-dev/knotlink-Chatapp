@@ -179,91 +179,218 @@ fun VideoCallScreen(
         // MAIN FULLSCREEN VIDEO STREAM
         // Rule 3: Show self camera full screen BEFORE opponent answers, then switch to remoteTrack
         // ==========================================
-        if (remoteTrack != null && viewModel != null) {
-            // Opponent's Remote Video Stream Fullscreen
-            AndroidView(
-                factory = { ctx ->
-                    SurfaceViewRenderer(ctx).apply {
-                        viewModel.callEngine.eglBaseContext?.let { eglCtx ->
-                            init(eglCtx, null)
-                        }
-                        setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        // Fixed-size hardware scaling is documented by WebRTC as potentially
-                        // buggy on some devices. Keep the remote renderer dynamically sized.
-                        setEnableHardwareScaler(false)
-                        disableFpsReduction()
-                        setMirror(false)
-                        viewModel.callEngine.attachRemoteVideoSink(this)
-                    }
-                },
-                onRelease = { renderer ->
-                    viewModel.callEngine.detachRemoteVideoSink(renderer)
-                    renderer.release()
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else if (hasCallPermissions && !isCameraOff && localTrack != null && viewModel != null) {
-            // Fullscreen Local Camera Preview BEFORE call is answered (Rule 3)
-            AndroidView(
-                factory = { ctx ->
-                    SurfaceViewRenderer(ctx).apply {
-                        viewModel.callEngine.eglBaseContext?.let { eglCtx ->
-                            init(eglCtx, null)
-                        }
-                        setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
-                        setEnableHardwareScaler(false)
-                        disableFpsReduction()
-                        setMirror(isFrontCamera)
-                        viewModel.callEngine.attachLocalVideoSink(this)
-                    }
-                },
-                update = { renderer ->
-                    renderer.setMirror(isFrontCamera)
-                },
-                onRelease = { renderer ->
-                    viewModel.callEngine.detachLocalVideoSink(renderer)
-                    renderer.release()
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+        val parsedNames = remember(contactName) {
+            if (contactName.isBlank()) emptyList()
+            else {
+                val clean = contactName.replace(" & others", "").replace(" and ", ",").replace(" & ", ",")
+                clean.split(",").map { it.trim() }.filter { it.isNotBlank() }
+            }
+        }
+        val isGroupCall = parsedNames.size >= 2
 
-            // Clean camera view without artificial glare overlays
-        } else {
-            // Dark gradient fallback if camera is off
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0xFF0F172A), Color(0xFF0B0F19), Color(0xFF020617))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
+        if (isGroupCall && remoteTrack != null) {
+            // Group Video Call Grid: 2 Symmetrical Rectangular Tiles stacked vertically (WhatsApp style)
+            Column(
+                modifier = Modifier.fillMaxSize()
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    val avatarUrl = activeCall.contactAvatar
-                    if (avatarUrl.isNotBlank()) {
-                        coil.compose.SubcomposeAsyncImage(
-                            model = avatarUrl,
-                            contentDescription = "Contact avatar",
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                            modifier = Modifier.size(96.dp).clip(CircleShape),
-                            error = { Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold) }
+                // Top Tile: Remote Video Stream / Opponents Grid
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF0F172A))
+                        .border(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    if (viewModel != null) {
+                        AndroidView(
+                            factory = { ctx ->
+                                SurfaceViewRenderer(ctx).apply {
+                                    viewModel.callEngine.eglBaseContext?.let { eglCtx ->
+                                        init(eglCtx, null)
+                                    }
+                                    setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                    setEnableHardwareScaler(false)
+                                    disableFpsReduction()
+                                    setMirror(false)
+                                    viewModel.callEngine.attachRemoteVideoSink(this)
+                                }
+                            },
+                            onRelease = { renderer ->
+                                viewModel.callEngine.detachRemoteVideoSink(renderer)
+                                renderer.release()
+                            },
+                            modifier = Modifier.fillMaxSize()
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
                     }
-                    Text(
-                        text = contactName,
-                        color = Color.White,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Calling...",
-                        color = Color(0xFF94A3B8),
-                        fontSize = 14.sp
-                    )
+
+                    // Format display names with first names + count at bottom left of opponents tile
+                    val groupDisplayName = if (parsedNames.size >= 2) {
+                        val first1 = parsedNames[0].split(" ").first()
+                        val first2 = parsedNames[1].split(" ").first()
+                        val remainingCount = if (contactName.contains("others") || contactName.contains("more")) 3 else parsedNames.size - 2
+                        if (remainingCount > 0) "$first1, $first2 +$remainingCount" else "$first1 & $first2"
+                    } else {
+                        contactName
+                    }
+
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = groupDisplayName,
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // Bottom Tile: Local Camera Stream
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF1E293B))
+                        .border(1.dp, Color.White.copy(alpha = 0.1f))
+                ) {
+                    if (hasCallPermissions && !isCameraOff && localTrack != null && viewModel != null) {
+                        AndroidView(
+                            factory = { ctx ->
+                                SurfaceViewRenderer(ctx).apply {
+                                    viewModel.callEngine.eglBaseContext?.let { eglCtx ->
+                                        init(eglCtx, null)
+                                    }
+                                    setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                                    setEnableHardwareScaler(false)
+                                    disableFpsReduction()
+                                    setMirror(isFrontCamera)
+                                    viewModel.callEngine.attachLocalVideoSink(this)
+                                }
+                            },
+                            update = { renderer ->
+                                renderer.setMirror(isFrontCamera)
+                            },
+                            onRelease = { renderer ->
+                                viewModel.callEngine.detachLocalVideoSink(renderer)
+                                renderer.release()
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Camera is Off", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
+                        }
+                    }
+
+                    Surface(
+                        color = Color.Black.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "You",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        } else {
+            // Standard Single Person video call layout (existing code)
+            if (remoteTrack != null && viewModel != null) {
+                // Opponent's Remote Video Stream Fullscreen
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceViewRenderer(ctx).apply {
+                            viewModel.callEngine.eglBaseContext?.let { eglCtx ->
+                                init(eglCtx, null)
+                            }
+                            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                            setEnableHardwareScaler(false)
+                            disableFpsReduction()
+                            setMirror(false)
+                            viewModel.callEngine.attachRemoteVideoSink(this)
+                        }
+                    },
+                    onRelease = { renderer ->
+                        viewModel.callEngine.detachRemoteVideoSink(renderer)
+                        renderer.release()
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (hasCallPermissions && !isCameraOff && localTrack != null && viewModel != null) {
+                // Fullscreen Local Camera Preview BEFORE call is answered
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceViewRenderer(ctx).apply {
+                            viewModel.callEngine.eglBaseContext?.let { eglCtx ->
+                                init(eglCtx, null)
+                            }
+                            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                            setEnableHardwareScaler(false)
+                            disableFpsReduction()
+                            setMirror(isFrontCamera)
+                            viewModel.callEngine.attachLocalVideoSink(this)
+                        }
+                    },
+                    update = { renderer ->
+                        renderer.setMirror(isFrontCamera)
+                    },
+                    onRelease = { renderer ->
+                        viewModel.callEngine.detachLocalVideoSink(renderer)
+                        renderer.release()
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                // Dark gradient fallback if camera is off
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color(0xFF0F172A), Color(0xFF0B0F19), Color(0xFF020617))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        val avatarUrl = activeCall.contactAvatar
+                        if (avatarUrl.isNotBlank()) {
+                            coil.compose.SubcomposeAsyncImage(
+                                model = avatarUrl,
+                                contentDescription = "Contact avatar",
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(96.dp).clip(CircleShape),
+                                error = { Text(text = contactName.take(1).uppercase().ifBlank { "U" }, color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold) }
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+                        Text(
+                            text = contactName,
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Calling...",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
         }

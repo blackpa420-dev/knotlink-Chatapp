@@ -48,6 +48,7 @@ fun FloatingVideoCallPip(
     modifier: Modifier = Modifier
 ) {
     val remoteTrack by viewModel.callEngine.remoteVideoTrack.collectAsState()
+    val localTrack by viewModel.callEngine.localVideoTrack.collectAsState()
 
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -107,49 +108,25 @@ fun FloatingVideoCallPip(
                             .clip(RoundedCornerShape(20.dp))
                     )
                 } else {
-                    // Fallback when remote track is negotiating or ringing
-                    Box(
+                    // Live Self Video Stream before remote is connected (setMirror = true for self view)
+                    AndroidView(
+                        factory = { ctx ->
+                            com.example.ui.components.WebRtcTextureView(ctx, cornerRadiusDp = 20f).apply {
+                                viewModel.callEngine.eglBaseContext?.let { eglCtx ->
+                                    init(eglCtx)
+                                }
+                                setMirror(true)
+                                viewModel.callEngine.attachLocalVideoSink(this)
+                            }
+                        },
+                        onRelease = { textureView ->
+                            viewModel.callEngine.detachLocalVideoSink(textureView)
+                            textureView.release()
+                        },
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color(0xFF0F172A), Color(0xFF1E293B))
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(52.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.linearGradient(
-                                            listOf(Color(0xFF2563EB), Color(0xFF7C3AED))
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = callState.contactName.take(1).uppercase().ifBlank { "C" },
-                                    color = Color.White,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = callState.contactName.ifBlank { "Calling..." },
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        }
-                    }
+                            .clip(RoundedCornerShape(20.dp))
+                    )
                 }
             }
         }

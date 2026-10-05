@@ -104,6 +104,7 @@ object BitChatRoutes {
     const val WELCOME = "welcome"
     const val NUMBER_VERIFICATION = "number_verification"
     const val VERIFY_OTP = "verify_otp"
+    const val RESET_PASSWORD = "reset_password"
     const val REGISTER_IDENTITY = "register_identity"
     const val CHATS = "chats"
     const val CONTACTS = "contacts"
@@ -337,11 +338,15 @@ fun BitChatNavHost(
 
         composable(BitChatRoutes.WELCOME) {
             WelcomeScreen(
-                onCreateAccountClick = {
+                onNavigateToLogin = {
+                    bitChatViewModel.setLoginMode(true)
+                    navController.navigate(BitChatRoutes.NUMBER_VERIFICATION)
+                },
+                onNavigateToRegister = {
                     bitChatViewModel.setLoginMode(false)
                     navController.navigate(BitChatRoutes.NUMBER_VERIFICATION)
                 },
-                onLogInClick = {
+                onNavigateToForgotPassword = {
                     bitChatViewModel.setLoginMode(true)
                     navController.navigate(BitChatRoutes.NUMBER_VERIFICATION)
                 }
@@ -349,13 +354,15 @@ fun BitChatNavHost(
         }
 
         composable(BitChatRoutes.NUMBER_VERIFICATION) {
+            val isLogin = bitChatViewModel.isLoginMode.collectAsState().value
             EmailAuthScreen(
-                viewModel = bitChatViewModel,
-                onBackClick = { navController.popBackStack() },
-                onOtpSent = {
+                bitChatViewModel = bitChatViewModel,
+                initialMode = if (isLogin) com.example.ui.screens.AuthMode.LOGIN else com.example.ui.screens.AuthMode.REGISTER,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToOtp = { _ ->
                     navController.navigate(BitChatRoutes.VERIFY_OTP)
                 },
-                onLoginSuccess = {
+                onAuthSuccess = {
                     navController.navigate(BitChatRoutes.CHATS) {
                         popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
                     }
@@ -364,16 +371,38 @@ fun BitChatNavHost(
         }
 
         composable(BitChatRoutes.VERIFY_OTP) {
+            val email = bitChatViewModel.enteredEmail.collectAsState().value
+            val isForgotPass = bitChatViewModel.isForgotPasswordMode.collectAsState().value
             VerifyOtpScreen(
-                viewModel = bitChatViewModel,
-                onVerifySuccess = {
-                    val user = bitChatViewModel.userIdentity.value
-                    if (user != null && user.username.isNotBlank() && user.isVerified) {
-                        navController.navigate(BitChatRoutes.CHATS) {
-                            popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
-                        }
+                bitChatViewModel = bitChatViewModel,
+                targetEmailOrNumber = email,
+                onNavigateBack = { navController.popBackStack() },
+                onOtpVerifiedSuccess = {
+                    if (isForgotPass) {
+                        navController.navigate(BitChatRoutes.RESET_PASSWORD)
                     } else {
-                        navController.navigate(BitChatRoutes.REGISTER_IDENTITY)
+                        val user = bitChatViewModel.userIdentity.value
+                        if (user != null && user.username.isNotBlank() && user.isVerified) {
+                            navController.navigate(BitChatRoutes.CHATS) {
+                                popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate(BitChatRoutes.REGISTER_IDENTITY)
+                        }
+                    }
+                }
+            )
+        }
+
+        composable(BitChatRoutes.RESET_PASSWORD) {
+            EmailAuthScreen(
+                bitChatViewModel = bitChatViewModel,
+                initialMode = com.example.ui.screens.AuthMode.RESET_PASSWORD,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToOtp = { _ -> },
+                onAuthSuccess = {
+                    navController.navigate(BitChatRoutes.NUMBER_VERIFICATION) {
+                        popUpTo(BitChatRoutes.WELCOME) { inclusive = false }
                     }
                 }
             )
@@ -381,8 +410,9 @@ fun BitChatNavHost(
 
         composable(BitChatRoutes.REGISTER_IDENTITY) {
             RegisterIdentityScreen(
-                viewModel = bitChatViewModel,
-                onContinueClick = {
+                bitChatViewModel = bitChatViewModel,
+                onNavigateBack = { navController.popBackStack() },
+                onRegistrationComplete = {
                     navController.navigate(BitChatRoutes.CHATS) {
                         popUpTo(BitChatRoutes.WELCOME) { inclusive = true }
                     }

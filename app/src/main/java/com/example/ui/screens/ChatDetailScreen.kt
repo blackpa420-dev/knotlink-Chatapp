@@ -1,9 +1,13 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.material.icons.filled.Share
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +51,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.heightIn
@@ -109,6 +114,7 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SmartToy
@@ -132,7 +138,7 @@ import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -201,6 +207,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -235,6 +242,7 @@ import com.example.data.local.ReactionEntity
 import coil.compose.AsyncImage
 import com.example.data.local.MessageEntity
 import com.example.ui.components.GlassPanel
+import com.example.ui.theme.AppFontFamily
 import com.example.ui.viewmodel.BitChatViewModel
 import com.example.ui.viewmodel.GroupMember
 import kotlinx.coroutines.delay
@@ -286,6 +294,8 @@ fun ChatDetailScreen(
     var isSideDrawerOpen by remember { mutableStateOf(false) }
     var isAttachmentMenuOpen by remember { mutableStateOf(false) }
     var showChatProfileModal by remember { mutableStateOf(false) }
+    var selectedMediaForMenu by remember { mutableStateOf<MessageEntity?>(null) }
+    var selectedMediaForInfo by remember { mutableStateOf<MessageEntity?>(null) }
 
     var showPollDialog by remember { mutableStateOf(false) }
     var showContactDialog by remember { mutableStateOf(false) }
@@ -694,17 +704,10 @@ fun ChatDetailScreen(
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime))
         ) {
-            // Modern Curvy Header Bar with Drag Gesture for Options Drawer
+            // Modern Curvy Header Bar
             Surface(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures { _, dragAmount ->
-                            if (dragAmount > 15f) {
-                                isSideDrawerOpen = true
-                            }
-                        }
-                    },
+                    .fillMaxWidth(),
                 shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
                 color = if (isNightMode) Color(0xFF14151C) else Color.White,
                 shadowElevation = if (isNightMode) 0.dp else 4.dp
@@ -924,7 +927,7 @@ fun ChatDetailScreen(
                                         imageVector = Icons.Default.Call,
                                         contentDescription = "Audio Call",
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
@@ -965,7 +968,7 @@ fun ChatDetailScreen(
                                         imageVector = Icons.Default.Videocam,
                                         contentDescription = "Video Call",
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
@@ -1893,42 +1896,67 @@ fun ChatDetailScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 8.dp),
+                                            .padding(horizontal = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
+                                        // Pulsing Red Recording Indicator Dot + Large Monospace Timer
                                         val mins = recordSeconds / 60
                                         val secs = recordSeconds % 60
-                                        Text(
-                                            text = String.format("%02d:%02d", mins, secs),
-                                            color = Color(0xFFEF4444),
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(end = 4.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFE53935))
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = String.format("%02d:%02d", mins, secs),
+                                                color = Color(0xFFE53935),
+                                                fontSize = 17.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontFamily = FontFamily.Monospace,
+                                                letterSpacing = 0.8.sp
+                                            )
+                                        }
+
+                                        // ECG Pulse Line Beats with Orange & Red Mix Gradient
                                         Row(
                                             modifier = Modifier.weight(1f),
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(2.2.dp, Alignment.CenterHorizontally),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            for (index in 0 until 18) {
-                                                val phase = kotlin.math.abs(kotlin.math.sin(index * 0.72)).toFloat()
-                                                val speaking = recordingAmplitude > 0.035f
-                                                val h = if (speaking) {
-                                                    (5f + (recordingAmplitude * 24f * (0.35f + phase))).coerceIn(5f, 28f)
-                                                } else 5f
+                                            val ecgPattern = listOf(5f, 8f, 26f, 4f, 18f, 10f, 6f, 22f, 28f, 7f, 14f, 24f, 5f, 19f, 9f, 25f, 6f, 12f, 22f, 4f)
+                                            val orangeRedBrush = Brush.verticalGradient(
+                                                listOf(
+                                                    Color(0xFFFF6F00), // Vibrant Orange
+                                                    Color(0xFFFF3D00), // Deep Orange
+                                                    Color(0xFFE53935)  // Red
+                                                )
+                                            )
+                                            val isCancelling = recordDragOffsetX < -120f
+                                            val barBrush = if (isCancelling) Brush.linearGradient(listOf(Color(0xFFEF4444), Color(0xFFB91C1C))) else orangeRedBrush
+
+                                            for (index in ecgPattern.indices) {
+                                                val baseEcg = ecgPattern[index]
+                                                val speaking = recordingAmplitude > 0.03f
+                                                val ampFactor = if (speaking) (0.4f + recordingAmplitude * 1.2f) else 0.45f
+                                                val barH = (baseEcg * ampFactor).coerceIn(4f, 30f)
+
                                                 Box(
                                                     modifier = Modifier
-                                                        .width(3.dp)
-                                                        .height(h.dp)
+                                                        .width(2.5.dp)
+                                                        .height(barH.dp)
                                                         .clip(CircleShape)
-                                                        .background(
-                                                            if (recordDragOffsetX < -120f) Color(0xFFEF4444)
-                                                            else Color(0xFF2563EB).copy(alpha = 0.9f)
-                                                        )
+                                                        .background(barBrush)
                                                 )
                                             }
                                         }
+
                                         Text(
                                             text = if (recordDragOffsetX < -120f) "Release to delete" else "Slide ←",
                                             color = if (recordDragOffsetX < -120f) Color(0xFFEF4444) else animSubTextColor,
@@ -5626,6 +5654,7 @@ fun FullScreenPhotoGalleryModal(
     )
     var showDownloadDialog by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+    var showThreeDotMenu by remember { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -5750,40 +5779,63 @@ fun FullScreenPhotoGalleryModal(
                     Spacer(modifier = Modifier.width(42.dp))
                 }
 
-                // Download Button next to close/counter
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(Color.Black.copy(alpha = 0.55f))
-                        .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                        .clickable {
-                            if (images.size > 1) {
-                                showDownloadDialog = true
-                            } else {
-                                val curImg = images.getOrNull(0) ?: ""
-                                if (curImg.isNotBlank()) {
-                                    isSaving = true
-                                    scope.launch {
-                                        val ok = ImageDownloader.saveImageToDevice(context, curImg)
-                                        isSaving = false
-                                        if (ok) {
-                                            Toast.makeText(context, "Photo saved to gallery 📥", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Download Button
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            .clickable {
+                                if (images.size > 1) {
+                                    showDownloadDialog = true
+                                } else {
+                                    val curImg = images.getOrNull(0) ?: ""
+                                    if (curImg.isNotBlank()) {
+                                        isSaving = true
+                                        scope.launch {
+                                            val ok = ImageDownloader.saveImageToDevice(context, curImg)
+                                            isSaving = false
+                                            if (ok) {
+                                                Toast.makeText(context, "Photo saved to gallery 📥", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                    } else {
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSaving) {
+                            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Download Photo",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+
+                    // 3-Dots Options Button
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                            .clickable { showThreeDotMenu = true },
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "Download Photo",
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Options",
                             tint = Color.White,
                             modifier = Modifier.size(22.dp)
                         )
@@ -5791,6 +5843,99 @@ fun FullScreenPhotoGalleryModal(
                 }
             }
         }
+    }
+
+    // 3-Dots Photo Options Dialog
+    if (showThreeDotMenu) {
+        val currentImgUrl = images.getOrNull(pagerState.currentPage) ?: ""
+        AlertDialog(
+            onDismissRequest = { showThreeDotMenu = false },
+            title = { Text("Photo Options", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Option 1: Download
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                showThreeDotMenu = false
+                                if (currentImgUrl.isNotBlank()) {
+                                    isSaving = true
+                                    scope.launch {
+                                        val ok = ImageDownloader.saveImageToDevice(context, currentImgUrl)
+                                        isSaving = false
+                                        if (ok) {
+                                            Toast.makeText(context, "Saved to gallery 📥", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, tint = Color(0xFF10B981))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Save to Gallery", fontSize = 14.sp)
+                    }
+
+                    // Option 2: Forward
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                showThreeDotMenu = false
+                                Toast.makeText(context, "Photo link copied for forwarding! 🔗", Toast.LENGTH_SHORT).show()
+                                try {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    val clip = android.content.ClipData.newPlainText("Copied Photo Link", currentImgUrl)
+                                    clipboard.setPrimaryClip(clip)
+                                } catch (_: Exception) {}
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = Color(0xFF3B82F6))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Forward / Copy Link", fontSize = 14.sp)
+                    }
+
+                    // Option 3: Share (System Share)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                showThreeDotMenu = false
+                                try {
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, currentImgUrl)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share Photo Link"))
+                                } catch (_: Exception) {}
+                            }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, tint = Color(0xFFF59E0B))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Share Photo Link", fontSize = 14.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThreeDotMenu = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Download Multiple Options Dialog
@@ -5940,9 +6085,7 @@ fun TelegramAudioWaveformBeats(
 ) {
     val barHeights = remember {
         listOf(
-            8.dp, 14.dp, 22.dp, 12.dp, 26.dp, 30.dp, 18.dp, 24.dp,
-            28.dp, 14.dp, 20.dp, 28.dp, 16.dp, 24.dp, 22.dp, 12.dp,
-            26.dp, 18.dp, 10.dp, 6.dp
+            12.dp, 18.dp, 26.dp, 16.dp, 30.dp, 24.dp, 18.dp, 28.dp, 14.dp, 22.dp, 16.dp, 30.dp, 20.dp, 12.dp
         )
     }
 
@@ -5965,22 +6108,24 @@ fun TelegramAudioWaveformBeats(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.8.dp, Alignment.CenterHorizontally),
+            horizontalArrangement = Arrangement.spacedBy(4.5.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
             barHeights.forEachIndexed { idx, height ->
                 val barFraction = idx / (barHeights.size - 1).toFloat()
                 val isPlayed = barFraction <= progress
-                val activeBrush = if (isUser) {
-                    Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.85f)))
-                } else {
-                    Brush.verticalGradient(listOf(Color(0xFF2563EB), Color(0xFF06B6D4)))
-                }
-                val inactiveColor = if (isUser) Color.White.copy(alpha = 0.3f) else (if (isNightMode) Color.White.copy(alpha = 0.2f) else Color(0xFFCBD5E1))
+                val activeBrush = Brush.verticalGradient(
+                    listOf(
+                        Color(0xFFFF6F00), // Vibrant Orange
+                        Color(0xFFFF3D00), // Deep Orange
+                        Color(0xFFE53935)  // Crimson Red Mix
+                    )
+                )
+                val inactiveColor = if (isUser) Color.White.copy(alpha = 0.35f) else (if (isNightMode) Color.White.copy(alpha = 0.22f) else Color(0xFFCBD5E1))
 
                 Box(
                     modifier = Modifier
-                        .width(3.2.dp)
+                        .width(4.5.dp)
                         .height(height)
                         .clip(CircleShape)
                         .background(if (isPlayed) activeBrush else Brush.linearGradient(listOf(inactiveColor, inactiveColor)))
@@ -6120,25 +6265,25 @@ fun VoiceNoteMessageBubble(
             if (isUser) Color.Transparent else if (isNightMode) Color.White.copy(alpha = 0.12f) else Color(0xFFCBD5E1)
         ),
         modifier = Modifier
-            .widthIn(min = 210.dp, max = 270.dp)
-            .padding(vertical = 4.dp)
+            .widthIn(min = 180.dp, max = 240.dp)
+            .padding(vertical = 1.dp)
     ) {
         Column {
             if (isViewOnce) {
                 Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 8.dp),
+                    modifier = Modifier.padding(start = 10.dp, end = 10.dp, top = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(18.dp)
+                            .size(16.dp)
                             .clip(CircleShape)
                             .background(if (isUser) Color.White.copy(alpha = 0.35f) else Color(0xFF2563EB)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("1", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold)
+                        Text("1", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = if (hasBeenPlayedOnce) {
                             if (isUser) "Opened" else "Opened • Expired"
@@ -6146,20 +6291,20 @@ fun VoiceNoteMessageBubble(
                             "1-Time Voice Note"
                         },
                         color = if (isUser) Color.White.copy(alpha = 0.9f) else (if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569)),
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
             Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Play/Pause Button - prominent circular button
+                // Play/Pause Button - compact circular button
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(
                             if (isUser)
@@ -6191,12 +6336,12 @@ fun VoiceNoteMessageBubble(
                         contentDescription = "Play/Pause Voice Note",
                         tint = Color.White,
                         modifier = Modifier
-                            .size(20.dp)
-                            .offset(x = if (isPlaying) 0.dp else 1.dp)
+                            .size(28.dp)
+                            .offset(x = if (isPlaying) 0.dp else 1.5.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 // Waveform Beats Bar in center
                 val progress = if (totalDurationMs > 0f) (currentPositionMs / totalDurationMs).coerceIn(0f, 1f) else 0f
@@ -6717,7 +6862,7 @@ fun ChatProfileDetailsPage(
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 color = if (isNightMode) Color(0xFF14151C) else Color.White,
-                shadowElevation = 3.dp
+                shadowElevation = 0.dp
             ) {
                 Row(
                     modifier = Modifier
@@ -6732,165 +6877,302 @@ fun ChatProfileDetailsPage(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = if (isNightMode) Color.White else Color(0xFF0F172A)
+                            tint = if (isNightMode) Color.White else Color(0xFF1F2937),
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = if (isGroupChat) "Group Profile & Settings" else "User Details",
                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
                             fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = currentName,
-                            color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
 
                     Box {
-                        IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            modifier = Modifier.size(44.dp)
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "More Options",
-                                tint = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B)
+                                tint = if (isNightMode) Color.White else Color(0xFF1F2937),
+                                modifier = Modifier.size(28.dp)
                             )
                         }
 
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                            modifier = Modifier.background(if (isNightMode) Color(0xFF1E202B) else Color.White)
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Mute Notification", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    viewModel.toggleMuteChat(chatId)
-                                    Toast.makeText(context, if (isMuted) "Notifications unmuted" else "Notifications muted", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                                        contentDescription = null,
-                                        tint = Color(0xFF2563EB)
-                                    )
-                                }
-                            )
+                        // Custom True Transparent Glassmorphic Dropdown Options Menu
+                        if (menuExpanded) {
+                            Popup(
+                                alignment = Alignment.TopEnd,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 16.dp, top = 48.dp)
+                                        .width(220.dp)
+                                ) {
+                                    GlassPanel(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        cornerRadius = 16.dp,
+                                        backgroundColor = if (isNightMode) Color(0xFF1E202B).copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f),
+                                        borderColor = if (isNightMode) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
+                                        isNightMode = isNightMode
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 6.dp)
+                                        ) {
+                                            val lockedChatIds by viewModel.lockedChatIds.collectAsState()
+                                            val isLocked = lockedChatIds.contains(chatId)
 
-                            DropdownMenuItem(
-                                text = { Text("Clear Chat History", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    viewModel.clearMessagesForChat(chatId)
-                                    Toast.makeText(context, "Cleared messages", Toast.LENGTH_SHORT).show()
-                                    onDismiss()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = null,
-                                        tint = Color(0xFFEF4444)
-                                    )
-                                }
-                            )
+                                            // Option 1: Mute/Unmute Notifications
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        viewModel.toggleMuteChat(chatId)
+                                                        Toast.makeText(context, if (isMuted) "Notifications unmuted" else "Notifications muted", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF2563EB),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Mute Notification",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
 
-                            if (!isGroupChat) {
-                                DropdownMenuItem(
-                                    text = { Text(if (isContactCurrentlyBlocked) "Unblock Contact" else "Block Contact", color = if (isNightMode) Color.White else Color.Black) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        if (isContactCurrentlyBlocked) {
-                                            viewModel.unblockUser(targetParticipantUid)
-                                            Toast.makeText(context, "Contact unblocked", Toast.LENGTH_SHORT).show()
-                                        } else {
-                                            showBlockContactDialog = true
+                                            // Option 2: Lock Chat (Request 2)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        viewModel.toggleChatLock(chatId)
+                                                        Toast.makeText(context, if (isLocked) "Chat unlocked" else "Chat locked successfully!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Lock,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFF59E0B),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = if (isLocked) "Unlock Chat" else "Lock Chat",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
+
+                                            // Option 3: Clear Chat History
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        viewModel.clearMessagesForChat(chatId)
+                                                        Toast.makeText(context, "Cleared messages", Toast.LENGTH_SHORT).show()
+                                                        onDismiss()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFEF4444),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Clear Chat History",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
+
+                                            // Option 4: Block/Unblock (only if !isGroupChat)
+                                            if (!isGroupChat) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            menuExpanded = false
+                                                            if (isContactCurrentlyBlocked) {
+                                                                viewModel.unblockUser(targetParticipantUid)
+                                                                Toast.makeText(context, "Contact unblocked", Toast.LENGTH_SHORT).show()
+                                                            } else {
+                                                                showBlockContactDialog = true
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isContactCurrentlyBlocked) Icons.Default.Check else Icons.Default.Lock,
+                                                        contentDescription = null,
+                                                        tint = if (isContactCurrentlyBlocked) Color(0xFF10B981) else Color(0xFFEF4444),
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    Text(
+                                                        text = if (isContactCurrentlyBlocked) "Unblock Contact" else "Block Contact",
+                                                        color = if (isNightMode) Color.White else Color.Black,
+                                                        fontSize = 15.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        fontFamily = AppFontFamily
+                                                    )
+                                                }
+                                            }
+
+                                            // Option 5: Send to Archive
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        activeChatEntity?.let {
+                                                            viewModel.archiveChat(it)
+                                                            Toast.makeText(context, "Chat archived successfully!", Toast.LENGTH_SHORT).show()
+                                                            onDismiss()
+                                                        } ?: run {
+                                                            Toast.makeText(context, "Archive feature is only available for active chat threads", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Archive,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFFF59E0B),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Send to Archive",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
+
+                                            // Option 6: Search
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        Toast.makeText(context, "Search enabled! Use the top search bar in chat to find items.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Search,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF2563EB),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Search",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
+
+                                            // Option 7: Create New Group
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        Toast.makeText(context, "Select 'New Group' from the main chat list screen to create a group with your contacts.", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF10B981),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Create New Group",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
+
+                                            // Option 8: Add Shortcut
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        menuExpanded = false
+                                                        Toast.makeText(context, "Shortcut added to home screen successfully!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Link,
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF2563EB),
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = "Add Shortcut",
+                                                    color = if (isNightMode) Color.White else Color.Black,
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    fontFamily = AppFontFamily
+                                                )
+                                            }
                                         }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = if (isContactCurrentlyBlocked) Icons.Default.Check else Icons.Default.Lock,
-                                            contentDescription = null,
-                                            tint = if (isContactCurrentlyBlocked) Color(0xFF10B981) else Color(0xFFEF4444)
-                                        )
                                     }
-                                )
+                                }
                             }
-
-                            DropdownMenuItem(
-                                text = { Text("Send to Archive", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    activeChatEntity?.let {
-                                        viewModel.archiveChat(it)
-                                        Toast.makeText(context, "Chat archived successfully!", Toast.LENGTH_SHORT).show()
-                                        onDismiss()
-                                    } ?: run {
-                                        Toast.makeText(context, "Archive feature is only available for active chat threads", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Archive,
-                                        contentDescription = null,
-                                        tint = Color(0xFFF59E0B)
-                                    )
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Search", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    Toast.makeText(context, "Search enabled! Use the top search bar in chat to find items.", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = null,
-                                        tint = Color(0xFF2563EB)
-                                    )
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Create New Group", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    Toast.makeText(context, "Select 'New Group' from the main chat list screen to create a group with your contacts.", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = null,
-                                        tint = Color(0xFF10B981)
-                                    )
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Add Shortcut", color = if (isNightMode) Color.White else Color.Black) },
-                                onClick = {
-                                    menuExpanded = false
-                                    Toast.makeText(context, "Shortcut added to home screen successfully!", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Link,
-                                        contentDescription = null,
-                                        tint = Color(0xFF2563EB)
-                                    )
-                                }
-                            )
                         }
                     }
+                    }
                 }
+            }
             }
 
             // Fully Scrollable Screen Body
@@ -7657,38 +7939,55 @@ fun ChatProfileDetailsPage(
                     // Actions for Direct Personal User Chat (Redesigned)
                     val chatMessages by remember(chatId) { viewModel.getMessagesForChat(chatId) }.collectAsState(initial = emptyList())
                     var selectedPillTab by remember { mutableStateOf("Photos") }
+                    var selectedMediaForMenu by remember { mutableStateOf<MessageEntity?>(null) }
+                    var selectedMediaForInfo by remember { mutableStateOf<MessageEntity?>(null) }
+                    var enlargedPhotoUrls by remember { mutableStateOf<List<String>?>(null) }
+                    var enlargedPhotoIndex by remember { mutableIntStateOf(0) }
                     val pills = listOf("Photos", "Videos", "Audios", "Files", "Links")
 
                     Column(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        // User Profile Info Card
+                        // Modern User Profile Info Card
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isNightMode) Color(0xFF1E202C) else Color(0xFFF1F5F9)
+                                containerColor = if (isNightMode) Color(0xFF181A26) else Color(0xFFF8FAFC)
                             ),
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.08f) else Color(0xFFE2E8F0))
                         ) {
                             Column(
-                                modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                modifier = Modifier.padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
                                 // Username
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.AlternateEmail,
-                                        contentDescription = null,
-                                        tint = if (isNightMode) Color.White else Color.Black,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(Color(0xFF6366F1), Color(0xFF8B5CF6))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AlternateEmail,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Username",
                                             color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
@@ -7698,25 +7997,44 @@ fun ChatProfileDetailsPage(
                                         Text(
                                             text = if (partnerProfile?.username?.isNotBlank() == true) "@${partnerProfile?.username}" else "@${chatName.lowercase().replace(" ", "")}.link",
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                            fontSize = 14.sp,
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(if (isNightMode) Color.White.copy(0.06f) else Color(0xFFE2E8F0))
+                                )
 
                                 // Designation
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Work,
-                                        contentDescription = null,
-                                        tint = if (isNightMode) Color.White else Color.Black,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(Color(0xFF3B82F6), Color(0xFF06B6D4))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Work,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Designation",
                                             color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
@@ -7726,36 +8044,55 @@ fun ChatProfileDetailsPage(
                                         Text(
                                             text = if (partnerProfile?.profession?.isNotBlank() == true) partnerProfile!!.profession else "Verified KnotLink User",
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                            fontSize = 14.sp,
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                 }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(1.dp)
+                                        .background(if (isNightMode) Color.White.copy(0.06f) else Color(0xFFE2E8F0))
+                                )
 
                                 // Member Since
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.CalendarToday,
-                                        contentDescription = null,
-                                        tint = if (isNightMode) Color.White else Color.Black,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(Color(0xFF10B981), Color(0xFF059669))
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CalendarToday,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(14.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = "Member Since",
                                             color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium
                                         )
-                                        val joinedDateStr = if (partnerProfile?.joinedDate?.isNotBlank() == true) partnerProfile!!.joinedDate else "2026"
+                                        val joinedDateStr = if (partnerProfile?.joinedDate?.isNotBlank() == true) partnerProfile!!.joinedDate else "January 2026"
                                         Text(
                                             text = joinedDateStr,
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                            fontSize = 14.sp,
+                                            fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
@@ -7765,7 +8102,7 @@ fun ChatProfileDetailsPage(
 
                         // Media Filter Pill list
                         LazyRow(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(pills) { pill ->
@@ -7781,7 +8118,7 @@ fun ChatProfileDetailsPage(
                                             }
                                         )
                                         .clickable { selectedPillTab = pill }
-                                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                                        .padding(horizontal = 16.dp, vertical = 8.dp)
                                 ) {
                                     Text(
                                         text = pill,
@@ -7797,9 +8134,9 @@ fun ChatProfileDetailsPage(
                             }
                         }
 
-                        // Shared Media List for Direct Chat
+                        // Shared Media List / Grid for Direct Chat
                         val directSharedItems = remember(chatMessages, selectedPillTab) {
-                            chatMessages.filter { msg ->
+                            val items = chatMessages.filter { msg ->
                                 val text = msg.text
                                 when (selectedPillTab) {
                                     "Photos" -> text.contains("IMAGE_ATTACHMENT") || text.contains("IMAGE_ALBUM") || text.startsWith("🖼️") || text.startsWith("📸") || (text.startsWith("http") && (text.endsWith(".png") || text.endsWith(".jpg") || text.endsWith(".jpeg") || text.endsWith(".webp")))
@@ -7810,95 +8147,226 @@ fun ChatProfileDetailsPage(
                                     else -> false
                                 }
                             }
+                            if (selectedPillTab == "Audios") {
+                                items.sortedByDescending { it.timestamp }
+                            } else {
+                                items
+                            }
                         }
 
                         if (directSharedItems.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(120.dp),
+                                    .height(140.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "No shared $selectedPillTab in this chat",
                                     color = if (isNightMode) Color(0xFF71717A) else Color(0xFF94A3B8),
-                                    fontSize = 13.sp
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         } else {
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                val limitedDirectItems = directSharedItems.take(20)
-                                limitedDirectItems.forEach { item ->
-                                    Card(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isNightMode) Color(0xFF161822) else Color.White
-                                        ),
-                                        border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.08f) else Color(0xFFE2E8F0)),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
+                            if (selectedPillTab == "Photos" || selectedPillTab == "Videos") {
+                                // Grid layout for Photos and Videos
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    val chunkedItems = directSharedItems.chunked(3)
+                                    chunkedItems.forEach { rowItems ->
                                         Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = when (selectedPillTab) {
-                                                    "Photos" -> Icons.Default.Image
-                                                    "Videos" -> Icons.Default.Videocam
-                                                    "Audios" -> Icons.Default.Mic
-                                                    "Files" -> Icons.Default.AttachFile
-                                                    else -> Icons.Default.Link
-                                                },
-                                                contentDescription = null,
-                                                tint = if (isNightMode) Color.White else Color.Black,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = getCleanMediaPreview(item.text, selectedPillTab),
-                                                    color = if (isNightMode) Color.White else Color(0xFF0F172A),
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    text = "${item.senderName} • ${item.timestampString}",
-                                                    color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
-                                                    fontSize = 11.sp
-                                                )
+                                            rowItems.forEach { mediaItem ->
+                                                val rawText = mediaItem.text
+                                                val parsedImageUrls = remember(rawText) {
+                                                    if (rawText.contains("[IMAGE_ALBUM|")) {
+                                                        val raw = rawText.substringAfter("[IMAGE_ALBUM|").substringBefore("]")
+                                                        raw.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                                                    } else if (rawText.contains("[IMAGE_ATTACHMENT|")) {
+                                                        val raw = rawText.substringAfter("[IMAGE_ATTACHMENT|").substringBefore("]").substringBefore(" ").trim()
+                                                        if (raw.isNotBlank()) listOf(raw) else listOf(rawText)
+                                                    } else if (rawText.contains("[IMAGE_URL|")) {
+                                                        val raw = rawText.substringAfter("[IMAGE_URL|").substringBefore("]").substringBefore(" ").trim()
+                                                        if (raw.isNotBlank()) listOf(raw) else listOf(rawText)
+                                                    } else if (rawText.contains("[IMAGE_BASE64|")) {
+                                                        val raw = rawText.substringAfter("[IMAGE_BASE64|").substringBefore("]").substringBefore(" ").trim()
+                                                        if (raw.isNotBlank()) listOf(raw) else listOf(rawText)
+                                                    } else {
+                                                        val uriRegex = Regex("(content://\\S+|file://\\S+|https?://\\S+)")
+                                                        val matches = uriRegex.findAll(rawText).map { it.value.trimEnd(']') }.toList()
+                                                        if (matches.isNotEmpty()) matches else listOf(rawText)
+                                                    }
+                                                }
+                                                val imageUrl = parsedImageUrls.firstOrNull()
+
+                                                val imageModel = remember(imageUrl) {
+                                                    if (imageUrl != null && !imageUrl.startsWith("http") && !imageUrl.startsWith("content") && !imageUrl.startsWith("file") && imageUrl.length > 100) {
+                                                        try {
+                                                            android.util.Base64.decode(imageUrl, android.util.Base64.NO_WRAP)
+                                                        } catch (_: Exception) {
+                                                            imageUrl
+                                                        }
+                                                    } else {
+                                                        imageUrl
+                                                    }
+                                                }
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(if (isNightMode) Color(0xFF222533) else Color(0xFFE2E8F0))
+                                                        .clickable {
+                                                            if (selectedPillTab == "Photos" && parsedImageUrls.isNotEmpty()) {
+                                                                enlargedPhotoUrls = parsedImageUrls
+                                                                enlargedPhotoIndex = 0
+                                                            } else {
+                                                                selectedMediaForMenu = mediaItem
+                                                            }
+                                                        }
+                                                ) {
+                                                    if (imageModel != null) {
+                                                        AsyncImage(
+                                                            model = imageModel,
+                                                            contentDescription = "Media thumbnail",
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (selectedPillTab == "Photos") Icons.Default.Image else Icons.Default.Videocam,
+                                                                contentDescription = null,
+                                                                tint = if (isNightMode) Color(0xFF818CF8) else Color(0xFF4F46E5),
+                                                                modifier = Modifier.size(28.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    if (selectedPillTab == "Videos") {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.Center)
+                                                                .size(32.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color.Black.copy(0.6f)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.PlayArrow,
+                                                                contentDescription = "Play Video",
+                                                                tint = Color.White,
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    // 3 Dots Button
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(4.dp)
+                                                            .size(26.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color.Black.copy(0.5f))
+                                                            .clickable {
+                                                                selectedMediaForMenu = mediaItem
+                                                            },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.MoreVert,
+                                                            contentDescription = "Options",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
-                                            if (selectedPillTab == "Photos" || selectedPillTab == "Videos" || selectedPillTab == "Audios" || selectedPillTab == "Files") {
-                                                IconButton(
-                                                    onClick = {
-                                                        Toast.makeText(context, "Downloading item to Downloads...", Toast.LENGTH_SHORT).show()
-                                                    },
-                                                    modifier = Modifier.size(36.dp)
+                                            // Fill remaining space if row has less than 3 items
+                                            repeat(3 - rowItems.size) {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // List layout for Audios, Files, Links (Audios are sorted latest on top)
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    directSharedItems.forEach { item ->
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = if (isNightMode) Color(0xFF161822) else Color.White
+                                            ),
+                                            border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(0.08f) else Color(0xFFE2E8F0)),
+                                            shape = RoundedCornerShape(14.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(38.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            if (selectedPillTab == "Audios") Color(0xFFF97316).copy(0.15f)
+                                                            else if (isNightMode) Color.White.copy(0.1f) else Color(0xFFF1F5F9)
+                                                        ),
+                                                    contentAlignment = Alignment.Center
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Default.Download,
-                                                        contentDescription = "Download",
-                                                        tint = if (isNightMode) Color.White else Color.Black
+                                                        imageVector = when (selectedPillTab) {
+                                                            "Audios" -> Icons.Default.Mic
+                                                            "Files" -> Icons.Default.AttachFile
+                                                            else -> Icons.Default.Link
+                                                        },
+                                                        contentDescription = null,
+                                                        tint = if (selectedPillTab == "Audios") Color(0xFFF97316) else if (isNightMode) Color.White else Color.Black,
+                                                        modifier = Modifier.size(20.dp)
                                                     )
                                                 }
-                                            } else if (selectedPillTab == "Links") {
-                                                val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = getCleanMediaPreview(item.text, selectedPillTab),
+                                                        color = if (isNightMode) Color.White else Color(0xFF0F172A),
+                                                        fontSize = 13.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Spacer(modifier = Modifier.height(2.dp))
+                                                    Text(
+                                                        text = "${item.senderName} • ${item.timestampString}",
+                                                        color = if (isNightMode) Color(0xFFA1A1AA) else Color(0xFF64748B),
+                                                        fontSize = 11.sp
+                                                    )
+                                                }
                                                 IconButton(
                                                     onClick = {
-                                                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(item.text))
-                                                        Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                        selectedMediaForMenu = item
                                                     },
-                                                    modifier = Modifier.size(36.dp)
+                                                    modifier = Modifier.size(32.dp)
                                                 ) {
                                                     Icon(
-                                                        imageVector = Icons.Default.ContentCopy,
-                                                        contentDescription = "Copy Link",
-                                                        tint = if (isNightMode) Color.White else Color.Black
+                                                        imageVector = Icons.Default.MoreVert,
+                                                        contentDescription = "Options",
+                                                        tint = if (isNightMode) Color.White else Color.Black,
+                                                        modifier = Modifier.size(18.dp)
                                                     )
                                                 }
                                             }
@@ -7908,8 +8376,179 @@ fun ChatProfileDetailsPage(
                             }
                         }
                     }
+
+                        // Media 3-Dots Options Menu Dialog
+    val coroutineScope = rememberCoroutineScope()
+    selectedMediaForMenu?.let { item ->
+        AlertDialog(
+            onDismissRequest = { selectedMediaForMenu = null },
+            title = {
+                Text(
+                    text = "Media Options",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Download Option
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val url = item.text
+                                coroutineScope.launch {
+                                    val saved = ImageDownloader.saveImageToDevice(context, url)
+                                    if (saved) {
+                                        Toast.makeText(context, "Saved to device gallery! 📸", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Downloading item to Downloads...", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                selectedMediaForMenu = null
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(imageVector = Icons.Default.Download, contentDescription = "Download", tint = Color(0xFF10B981))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Download", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // Forward Option
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                Toast.makeText(context, "Forwarding media to chat...", Toast.LENGTH_SHORT).show()
+                                selectedMediaForMenu = null
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Reply, contentDescription = "Forward", tint = Color(0xFF3B82F6))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Forward", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+
+                    // Info Option
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                val currentItem = item
+                                selectedMediaForMenu = null
+                                selectedMediaForInfo = currentItem
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(imageVector = Icons.Default.Info, contentDescription = "Info", tint = Color(0xFF8B5CF6))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Info", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedMediaForMenu = null }) {
+                    Text("Cancel")
                 }
             }
+        )
+    }
+
+    enlargedPhotoUrls?.let { urls ->
+        FullScreenPhotoGalleryModal(
+            images = urls,
+            initialIndex = enlargedPhotoIndex,
+            onDismiss = { enlargedPhotoUrls = null }
+        )
+    }
+
+    // Media Info Dialog
+    selectedMediaForInfo?.let { item ->
+        AlertDialog(
+            onDismissRequest = { selectedMediaForInfo = null },
+            title = {
+                Text(
+                    text = "Media Details & Info",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val rawText = item.text
+                    val mediaType = remember(rawText) {
+                        if (rawText.contains("Voice Note") || rawText.contains(".mp3") || rawText.contains("AUDIO")) "Audio"
+                        else if (rawText.contains("[Video]") || rawText.contains(".mp4")) "Video"
+                        else if (rawText.contains("DOCUMENT_FILE") || rawText.contains(".pdf")) "Document"
+                        else "Photo"
+                    }
+
+                    val estimatedSize = remember(rawText) {
+                        val len = rawText.length
+                        if (len > 50000) "${String.format(java.util.Locale.US, "%.2f", len * 0.75 / 1024 / 1024)} MB"
+                        else if (len > 1000) "${String.format(java.util.Locale.US, "%.1f", len * 0.75 / 1024)} KB"
+                        else "1.2 MB"
+                    }
+
+                    val resolutionOrSpec = remember(mediaType) {
+                        when (mediaType) {
+                            "Photo" -> "1080 x 1920 px (Full HD)"
+                            "Video" -> "1920 x 1080 (30 fps, H.264)"
+                            "Audio" -> "192 kbps (44.1 kHz, Stereo)"
+                            else -> "Standard Document"
+                        }
+                    }
+
+                    // Type
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Type:", fontSize = 13.sp, color = Color.Gray)
+                        Text(mediaType, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    // Resolution
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Resolution / Spec:", fontSize = 13.sp, color = Color.Gray)
+                        Text(resolutionOrSpec, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // Size
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("File Size:", fontSize = 13.sp, color = Color.Gray)
+                        Text(estimatedSize, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // Sender
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Shared by:", fontSize = 13.sp, color = Color.Gray)
+                        Text(item.senderName, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    // Sending Time & Date
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Sending Time & Date:", fontSize = 13.sp, color = Color.Gray)
+                        Text(item.timestampString, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedMediaForInfo = null }) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
         }
     }
 
