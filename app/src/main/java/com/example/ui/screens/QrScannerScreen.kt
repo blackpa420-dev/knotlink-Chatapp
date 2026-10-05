@@ -180,12 +180,16 @@ fun QrScannerScreen(
     // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.
     // The same canonical search flow can resolve this UID directly.
     val publicId = user?.publicId ?: user?.username ?: "KNOTLINK_USER"
-    val qrIdentifier = user?.qrIdentifier ?: user?.username?.removePrefix("@") ?: ""
+    val qrIdentifier = user?.qrIdentifier.orEmpty()
     val qrBitmap = remember(qrIdentifier) {
-        try {
-            QRCodeGenerator.generateProfileQRCode(publicId = qrIdentifier, context = context, size = 512)
-        } catch (e: Exception) {
+        if (qrIdentifier.isBlank()) {
             null
+        } else {
+            try {
+                QRCodeGenerator.generateProfileQRCode(publicId = qrIdentifier, context = context, size = 512)
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 
