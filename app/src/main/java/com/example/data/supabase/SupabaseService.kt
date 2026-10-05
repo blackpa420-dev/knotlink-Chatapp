@@ -1091,39 +1091,48 @@ object SupabaseService {
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates")
+                .addHeader("Prefer", "resolution=ignore-duplicates,return=representation")
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
+
             val response = httpClient.newCall(request).execute()
+            val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val bodyText = response.body?.string().orEmpty()
                 return@withContext Result.failure(
-                    Exception(parseErrorMessage(bodyText, "Failed to create chat (${response.code})"))
+                    Exception(parseErrorMessage(responseBody, "Failed to create chat (${response.code})"))
                 )
             }
 
-            // Every authenticated chat operation starts by registering the current
-            // user as a participant. The second participant is added only when the
-            // canonical recipient is known.
-            val participantUrl = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
-            val participantBody = JSONObject().apply {
-                put("chat_id", chatId)
-                put("user_id", currentUid)
+            // Only a newly-created chat gets an automatic current-user membership.
+            // Existing chats must already be joined, preventing guessed chat IDs
+            // from becoming a way to join another user's conversation.
+            val createdNewChat = try {
+                responseBody.isNotBlank() && JSONArray(responseBody).length() > 0
+            } catch (_: Exception) {
+                false
             }
-            val participantRequest = Request.Builder()
-                .url(participantUrl)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
-                .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-            httpClient.newCall(participantRequest).execute().use { participantResponse ->
-                if (!participantResponse.isSuccessful) {
-                    val participantBody = participantResponse.body?.string().orEmpty()
-                    return@withContext Result.failure(
-                        Exception(parseErrorMessage(participantBody, "Failed to register chat participant (${participantResponse.code})"))
-                    )
+
+            if (createdNewChat) {
+                val participantUrl = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
+                val participantBody = JSONObject().apply {
+                    put("chat_id", chatId)
+                    put("user_id", currentUid)
+                }
+                val participantRequest = Request.Builder()
+                    .url(participantUrl)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
+                    .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                httpClient.newCall(participantRequest).use { participantResponse ->
+                    if (!participantResponse.isSuccessful) {
+                        val participantBody = participantResponse.body?.string().orEmpty()
+                        return@withContext Result.failure(
+                            Exception(parseErrorMessage(participantBody, "Failed to register chat participant (${participantResponse.code})"))
+                        )
+                    }
                 }
             }
             Result.success(true)
