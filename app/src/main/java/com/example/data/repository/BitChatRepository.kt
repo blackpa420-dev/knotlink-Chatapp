@@ -1032,20 +1032,8 @@ class BitChatRepository(val dao: BitChatDao) {
                 )
             }
 
-            // 3. Fallback for valid scanned public ID
-            if (clean.length >= 3) {
-                return PublicUserProfile(
-                    uid = clean,
-                    publicId = clean,
-                    username = clean.lowercase().replace(" ", "_"),
-                    displayName = clean,
-                    avatarUrl = "",
-                    bio = "Scanned KnotLink User",
-                    profession = "✨ KnotLink Member",
-                    mutualGroups = listOf("KnotLink Network"),
-                    avatarType = "default"
-                )
-            }
+            // Never fabricate a profile for an unresolved identifier.
+            // A QR/ID must resolve to a real registered profile before a user is shown or a chat is created.
         } catch (e: Exception) {
             Log.w("BitChatRepo", "Identity resolution error: ${e.message}")
         }
