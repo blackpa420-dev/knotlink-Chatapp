@@ -177,7 +177,10 @@ fun QrScannerScreen(
     var scannedUser by remember { mutableStateOf<ScannedUser?>(null) }
 
     // Personal QR Code Bitmap Generation
-    // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.\n    // The same canonical search flow can resolve this UID directly.\n    val qrIdentifier = user?.qrIdentifier ?: user?.username?.removePrefix("@") ?: ""
+    // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.
+    // The same canonical search flow can resolve this UID directly.
+    val publicId = user?.publicId ?: user?.username ?: "KNOTLINK_USER"
+    val qrIdentifier = user?.qrIdentifier ?: user?.username?.removePrefix("@") ?: ""
     val qrBitmap = remember(qrIdentifier) {
         try {
             QRCodeGenerator.generateProfileQRCode(publicId = qrIdentifier, context = context, size = 512)
