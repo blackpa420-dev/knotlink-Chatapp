@@ -1215,12 +1215,51 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 val signUpRes = SupabaseService.signUpWithEmail(email, pass, "", "")
 
                 if (!signUpRes.isSuccess) {
-                    _isSendingOtp.value = false
                     val errStr = signUpRes.exceptionOrNull()?.message.orEmpty()
-                    val displayErr = if (
+                    val looksAlreadyRegistered =
                         errStr.contains("already registered", ignoreCase = true) ||
-                        errStr.contains("already exists", ignoreCase = true)
-                    ) {
+                        errStr.contains("already exists", ignoreCase = true) ||
+                        errStr.contains("user already", ignoreCase = true)
+
+                    if (looksAlreadyRegistered) {
+                        // Auth user without public.profiles is an abandoned registration, not a completed account.
+                        val existingProfile = SupabaseService.getProfileByEmail(email).getOrNull()
+                        if (existingProfile == null) {
+                            val resume = SupabaseService.signInWithEmail(email, pass)
+                            if (resume.isSuccess) {
+                                val uid = resume.getOrNull()?.user?.id.orEmpty()
+                                if (uid.isNotBlank() && repository.prepareForAuthenticatedUser(uid)) {
+                                    repository.saveEmail(email)
+                                    val existingLocal = repository.userIdentity.firstOrNull()
+                                    repository.saveUserIdentity((existingLocal ?: UserIdentityEntity()).copy(
+                                        id = 1, supabaseUid = uid, email = email,
+                                        username = "", fullName = "", avatarPath = "",
+                                        isEmailVerified = true, isVerified = false, loginTimestamp = 0L
+                                    ))
+                                    _isSendingOtp.value = false
+                                    showToast("Your previous registration is incomplete. Please finish your profile.")
+                                    withContext(Dispatchers.Main) { onSuccess() }
+                                    return@launch
+                                }
+                            }
+
+                            // Pending/unconfirmed Auth user: resend the signup OTP and continue.
+                            val otpRes = SupabaseService.sendOtpToEmail(email, "signup")
+                            if (otpRes.isSuccess) {
+                                repository.saveEmail(email)
+                                _isSendingOtp.value = false
+                                _enteredOtpCode.value = ""
+                                _selectedOtpIndex.value = 0
+                                startOtpCountdown()
+                                showToast("Verification code sent to $email")
+                                withContext(Dispatchers.Main) { onSuccess() }
+                                return@launch
+                            }
+                        }
+                    }
+
+                    _isSendingOtp.value = false
+                    val displayErr = if (looksAlreadyRegistered) {
                         "This email is already registered. Please log in instead."
                     } else {
                         errStr.ifBlank { "Could not create the account. Please try again." }
