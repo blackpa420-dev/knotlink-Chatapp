@@ -8090,7 +8090,7 @@ fun ChatProfileDetailsPage(
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Medium
                                         )
-                                        val joinedDateStr = if (partnerProfile?.joinedDate?.isNotBlank() == true) partnerProfile!!.joinedDate else "January 2026"
+                                        val joinedDateStr = formatMemberSince(partnerProfile?.joinedDate)
                                         Text(
                                             text = joinedDateStr,
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
@@ -9277,6 +9277,42 @@ private fun TelegramTranslateDialog(
             }
         }
     }
+}
+
+private fun formatMemberSince(rawDate: String?): String {
+    val value = rawDate?.trim().orEmpty()
+    if (value.isBlank()) return "—"
+
+    // Supabase timestamps normally arrive as ISO-8601 strings.
+    // Keep the calendar date only; do not expose time/timezone details.
+    if (value.length >= 10 && value.substring(0, 10).matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+        return value.substring(0, 10).replace('-', '/')
+    }
+    if (value.length >= 10 && value.substring(0, 10).matches(Regex("\\d{4}/\\d{2}/\\d{2}"))) {
+        return value.substring(0, 10)
+    }
+
+    // Gracefully handle older human-readable stored dates.
+    val inputFormats = listOf(
+        "MMMM d, yyyy",
+        "MMM d, yyyy",
+        "yyyy-MM-dd",
+        "yyyy/MM/dd"
+    )
+    for (pattern in inputFormats) {
+        try {
+            val parser = java.text.SimpleDateFormat(pattern, java.util.Locale.US).apply {
+                isLenient = false
+            }
+            val parsed = parser.parse(value) ?: continue
+            return java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.US).format(parsed)
+        } catch (_: Exception) {
+            // Try the next known format.
+        }
+    }
+
+    // Never display a raw timestamp/garbled value in the UI.
+    return "—"
 }
 
 private fun getCleanMediaPreview(text: String, tab: String): String {
