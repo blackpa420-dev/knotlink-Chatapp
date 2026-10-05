@@ -1012,7 +1012,51 @@ class BitChatRepository(val dao: BitChatDao) {
                 )
             }
 
-            // 2. Check local contacts in Room DB
+            // 2. Use the same Supabase directory search path as manual user search.
+            // Manual search can resolve public_id through the directory fallback, while
+            // the old QR path stopped after username/UUID lookup. Keep this exact-match
+            // fallback so QR and manual ID search resolve the same registered account.
+            try {
+                val directoryProfiles = SupabaseService.searchProfiles(clean).getOrNull().orEmpty()
+                val normalized = clean.lowercase().removePrefix("@")
+                val normalizedBase = normalized
+                    .removeSuffix(".link")
+                    .removeSuffix(".bit")
+                    .removeSuffix(".chat")
+
+                val exactProfile = directoryProfiles.firstOrNull { profile ->
+                    val profileUsername = profile.username.trim().lowercase().removePrefix("@")
+                    val profileBase = profileUsername
+                        .removeSuffix(".link")
+                        .removeSuffix(".bit")
+                        .removeSuffix(".chat")
+                    profile.id.equals(clean, ignoreCase = true) ||
+                            profile.publicId.equals(clean, ignoreCase = true) ||
+                            profile.username.equals(clean, ignoreCase = true) ||
+                            profileUsername == normalized ||
+                            profileBase == normalizedBase ||
+                            profile.email.equals(clean, ignoreCase = true)
+                }
+
+                if (exactProfile != null) {
+                    val profile = PublicUserProfile(
+                        uid = exactProfile.id,
+                        publicId = exactProfile.publicId.ifBlank { exactProfile.username.ifBlank { exactProfile.id } },
+                        username = exactProfile.username,
+                        displayName = exactProfile.fullName.ifBlank { exactProfile.username },
+                        avatarUrl = exactProfile.avatarUrl,
+                        bio = exactProfile.bio.ifBlank { "Verified KnotLink User" },
+                        profession = exactProfile.profession.ifBlank { "✨ KnotLink Member" },
+                        mutualGroups = listOf("KnotLink Network"),
+                        avatarType = exactProfile.avatarUrl?.ifBlank { "default" } ?: "default"
+                    )
+                    return profile
+                }
+            } catch (e: Exception) {
+                Log.d("BitChatRepo", "QR directory identity lookup fallback error: " + e.message)
+            }
+
+            // 3. Check local contacts in Room DB
             val contacts = dao.getAllContacts().firstOrNull() ?: emptyList()
             val matchingContact = contacts.find {
                 it.id.equals(clean, ignoreCase = true) ||
