@@ -280,6 +280,17 @@ object SupabaseService {
     // AUTH API
     // ==========================================
 
+    private fun canonicalUsername(input: String): String {
+        val base = input.trim()
+            .removePrefix("@")
+            .lowercase()
+            .removeSuffix(".link")
+            .removeSuffix(".bit")
+            .removeSuffix(".chat")
+            .filter { it.isLetterOrDigit() || it == '_' }
+        return if (base.isBlank()) "" else "@$base.link"
+    }
+
     suspend fun signUpWithEmail(
         email: String,
         password: String,
@@ -314,6 +325,14 @@ object SupabaseService {
             }
 
             val json = JSONObject(resStr)
+
+            val identities = json.optJSONArray("identities")
+            if (json.has("id") && identities != null && identities.length() == 0) {
+                return@withContext Result.failure(
+                    Exception("This email is already registered. Please log in instead.")
+                )
+            }
+
             val session = if (json.has("access_token")) {
                 SupabaseAuthSession.fromJson(json)
             } else {
@@ -421,7 +440,11 @@ object SupabaseService {
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val cleanEmail = email.trim().lowercase()
-            val typesToTry = listOf(type, "signup", "email", "recovery").distinct()
+            val typesToTry = when (type.lowercase()) {
+                "recovery" -> listOf("recovery")
+                "signup" -> listOf("signup")
+                else -> listOf(type)
+            }
             var lastErrStr = ""
 
             for (t in typesToTry) {
@@ -466,7 +489,13 @@ object SupabaseService {
                 }
             }
 
-            // Fallback to /otp endpoint
+            if (type.equals("recovery", ignoreCase = true)) {
+                return@withContext Result.failure(
+                    Exception(lastErrStr.ifBlank { "No account found for this email. Please create an account first." })
+                )
+            }
+
+            // Non-recovery OTP fallback may create/verify the signup flow.
             try {
                 val otpUrl = "${SupabaseConfig.AUTH_BASE_URL}/otp"
                 val otpBody = JSONObject().apply {
@@ -483,26 +512,9 @@ object SupabaseService {
 
                 val otpResp = httpClient.newCall(otpReq).execute()
                 val otpStr = otpResp.body?.string() ?: ""
+                if (otpResp.isSuccessful) return@withContext Result.success(true)
 
-                if (otpResp.isSuccessful) {
-                    Log.d(TAG, "OTP dispatched successfully via /otp to $cleanEmail")
-                    return@withContext Result.success(true)
-                }
-
-                val otpErr = parseErrorMessage(otpStr, "Failed to send verification code")
-                val isOtpRateLimited = otpResp.code == 429 || otpResp.code == 422 ||
-                        otpErr.contains("security", ignoreCase = true) ||
-                        otpErr.contains("rate", ignoreCase = true) ||
-                        otpErr.contains("seconds", ignoreCase = true) ||
-                        otpErr.contains("limit", ignoreCase = true) ||
-                        otpErr.contains("60", ignoreCase = true) ||
-                        otpErr.contains("already", ignoreCase = true)
-
-                if (isOtpRateLimited) {
-                    Log.d(TAG, "OTP active/rate limited for $cleanEmail ($otpErr)")
-                    return@withContext Result.success(true)
-                }
-                lastErrStr = otpErr
+                lastErrStr = parseErrorMessage(otpStr, "Failed to send verification code")
             } catch (e: Exception) {
                 Log.w(TAG, "Error trying /otp for $cleanEmail", e)
             }
@@ -549,7 +561,9 @@ object SupabaseService {
     suspend fun upsertProfile(profile: SupabaseProfile): Result<SupabaseProfile> = withContext(Dispatchers.IO) {
         try {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}"
-            val bodyStr = profile.toJson().toString()
+            val normalizedProfile = if (profile.username.isBlank()) profile
+            else profile.copy(username = canonicalUsername(profile.username))
+            val bodyStr = normalizedProfile.toJson().toString()
             Log.d(TAG, "upsertProfile sending payload: $bodyStr")
 
             val request = Request.Builder()
@@ -985,15 +999,12 @@ object SupabaseService {
             if (raw.isBlank()) return@withContext Result.success(false)
 
             val base = raw.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val withSuffix = "$base.link"
-            val encBase = java.net.URLEncoder.encode(base, "UTF-8")
-            val encSuffix = java.net.URLEncoder.encode(withSuffix, "UTF-8")
-            val encEmail = java.net.URLEncoder.encode("$base@%", "UTF-8")
+            val canonical = canonicalUsername(base)
+            val encCanonical = java.net.URLEncoder.encode(canonical, "UTF-8")
 
             // Availability checks must query only matching rows, never download all profiles.
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                "?or=(username.ilike.$encBase,username.ilike.$encSuffix,email.ilike.$encEmail)" +
-                "&select=id,username,email&limit=20"
+                "?username.eq.$encCanonical&select=id,username&limit=20"
 
             val req = Request.Builder()
                 .url(url)
