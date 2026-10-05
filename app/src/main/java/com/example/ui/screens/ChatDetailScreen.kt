@@ -6906,278 +6906,119 @@ fun ChatProfileDetailsPage(
                             )
                         }
 
-                        // Custom True Transparent Glassmorphic Dropdown Options Menu
+                        // Reliable anchored menu for User Details.
                         if (menuExpanded) {
-                            androidx.compose.material3.DropdownMenu(
-                                expanded = menuExpanded,
-                                onDismissRequest = { menuExpanded = false },
-                                modifier = Modifier.width(220.dp)
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(y = 48.dp)
+                                    .width(260.dp)
+                                    .zIndex(50f),
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isNightMode) Color(0xFF1E202B) else Color.White,
+                                border = BorderStroke(1.dp, if (isNightMode) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)),
+                                shadowElevation = 14.dp
                             ) {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    GlassPanel(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        cornerRadius = 16.dp,
-                                        backgroundColor = if (isNightMode) Color(0xFF1E202B).copy(alpha = 0.65f) else Color.White.copy(alpha = 0.65f),
-                                        borderColor = if (isNightMode) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f),
-                                        isNightMode = isNightMode
-                                    ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(vertical = 6.dp)
-                                        ) {
-                                            val lockedChatIds by viewModel.lockedChatIds.collectAsState()
-                                            val isLocked = lockedChatIds.contains(chatId)
+                                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                                    val lockedChatIds by viewModel.lockedChatIds.collectAsState()
+                                    val isLocked = lockedChatIds.contains(chatId)
 
-                                            // Option 1: Mute/Unmute Notifications
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        viewModel.toggleMuteChat(chatId)
-                                                        Toast.makeText(context, if (isMuted) "Notifications unmuted" else "Notifications muted", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF2563EB),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Mute Notification",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        viewModel.toggleMuteChat(chatId)
+                                        Toast.makeText(context, if (isMuted) "Notifications unmuted" else "Notifications muted", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(if (isMuted) Icons.Default.Notifications else Icons.Default.NotificationsOff, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(if (isMuted) "Unmute Notifications" else "Mute Notification", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
 
-                                            // Option 2: Lock Chat (Request 2)
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        viewModel.toggleChatLock(chatId)
-                                                        Toast.makeText(context, if (isLocked) "Chat unlocked" else "Chat locked successfully!", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Lock,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFFF59E0B),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = if (isLocked) "Unlock Chat" else "Lock Chat",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        viewModel.toggleChatLock(chatId)
+                                        Toast.makeText(context, if (isLocked) "Chat unlocked" else "Chat locked successfully!", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Lock, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(if (isLocked) "Unlock Chat" else "Lock Chat", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
 
-                                            // Option 3: Clear Chat History
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        viewModel.clearMessagesForChat(chatId)
-                                                        Toast.makeText(context, "Cleared messages", Toast.LENGTH_SHORT).show()
-                                                        onDismiss()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Delete,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFFEF4444),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Clear Chat History",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        viewModel.clearMessagesForChat(chatId)
+                                        Toast.makeText(context, "Cleared messages", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Delete, null, tint = Color(0xFFEF4444), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text("Clear Chat History", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
 
-                                            // Option 4: Block/Unblock (only if !isGroupChat)
-                                            if (!isGroupChat) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .clickable {
-                                                            menuExpanded = false
-                                                            if (isContactCurrentlyBlocked) {
-                                                                viewModel.unblockUser(targetParticipantUid)
-                                                                Toast.makeText(context, "Contact unblocked", Toast.LENGTH_SHORT).show()
-                                                            } else {
-                                                                showBlockContactDialog = true
-                                                            }
-                                                        }
-                                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isContactCurrentlyBlocked) Icons.Default.Check else Icons.Default.Lock,
-                                                        contentDescription = null,
-                                                        tint = if (isContactCurrentlyBlocked) Color(0xFF10B981) else Color(0xFFEF4444),
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    Text(
-                                                        text = if (isContactCurrentlyBlocked) "Unblock Contact" else "Block Contact",
-                                                        color = if (isNightMode) Color.White else Color.Black,
-                                                        fontSize = 15.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        fontFamily = AppFontFamily
-                                                    )
-                                                }
+                                    if (!isGroupChat) {
+                                        Row(modifier = Modifier.fillMaxWidth().clickable {
+                                            menuExpanded = false
+                                            if (isContactCurrentlyBlocked) {
+                                                viewModel.unblockUser(targetParticipantUid)
+                                                Toast.makeText(context, "Contact unblocked", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                showBlockContactDialog = true
                                             }
-
-                                            // Option 5: Send to Archive
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        activeChatEntity?.let {
-                                                            viewModel.archiveChat(it)
-                                                            Toast.makeText(context, "Chat archived successfully!", Toast.LENGTH_SHORT).show()
-                                                            onDismiss()
-                                                        } ?: run {
-                                                            Toast.makeText(context, "Archive feature is only available for active chat threads", Toast.LENGTH_SHORT).show()
-                                                        }
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Archive,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFFF59E0B),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Send to Archive",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
-
-                                            // Option 6: Search
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        Toast.makeText(context, "Search enabled! Use the top search bar in chat to find items.", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Search,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF2563EB),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Search",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
-
-                                            // Option 7: Create New Group
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        Toast.makeText(context, "Select 'New Group' from the main chat list screen to create a group with your contacts.", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Add,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF10B981),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Create New Group",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
-
-                                            // Option 8: Add Shortcut
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable {
-                                                        menuExpanded = false
-                                                        Toast.makeText(context, "Shortcut added to home screen successfully!", Toast.LENGTH_SHORT).show()
-                                                    }
-                                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Link,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFF2563EB),
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Text(
-                                                    text = "Add Shortcut",
-                                                    color = if (isNightMode) Color.White else Color.Black,
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    fontFamily = AppFontFamily
-                                                )
-                                            }
+                                        }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(if (isContactCurrentlyBlocked) Icons.Default.Check else Icons.Default.Lock, null, tint = if (isContactCurrentlyBlocked) Color(0xFF10B981) else Color(0xFFEF4444), modifier = Modifier.size(20.dp))
+                                            Spacer(Modifier.width(10.dp))
+                                            Text(if (isContactCurrentlyBlocked) "Unblock Contact" else "Block Contact", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
                                         }
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        activeChatEntity?.let {
+                                            viewModel.archiveChat(it)
+                                            Toast.makeText(context, "Chat archived successfully!", Toast.LENGTH_SHORT).show()
+                                            onDismiss()
+                                        } ?: Toast.makeText(context, "Archive feature is only available for active chat threads", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Archive, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text("Send to Archive", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        Toast.makeText(context, "Search enabled! Use the top search bar in chat to find items.", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Search, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text("Search", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        Toast.makeText(context, "Select 'New Group' from the main chat list screen to create a group with your contacts.", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, null, tint = Color(0xFF10B981), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text("Create New Group", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
+                                    }
+
+                                    Row(modifier = Modifier.fillMaxWidth().clickable {
+                                        menuExpanded = false
+                                        Toast.makeText(context, "Shortcut added to home screen successfully!", Toast.LENGTH_SHORT).show()
+                                    }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Link, null, tint = Color(0xFF2563EB), modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(10.dp))
+                                        Text("Add Shortcut", color = if (isNightMode) Color.White else Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Medium, fontFamily = AppFontFamily)
                                     }
                                 }
                             }
                         }
-                    }
-                    }
-                }
-            }
-            }
 
             // Fully Scrollable Screen Body
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(top = 56.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    .padding(top = 72.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
