@@ -1664,7 +1664,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateUsername(input: String) {
         // Alphanumeric only (letters and digits, no special characters or signs)
-        val clean = input.lowercase().filter { it in 'a'..'z' || it.isDigit() }
+        val clean = input.lowercase().filter { it in 'a'..'z' || it.isDigit() || it == '_' }
         _enteredUsername.value = clean
 
         if (clean.length < 3) {
