@@ -3098,9 +3098,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         if (publicId.isBlank()) return ScannedUserResult.InvalidQr
 
-        // QR uses the exact same canonical user-search flow as manual search.
-        // No separate QR resolver or alternate profile lookup is allowed.
-        val profile = repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+        // UUID QR payloads are resolved directly against the canonical profile primary key.
+        // This avoids the text-search parser entirely for the one identifier that must be
+        // deterministic: Supabase Auth UUID.
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        val profile = if (publicId.matches(uuidRegex)) {
+            com.example.data.supabase.SupabaseService.getProfile(publicId).getOrNull()
+                ?: repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+        } else {
+            repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+        }
         if (profile != null) {
             return ScannedUserResult.Success(
                 ScannedUser(
