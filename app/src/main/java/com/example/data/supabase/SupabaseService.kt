@@ -1126,11 +1126,11 @@ object SupabaseService {
                     .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
                     .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
                     .build()
-                httpClient.newCall(participantRequest).use { participantResponse ->
+                httpClient.newCall(participantRequest).execute().use { participantResponse ->
                     if (!participantResponse.isSuccessful) {
-                        val participantBody = participantResponse.body?.string().orEmpty()
+                        val pBody = participantResponse.body?.string().orEmpty()
                         return@withContext Result.failure(
-                            Exception(parseErrorMessage(participantBody, "Failed to register chat participant (${participantResponse.code})"))
+                            Exception(parseErrorMessage(pBody, "Failed to register chat participant (${participantResponse.code})"))
                         )
                     }
                 }
@@ -1188,7 +1188,7 @@ object SupabaseService {
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
             val senderId = message.senderId.trim()
-            val recipientId = message.recipientId.trim()
+            val recipientId = message.receiverId.trim()
             if (senderId.isBlank() || recipientId.isBlank()) {
                 return@withContext Result.failure(Exception("Message sender and recipient must be canonical user IDs"))
             }
