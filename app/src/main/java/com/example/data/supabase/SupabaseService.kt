@@ -1102,9 +1102,66 @@ object SupabaseService {
         }
     }
 
+    private suspend fun ensureChatParticipants(
+        chatId: String,
+        senderId: String,
+        recipientId: String
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            if (chatId.isBlank() || senderId.isBlank() || recipientId.isBlank()) {
+                return@withContext Result.failure(Exception("Chat participants require canonical user IDs"))
+            }
+
+            val url = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
+            fun addParticipant(userId: String): Boolean {
+                val body = JSONObject().apply {
+                    put("chat_id", chatId)
+                    put("user_id", userId)
+                }
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e(TAG, "Failed to add chat participant $userId: ${response.code}")
+                    }
+                    return response.isSuccessful
+                }
+            }
+
+            if (!addParticipant(senderId)) return@withContext Result.failure(Exception("Could not register sender in chat"))
+            if (recipientId != senderId && !addParticipant(recipientId)) {
+                return@withContext Result.failure(Exception("Could not register recipient in chat"))
+            }
+            Result.success(true)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in ensureChatParticipants", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
-            ensureChatExists(message.chatId)
+            val senderId = message.senderId.trim()
+            val recipientId = message.recipientId.trim()
+            if (senderId.isBlank() || recipientId.isBlank()) {
+                return@withContext Result.failure(Exception("Message sender and recipient must be canonical user IDs"))
+            }
+
+            val chatResult = ensureChatExists(message.chatId)
+            if (chatResult.isFailure) return@withContext Result.failure(chatResult.exceptionOrNull() ?: Exception("Could not create chat"))
+
+            val participantResult = ensureChatParticipants(message.chatId, senderId, recipientId)
+            if (participantResult.isFailure) {
+                return@withContext Result.failure(
+                    participantResult.exceptionOrNull() ?: Exception("Could not register chat participants")
+                )
+            }
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}"
             val bodyStr = message.toJson().toString()
