@@ -32,7 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.SideEffect
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.navigation.BitChatNavHost
@@ -190,7 +193,23 @@ class MainActivity : FragmentActivity() {
         }
 
         BitChatTheme {
-          Surface(modifier = Modifier.fillMaxSize()) {
+          val isNightMode by vm.isNightMode.collectAsState(initial = true)
+
+          SideEffect {
+            // Keep the Android notification/status bar visually continuous with the
+            // app chrome while Compose draws edge-to-edge behind it.
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.isNavigationBarContrastEnforced = false
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.isAppearanceLightStatusBars = !isNightMode
+            controller.isAppearanceLightNavigationBars = !isNightMode
+          }
+
+          Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = if (isNightMode) Color(0xFF0F1015) else Color(0xFFF8FAFC)
+          ) {
             val engineState by vm.callEngineState.collectAsState()
 
             Column(modifier = Modifier.fillMaxSize()) {
