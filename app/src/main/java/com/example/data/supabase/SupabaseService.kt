@@ -1082,7 +1082,7 @@ object SupabaseService {
     suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             if (chatId.isBlank()) return@withContext Result.failure(Exception("Chat ID cannot be blank"))
-            val currentUid = getCurrentUserId()?.trim().orEmpty()
+            val currentUid = getAuthenticatedUserId()?.trim().orEmpty()
             if (currentUid.isBlank()) {
                 return@withContext Result.failure(Exception("No authenticated Supabase UUID"))
             }
