@@ -1081,6 +1081,12 @@ object SupabaseService {
 
     suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
+            if (chatId.isBlank()) return@withContext Result.failure(Exception("Chat ID cannot be blank"))
+            val currentUid = getCurrentUserId()?.trim().orEmpty()
+            if (currentUid.isBlank()) {
+                return@withContext Result.failure(Exception("No authenticated Supabase UUID"))
+            }
+
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CHATS}"
             val body = JSONObject().apply {
                 put("id", chatId)
@@ -1095,7 +1101,38 @@ object SupabaseService {
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
+            if (!response.isSuccessful) {
+                val bodyText = response.body?.string().orEmpty()
+                return@withContext Result.failure(
+                    Exception(parseErrorMessage(bodyText, "Failed to create chat (${response.code})"))
+                )
+            }
+
+            // Every authenticated chat operation starts by registering the current
+            // user as a participant. The second participant is added only when the
+            // canonical recipient is known.
+            val participantUrl = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
+            val participantBody = JSONObject().apply {
+                put("chat_id", chatId)
+                put("user_id", currentUid)
+            }
+            val participantRequest = Request.Builder()
+                .url(participantUrl)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(participantRequest).execute().use { participantResponse ->
+                if (!participantResponse.isSuccessful) {
+                    val participantBody = participantResponse.body?.string().orEmpty()
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(participantBody, "Failed to register chat participant (${participantResponse.code})"))
+                    )
+                }
+            }
+            Result.success(true)
         } catch (e: Exception) {
             Log.e(TAG, "Error in ensureChatExists", e)
             Result.failure(e)
