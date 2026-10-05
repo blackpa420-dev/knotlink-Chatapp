@@ -1043,7 +1043,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     }
                 } else {
                     _isSendingOtp.value = false
-                    val displayErr = "Invalid email or password. Please check your credentials and try again."
+
+                    // If no completed KnotLink profile exists for this email, treat it as
+                    // an unknown account. If a profile exists, keep the safer generic
+                    // invalid-credentials message for wrong passwords.
+                    val profileExists = try {
+                        SupabaseService.getProfileByEmail(email).getOrNull() != null
+                    } catch (_: Throwable) {
+                        false
+                    }
+                    val displayErr = if (!profileExists) {
+                        "No account found with this email. Please create an account first."
+                    } else {
+                        "Invalid email or password. Please check your credentials and try again."
+                    }
                     _emailAuthError.value = displayErr
                     showToast(displayErr, isError = true)
                 }
@@ -1163,26 +1176,22 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 val signUpRes = SupabaseService.signUpWithEmail(email, pass, "", "")
 
                 if (!signUpRes.isSuccess) {
-                    // User already exists in Supabase Auth, dispatch OTP via /resend
-                    val otpRes = SupabaseService.sendOtpToEmail(email, "signup")
-                    if (!otpRes.isSuccess) {
-                        val errStr = signUpRes.exceptionOrNull()?.message ?: otpRes.exceptionOrNull()?.message ?: ""
-                        if (!errStr.contains("already registered", ignoreCase = true) &&
-                            !errStr.contains("already exists", ignoreCase = true) &&
-                            !errStr.contains("security", ignoreCase = true) &&
-                            !errStr.contains("rate", ignoreCase = true) &&
-                            !errStr.contains("limit", ignoreCase = true) &&
-                            !errStr.contains("seconds", ignoreCase = true) &&
-                            !errStr.contains("60", ignoreCase = true)
-                        ) {
-                            _isSendingOtp.value = false
-                            _emailAuthError.value = errStr.ifBlank { "Failed to send verification code" }
-                            showToast(errStr.ifBlank { "Failed to send verification code" }, isError = true)
-                            return@launch
-                        }
+                    _isSendingOtp.value = false
+                    val errStr = signUpRes.exceptionOrNull()?.message.orEmpty()
+                    val displayErr = if (
+                        errStr.contains("already registered", ignoreCase = true) ||
+                        errStr.contains("already exists", ignoreCase = true)
+                    ) {
+                        "This email is already registered. Please log in instead."
+                    } else {
+                        errStr.ifBlank { "Could not create the account. Please try again." }
                     }
+                    _emailAuthError.value = displayErr
+                    showToast(displayErr, isError = true)
+                    return@launch
                 }
 
+                // New account was created successfully; Supabase Auth owns the email identity.
                 // OTP is successfully dispatched or active for user's email
                 repository.saveEmail(email)
                 _isSendingOtp.value = false
@@ -1552,27 +1561,52 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             onError(err)
             return
         }
-        if (lastKnownOldPassword.isNotBlank() && newPass == lastKnownOldPassword) {
-            val err = "Old password cannot be reused as a new password. Please choose another password."
-            _emailAuthError.value = err
-            showToast(err, isError = true)
-            onError(err)
-            return
-        }
-
         viewModelScope.launch {
             try {
+                val email = _enteredEmail.value.trim().lowercase()
+
+                // Never store/read plaintext passwords from the database. During recovery,
+                // verify whether the proposed password is still the current password by
+                // attempting normal Auth sign-in. A successful sign-in means the new
+                // password is identical to the old one.
+                val samePasswordCheck = SupabaseService.signInWithEmail(email, newPass)
+                if (samePasswordCheck.isSuccess) {
+                    val err = "New password cannot be the same as your current password. Please choose another."
+                    _emailAuthError.value = err
+                    showToast(err, isError = true)
+                    onError(err)
+                    return@launch
+                }
+
+                val checkError = samePasswordCheck.exceptionOrNull()?.message.orEmpty()
+                val isExpectedWrongPassword = checkError.contains("invalid", ignoreCase = true) ||
+                    checkError.contains("credential", ignoreCase = true) ||
+                    checkError.contains("password", ignoreCase = true)
+                if (!isExpectedWrongPassword) {
+                    val err = "Could not verify the new password. Please try again."
+                    _emailAuthError.value = err
+                    showToast(err, isError = true)
+                    onError(err)
+                    return@launch
+                }
+
                 val session = SupabaseService.getSession()
                 val token = session?.accessToken.orEmpty()
-                if (token.isNotBlank()) {
-                    val res = SupabaseService.updateUserPassword(token, newPass)
-                    if (res.isFailure) {
-                        val err = res.exceptionOrNull()?.message ?: "Failed to update password"
-                        _emailAuthError.value = err
-                        showToast(err, isError = true)
-                        onError(err)
-                        return@launch
-                    }
+                if (token.isBlank()) {
+                    val err = "Password reset session expired. Please request a new OTP."
+                    _emailAuthError.value = err
+                    showToast(err, isError = true)
+                    onError(err)
+                    return@launch
+                }
+
+                val res = SupabaseService.updateUserPassword(token, newPass)
+                if (res.isFailure) {
+                    val err = res.exceptionOrNull()?.message ?: "Failed to update password"
+                    _emailAuthError.value = err
+                    showToast(err, isError = true)
+                    onError(err)
+                    return@launch
                 }
                 lastKnownOldPassword = newPass
                 _enteredPassword.value = newPass
@@ -1695,8 +1729,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             _isCheckingUsername.value = true
-            val suffix = ".link"
-            val fullUsername = if (username.endsWith(suffix)) username else username + suffix
+            val cleanUsername = username.removePrefix("@").removeSuffix(".link").lowercase()
+            val fullUsername = "@$cleanUsername.link"
 
             // 1. Synchronous blocking database check before proceeding
             val takenRes = SupabaseService.isUsernameTaken(username)
@@ -1837,24 +1871,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun changeUsernameHandle(newHandle: String, onSuccess: () -> Unit = {}) {
-        viewModelScope.launch {
-            val clean = newHandle.trim().removePrefix("@").removeSuffix(".link")
-            val formatted = "$clean.link"
-            repository.saveUsernameAndVerify(formatted, "KnotLink")
-            val current = repository.userIdentity.firstOrNull()
-            if (current != null) {
-                repository.updateUserProfile(
-                    fullName = current.fullName,
-                    avatarPath = current.avatarPath,
-                    profession = current.profession,
-                    email = current.email,
-                    secondaryEmail = current.secondaryEmail,
-                    isEmailVerified = current.isEmailVerified,
-                    birthDate = current.birthDate
-                )
-            }
-            onSuccess()
-        }
+        // Username is a permanent account identifier. The database trigger also
+        // rejects any direct username UPDATE, so the app never exposes a rename path.
+        showToast("Username cannot be changed once assigned.", isError = true)
     }
 
     fun updateUserProfile(
