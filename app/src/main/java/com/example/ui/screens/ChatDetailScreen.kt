@@ -6908,15 +6908,12 @@ fun ChatProfileDetailsPage(
 
                         // Custom True Transparent Glassmorphic Dropdown Options Menu
                         if (menuExpanded) {
-                            Popup(
-                                alignment = Alignment.TopEnd,
-                                onDismissRequest = { menuExpanded = false }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false },
+                                modifier = Modifier.width(220.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 16.dp, top = 48.dp)
-                                        .width(220.dp)
-                                ) {
+                                Box(modifier = Modifier.fillMaxWidth()) {
                                     GlassPanel(
                                         modifier = Modifier.fillMaxWidth(),
                                         cornerRadius = 16.dp,
@@ -7180,7 +7177,7 @@ fun ChatProfileDetailsPage(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
+                    .padding(top = 56.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
@@ -7334,7 +7331,7 @@ fun ChatProfileDetailsPage(
                     )
                     val cleanHandle = chatName.trim().removePrefix("@").removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat").lowercase().replace(" ", "")
                     Text(
-                        text = "@${cleanHandle.ifBlank { "user" }}.link",
+                        text = cleanHandle.ifBlank { "user" }.let { "@$it.link" },
                         color = Color(0xFF2563EB),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
@@ -7995,7 +7992,12 @@ fun ChatProfileDetailsPage(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            text = if (partnerProfile?.username?.isNotBlank() == true) "@${partnerProfile?.username}" else "@${chatName.lowercase().replace(" ", "")}.link",
+                                            text = (partnerProfile?.username ?: chatName).trim()
+                                                .removePrefix("@")
+                                                .removeSuffix(".link")
+                                                .lowercase()
+                                                .replace(" ", "")
+                                                .let { "@$it.link" },
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold
