@@ -3065,6 +3065,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     suspend fun resolveScannedUser(rawQrPayload: String): ScannedUserResult {
         val cleanPayload = rawQrPayload.trim()
+            .replace("\uFEFF", "")
+            .replace("\u200B", "")
         if (cleanPayload.isBlank()) return ScannedUserResult.InvalidQr
 
         // Extract publicId / username / raw identifier
@@ -3098,12 +3100,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         if (publicId.isBlank()) return ScannedUserResult.InvalidQr
 
+        // A QR scanner can preserve an outer wrapper or invisible character.
+        // If a canonical UUID appears anywhere in the payload, use that UUID
+        // directly instead of depending on the textual prefix parser.
+        val embeddedUuid = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+            .find(cleanPayload)
+            ?.value
+        val canonicalPublicId = embeddedUuid ?: publicId
+
         // UUID QR payloads are resolved directly against the canonical profile primary key.
         // This avoids the text-search parser entirely for the one identifier that must be
         // deterministic: Supabase Auth UUID.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        val profile: PublicUserProfile? = if (publicId.matches(uuidRegex)) {
-            val supa = com.example.data.supabase.SupabaseService.getProfile(publicId).getOrNull()
+        val profile: PublicUserProfile? = if (canonicalPublicId.matches(uuidRegex)) {
+            val supa = com.example.data.supabase.SupabaseService.getProfile(canonicalPublicId).getOrNull()
             if (supa != null) {
                 PublicUserProfile(
                     uid = supa.id,
@@ -3117,7 +3127,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     avatarType = supa.avatarUrl?.ifBlank { "default" } ?: "default"
                 )
             } else {
-                repository.searchUsers(publicId, exactMatch = true).firstOrNull()
+                repository.searchUsers(canonicalPublicId, exactMatch = true).firstOrNull()
             }
         } else {
             repository.searchUsers(publicId, exactMatch = true).firstOrNull()
