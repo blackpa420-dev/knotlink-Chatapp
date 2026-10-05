@@ -815,21 +815,15 @@ object SupabaseService {
                 return@withContext Result.success(list)
             }
 
-            // Canonical username lookup: the same endpoint is used by manual search and QR.
+            // One canonical remote search query for every non-UUID lookup.
+            // QR uses the UUID branch above; manual username/name/email search uses this
+            // same function and the same profile table. There is no local/legacy resolver.
             val encodedBase = java.net.URLEncoder.encode(base, "UTF-8")
-            val usernameUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                "?or=(username.ilike.$encodedBase,username.ilike.${encodedBase}.link)&select=*&limit=50"
-            val usernameBody = get(usernameUrl)
-            if (usernameBody.isNotBlank()) addProfiles(usernameBody)
-
-            // One canonical fallback for legacy public_id / display-name / email searches.
-            if (list.isEmpty()) {
-                val encodedQ = java.net.URLEncoder.encode(q, "UTF-8")
-                val fallbackUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                    "?or=(username.ilike.%25$encodedQ%25,full_name.ilike.%25$encodedQ%25,email.ilike.%25$encodedQ%25,public_id.ilike.%25$encodedQ%25)&select=*&limit=50"
-                val body = get(fallbackUrl)
-                if (body.isNotBlank()) addProfiles(body)
-            }
+            val encodedQ = java.net.URLEncoder.encode(q, "UTF-8")
+            val searchUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
+                "?or=(username.ilike.$encodedBase,username.ilike.${encodedBase}.link,full_name.ilike.%25$encodedQ%25,email.ilike.%25$encodedQ%25)&select=*&limit=50"
+            val body = get(searchUrl)
+            if (body.isNotBlank()) addProfiles(body)
 
             Result.success(list)
         } catch (e: Exception) {
