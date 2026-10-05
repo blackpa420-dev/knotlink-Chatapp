@@ -1002,78 +1002,55 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentIdentity = dao.getUserIdentity().firstOrNull()
         val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: ""
         val blockedUids = (allBlockedUsers.firstOrNull() ?: emptyList()).map { it.targetUid }.toSet()
-        val results = mutableListOf<PublicUserProfile>()
 
-        // ONE canonical remote search path shared by manual search and QR.
-        try {
-            val supaResults = SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
-            for (p in supaResults) {
-                if (p.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(p.id)) continue
-                results.add(
-                    PublicUserProfile(
-                        uid = p.id,
-                        publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
-                        username = p.username,
-                        displayName = p.fullName.ifBlank { p.username },
-                        avatarUrl = p.avatarUrl,
-                        bio = p.bio.ifBlank { "Verified KnotLink User" },
-                        profession = p.profession.ifBlank { "✨ KnotLink Member" },
-                        mutualGroups = listOf("KnotLink Network"),
-                        avatarType = p.avatarUrl?.ifBlank { "default" } ?: "default"
-                    )
+        // ONE canonical remote profile-search system for both manual search and QR.
+        // There is intentionally no local-contact resolver here.
+        val supaResults = try {
+            SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
+        } catch (e: Exception) {
+            Log.d("BitChatRepo", "Canonical user search error: ${e.message}")
+            emptyList()
+        }
+
+        val results = supaResults
+            .asSequence()
+            .filter { it.id.isNotBlank() }
+            .filterNot { it.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(it.id) }
+            .map { p ->
+                PublicUserProfile(
+                    uid = p.id,
+                    publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
+                    username = p.username,
+                    displayName = p.fullName.ifBlank { p.username },
+                    avatarUrl = p.avatarUrl,
+                    bio = p.bio.ifBlank { "Verified KnotLink User" },
+                    profession = p.profession.ifBlank { "✨ KnotLink Member" },
+                    mutualGroups = listOf("KnotLink Network"),
+                    avatarType = p.avatarUrl?.ifBlank { "default" } ?: "default"
                 )
             }
-        } catch (e: Exception) {
-            Log.d("BitChatRepo", "Canonical user search error: " + e.message)
-        }
+            .distinctBy { it.uid }
+            .toList()
 
-        // Local contacts are only a local cache/fallback; never fabricate users.
-        try {
-            val localContacts = allContacts.firstOrNull() ?: emptyList()
-            for (contact in localContacts) {
-                if (contact.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(contact.id)) continue
-                if (contact.name.contains(cleanQuery, ignoreCase = true) || contact.id.contains(cleanQuery, ignoreCase = true)) {
-                    if (results.none { it.uid == contact.id }) {
-                        results.add(
-                            PublicUserProfile(
-                                uid = contact.id,
-                                publicId = contact.id,
-                                username = contact.name.lowercase().replace(" ", "_"),
-                                displayName = contact.name,
-                                avatarUrl = "",
-                                bio = "KnotLink Contact",
-                                profession = "✨ KnotLink Member",
-                                mutualGroups = listOf("KnotLink Network"),
-                                avatarType = contact.avatarType
-                            )
-                        )
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.d("BitChatRepo", "Local contact search error: " + e.message)
-        }
+        if (!exactMatch) return results
 
-        val distinct = results.distinctBy { it.uid }
-        if (!exactMatch) return distinct
-
-        // QR uses the same results, but only accepts an exact identifier match.
         val normalized = cleanQuery.removePrefix("@").lowercase()
         val normalizedBase = normalized.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
 
-        return distinct.filter { profile ->
+        return results.filter { profile ->
             val username = profile.username.trim().lowercase().removePrefix("@")
             val usernameBase = username.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
             val publicId = profile.publicId.trim().lowercase().removePrefix("@")
             val publicIdBase = publicId.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
 
             profile.uid.equals(normalized, ignoreCase = true) ||
-                    publicId == normalized ||
-                    publicIdBase == normalizedBase ||
-                    username == normalized ||
-                    usernameBase == normalizedBase
+                publicId == normalized ||
+                publicIdBase == normalizedBase ||
+                username == normalized ||
+                usernameBase == normalizedBase
         }
     }
+
     suspend fun findOrCreateCanonicalChat(
         chatId: String,
         opponentUid: String,
