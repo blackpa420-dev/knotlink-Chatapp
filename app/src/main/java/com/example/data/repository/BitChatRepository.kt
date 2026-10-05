@@ -757,7 +757,13 @@ class BitChatRepository(val dao: BitChatDao) {
             if (sendResult == null) {
                 // Never throw from the message-send coroutine: a server/RLS/auth failure
                 // must become a failed local message, not an application crash.
-                throw MessageSendFailureException("Message was not accepted by Supabase.")
+                val failedMessage = message.copy(
+                    id = localRowId,
+                    syncStatus = "FAILED",
+                    deliveryState = "FAILED"
+                )
+                dao.insertMessage(failedMessage)
+                return failedMessage
             }
             val finalServerId = sendResult.id.ifBlank { serverMsgId }
 
