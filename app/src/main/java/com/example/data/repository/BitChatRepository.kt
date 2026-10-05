@@ -572,7 +572,13 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentTime = sdf.format(Date())
         val clientMsgId = existingClientMessageId ?: UUID.randomUUID().toString()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
-        val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
+        val currentUid = currentIdentity?.supabaseUid?.trim()
+            ?.ifBlank { currentIdentity.email?.trim().orEmpty() }
+            .orEmpty()
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        if (isFromUser && !currentUid.matches(uuidRegex)) {
+            throw IllegalStateException("Cannot send message: signed-in account has no canonical Supabase UUID.")
+        }
         val mySenderName = if (isFromUser) {
             currentIdentity?.fullName?.ifBlank { currentIdentity.username.ifBlank { senderName } } ?: senderName
         } else {
@@ -731,7 +737,7 @@ class BitChatRepository(val dao: BitChatDao) {
 
             val supaMsg = SupabaseMessage(
                 id = serverMsgId,
-                chatId = chatId,
+                chatId = targetChatId,
                 senderId = currentUid,
                 senderName = mySenderName,
                 receiverId = otherParticipant,
@@ -745,11 +751,16 @@ class BitChatRepository(val dao: BitChatDao) {
                 clientMsgId = clientMsgId
             )
 
-            // INSTANT DELIVER: Broadcast message directly over WebSocket (<50ms latency)
-            SupabaseRealtimeManager.broadcastNewMessage(supaMsg)
-
+            // Persist remotely first. Realtime broadcast is only emitted after the
+            // authoritative database write succeeds, preventing phantom delivery.
             val sendResult = SupabaseService.sendMessage(supaMsg).getOrNull()
-            val finalServerId = sendResult?.id?.ifBlank { serverMsgId } ?: serverMsgId
+                ?: throw IllegalStateException("Message was not accepted by Supabase.")
+            val finalServerId = sendResult.id.ifBlank { serverMsgId }
+
+            // Now that the authoritative write succeeded, notify the peer immediately.
+            SupabaseRealtimeManager.broadcastNewMessage(
+                sendResult.copy(id = finalServerId)
+            )
 
             if (finalServerId.isNotBlank()) {
                 dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
