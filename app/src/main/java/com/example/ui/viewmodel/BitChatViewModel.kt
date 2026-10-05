@@ -1871,14 +1871,6 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             repository.recordLoginSession()
 
             _isCheckingUsername.value = false
-                showToast(err, isError = true)
-                withContext(Dispatchers.Main) {
-                    onError?.invoke(err)
-                }
-                return@launch
-            }
-
-            _isCheckingUsername.value = false
             withContext(Dispatchers.Main) {
                 onSuccess()
             }
