@@ -717,7 +717,7 @@ object SupabaseService {
             val queryTerms = listOf(base, withSuffix, raw).distinct()
             for (term in queryTerms) {
                 val enc = java.net.URLEncoder.encode(term, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.eq.$enc,email.eq.$enc,username.ilike.$enc)&select=*"
+                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.eq.$enc,email.eq.$enc,public_id.eq.$enc,username.ilike.$enc,public_id.ilike.$enc)&select=*"
                 val request = Request.Builder()
                     .url(url)
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
