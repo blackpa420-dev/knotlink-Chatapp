@@ -776,11 +776,11 @@ object SupabaseService {
             val list = mutableListOf<SupabaseProfile>()
             val seenIds = mutableSetOf<String>()
 
-            // 1. Direct query with PostgREST or
+            // 1. Direct canonical query: stable UID + username + legacy public_id.
             try {
                 val encoded = java.net.URLEncoder.encode(base, "UTF-8")
                 val encodedFull = java.net.URLEncoder.encode(q, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.%25$encoded%25,username.ilike.%25$encodedFull%25,full_name.ilike.%25$encoded%25,email.ilike.%25$encoded%25,public_id.ilike.%25$encoded%25,public_id.ilike.%25$encodedFull%25)&limit=50&select=*"
+                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(id.eq.$encoded,username.ilike.%25$encoded%25,username.ilike.%25$encodedFull%25,full_name.ilike.%25$encoded%25,email.ilike.%25$encoded%25,public_id.ilike.%25$encoded%25,public_id.ilike.%25$encodedFull%25)&limit=50&select=*"
                 val request = Request.Builder()
                     .url(url)
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
