@@ -6781,36 +6781,89 @@ fun ChatProfileDetailsPage(
     val myEmail = userIdentity?.email ?: ""
     val myUname = userIdentity?.username?.trim()?.lowercase()?.removePrefix("@")?.removeSuffix(".link") ?: ""
 
-    val targetParticipantUid = remember(activeChatEntity, chatId, currentProfileUid, myEmail, myUname) {
-        val parts = activeChatEntity?.participantUids?.split(",")?.map { it.trim() } ?: emptyList()
-        val other = parts.firstOrNull { p ->
-            val clean = p.lowercase().removePrefix("@").removeSuffix(".link")
-            clean.isNotBlank() && clean != currentProfileUid.lowercase() && clean != myEmail.lowercase() && clean != myUname && clean != "me" && clean != "user_me"
+    val uuidRegex = remember {
+        Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    }
+    val profileChatMessages by remember(chatId) {
+        viewModel.getMessagesForChat(chatId)
+    }.collectAsState(initial = emptyList())
+
+    val profileCandidates = remember(
+        activeChatEntity,
+        chatId,
+        currentProfileUid,
+        myEmail,
+        myUname,
+        profileChatMessages
+    ) {
+        val selfIds = setOf(
+            currentProfileUid.trim().lowercase(),
+            myEmail.trim().lowercase(),
+            myUname.trim().lowercase(),
+            "@$myUname".lowercase(),
+            "@$myUname.link".lowercase()
+        ).filter { it.isNotBlank() }.toSet()
+
+        val candidates = linkedSetOf<String>()
+
+        fun addCandidate(raw: String?) {
+            val value = raw?.trim().orEmpty()
+            if (value.isBlank()) return
+
+            val lower = value.lowercase()
+            val clean = lower.removePrefix("@").removeSuffix(".link")
+            if (lower in selfIds || clean in selfIds || lower == "me" || lower == "user_me" || lower == "uid_target") return
+
+            if (value.matches(uuidRegex) || lower.startsWith("@") || lower.contains(".") || value.length >= 3) {
+                candidates.add(value)
+            }
         }
-        if (other != null) {
-            other
-        } else if (chatId.startsWith("chat_")) {
-            val unPrefixed = chatId.removePrefix("chat_")
-            val subParts = unPrefixed.split("_")
-            subParts.firstOrNull { s ->
-                val clean = s.lowercase().removePrefix("@").removeSuffix(".link")
-                clean.isNotBlank() && clean != currentProfileUid.lowercase() && clean != myEmail.lowercase() && clean != myUname && clean != "me" && clean != "user_me"
-            } ?: unPrefixed
-        } else {
-            chatId
-        }
+
+        activeChatEntity?.participantUids
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.forEach(::addCandidate)
+
+        profileChatMessages
+            .asSequence()
+            .flatMap { listOf(it.senderUid, it.receiverUid) }
+            .forEach(::addCandidate)
+
+        Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+            .findAll(chatId)
+            .map { it.value }
+            .forEach(::addCandidate)
+
+        addCandidate(chatName)
+
+        candidates.toList()
     }
 
+    var targetParticipantUid by remember { mutableStateOf("") }
     var partnerProfile by remember { mutableStateOf<com.example.data.supabase.SupabaseProfile?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(targetParticipantUid) {
-        if (!isGroupChat && targetParticipantUid.isNotBlank() && targetParticipantUid != "uid_target") {
+    LaunchedEffect(profileCandidates) {
+        partnerProfile = null
+        targetParticipantUid = ""
+
+        for (candidate in profileCandidates) {
             try {
-                val p = com.example.data.supabase.SupabaseService.getProfile(targetParticipantUid).getOrNull()
-                    ?: com.example.data.supabase.SupabaseService.getProfileByUsername(targetParticipantUid).getOrNull()
-                partnerProfile = p
-            } catch (e: Exception) {}
+                val profile = com.example.data.supabase.SupabaseService.getProfile(candidate).getOrNull()
+                    ?: com.example.data.supabase.SupabaseService.getProfileByUsername(candidate).getOrNull()
+
+                if (profile != null &&
+                    profile.id.isNotBlank() &&
+                    !profile.id.equals(currentProfileUid, ignoreCase = true) &&
+                    !profile.email.equals(myEmail, ignoreCase = true)
+                ) {
+                    targetParticipantUid = profile.id
+                    partnerProfile = profile
+                    break
+                }
+            } catch (_: Throwable) {
+                // Try the next candidate.
+            }
         }
     }
 
@@ -6906,8 +6959,22 @@ fun ChatProfileDetailsPage(
                             )
                         }
 
-                        // Reliable anchored menu for User Details.
+                        // Use a real Popup so opening the menu never participates in
+                        // the top-bar measurement or pushes the profile page downward.
                         if (menuExpanded) {
+                            Popup(
+                                alignment = Alignment.TopEnd,
+                                offset = IntOffset(
+                                    x = with(LocalDensity.current) { (-8).dp.roundToPx() },
+                                    y = with(LocalDensity.current) { 64.dp.roundToPx() }
+                                ),
+                                properties = androidx.compose.ui.window.PopupProperties(
+                                    focusable = true,
+                                    dismissOnBackPress = true,
+                                    dismissOnClickOutside = true
+                                ),
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
                             Surface(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
@@ -7011,6 +7078,7 @@ fun ChatProfileDetailsPage(
                                     }
                                 }
                             }
+                            }
                         }
                     }
                 }
@@ -7021,7 +7089,7 @@ fun ChatProfileDetailsPage(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(top = 72.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    .padding(top = 20.dp, start = 16.dp, end = 16.dp, bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
@@ -7037,6 +7105,15 @@ fun ChatProfileDetailsPage(
                         AsyncImage(
                             model = File(customAvatarPath!!),
                             contentDescription = "Group Avatar",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else if (!partnerProfile?.avatarUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = partnerProfile?.avatarUrl,
+                            contentDescription = "User Avatar",
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clip(CircleShape),
@@ -7168,7 +7245,7 @@ fun ChatProfileDetailsPage(
                     )
                 } else {
                     Text(
-                        text = chatName,
+                        text = partnerProfile?.fullName?.takeIf { it.isNotBlank() } ?: chatName,
                         color = if (isNightMode) Color.White else Color(0xFF0F172A),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold
@@ -7836,12 +7913,7 @@ fun ChatProfileDetailsPage(
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            text = (partnerProfile?.username ?: chatName).trim()
-                                                .removePrefix("@")
-                                                .removeSuffix(".link")
-                                                .lowercase()
-                                                .replace(" ", "")
-                                                .let { "@$it.link" },
+                                            text = formatCanonicalUsername(partnerProfile?.username),
                                             color = if (isNightMode) Color.White else Color(0xFF0F172A),
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold
@@ -9123,6 +9195,13 @@ private fun TelegramTranslateDialog(
             }
         }
     }
+}
+
+private fun formatCanonicalUsername(rawUsername: String?): String {
+    val raw = rawUsername?.trim().orEmpty()
+    if (raw.isBlank()) return "—"
+    val base = raw.removePrefix("@").lowercase().removeSuffix(".link")
+    return if (base.isBlank()) "—" else "@$base.link"
 }
 
 private fun formatMemberSince(rawDate: String?): String {
