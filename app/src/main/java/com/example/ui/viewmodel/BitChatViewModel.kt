@@ -2948,22 +2948,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         if (publicId.isBlank()) return ScannedUserResult.InvalidQr
 
-        val profile = repository.findUserByPublicIdentity(publicId)
+        // QR uses the exact same canonical user-search flow as manual search.
+        // No separate QR resolver or alternate profile lookup is allowed.
+        val profile = repository.searchUsers(publicId, exactMatch = true).firstOrNull()
         if (profile != null) {
-            val scannedUser = ScannedUser(
-                publicId = profile.publicId.ifBlank { profile.uid },
-                name = profile.displayName.ifBlank { profile.username },
-                username = if (profile.username.startsWith("@")) profile.username else "@${profile.username}",
-                bio = profile.bio,
-                profession = profile.profession,
-                mutualGroups = profile.mutualGroups.ifEmpty { listOf("BitChat Network") },
-                avatarType = profile.avatarType,
-                avatarUrl = profile.avatarUrl,
-                uid = profile.uid
+            return ScannedUserResult.Success(
+                ScannedUser(
+                    publicId = profile.publicId.ifBlank { profile.uid },
+                    name = profile.displayName.ifBlank { profile.username },
+                    username = if (profile.username.startsWith("@")) profile.username else "@" + profile.username,
+                    bio = profile.bio,
+                    profession = profile.profession,
+                    mutualGroups = profile.mutualGroups.ifEmpty { listOf("KnotLink Network") },
+                    avatarType = profile.avatarType,
+                    avatarUrl = profile.avatarUrl,
+                    uid = profile.uid
+                )
             )
-            return ScannedUserResult.Success(scannedUser)
         }
-
         return ScannedUserResult.UserNotFound
     }
 
