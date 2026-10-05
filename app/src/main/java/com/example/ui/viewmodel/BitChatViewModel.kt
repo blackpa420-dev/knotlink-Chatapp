@@ -1098,6 +1098,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 _enteredEmail.value = targetEmail
+
+                if (_isForgotPasswordMode.value) {
+                    val recoveryProfile = SupabaseService.getProfileByEmail(targetEmail).getOrNull()
+                    if (recoveryProfile == null) {
+                        _isSendingOtp.value = false
+                        val err = "No account found with this email. Please create an account first."
+                        _emailAuthError.value = err
+                        showToast(err, isError = true)
+                        return@launch
+                    }
+                }
+
                 repository.saveEmail(targetEmail)
 
                 // Try sending recovery/email OTP directly with proper type on first attempt
