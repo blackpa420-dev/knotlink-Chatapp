@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.ContactEntity
+import com.example.data.repository.PublicUserProfile
 import com.example.ui.components.BitChatBottomNavBar
 import com.example.ui.components.BitChatNavTab
 import com.example.ui.components.GlassPanel
@@ -72,6 +73,10 @@ fun ContactsScreen(
     val contacts by viewModel.filteredContacts.collectAsState()
     val userPresenceMap by viewModel.userPresenceMap.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val userSearchQuery by viewModel.userSearchQuery.collectAsState()
+    val userSearchResults by viewModel.userSearchResults.collectAsState()
+    val userSearchState by viewModel.userSearchState.collectAsState()
+    var selectedPublicProfile by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<PublicUserProfile?>(null) }
 
     val isNightMode by viewModel.isNightMode.collectAsState()
 
@@ -197,7 +202,7 @@ fun ContactsScreen(
                         }
                         BasicTextField(
                             value = searchQuery,
-                            onValueChange = { viewModel.setSearchQuery(it) },
+                            onValueChange = { viewModel.setUserSearchQuery(it) },
                             modifier = Modifier.fillMaxWidth(),
                             textStyle = TextStyle(
                                 color = if (isNightMode) Color.White else Color.Black,
@@ -211,57 +216,94 @@ fun ContactsScreen(
                 }
             }
 
-            // Quick Action Buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Button(
-                    onClick = { /* New Contact */ },
+            if (userSearchQuery.isNotBlank()) {
+                Column(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .weight(1f)
-                        .height(48.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BitPrimary,
-                        contentColor = BitOnPrimary
-                    )
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.PersonAdd,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "New Contact", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    when (userSearchState) {
+                        BitChatViewModel.UserSearchState.SEARCHING -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Searching…", color = animSubTextColor, fontSize = 14.sp)
+                            }
+                        }
+                        BitChatViewModel.UserSearchState.EMPTY -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("No KnotLink user found", color = animSubTextColor, fontSize = 14.sp)
+                            }
+                        }
+                        BitChatViewModel.UserSearchState.ERROR -> {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Couldn't search users", color = animSubTextColor, fontSize = 14.sp)
+                            }
+                        }
+                        else -> {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(
+                                    userSearchResults,
+                                    key = { it.uid },
+                                    contentType = { "public_profile" }
+                                ) { profile ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(if (isNightMode) BitSurfaceContainer else Color.White)
+                                            .clickable { selectedPublicProfile = profile }
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isNightMode) Color(0xFF252936) else Color(0xFFE2E8F0)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (!profile.avatarUrl.isNullOrBlank()) {
+                                                androidx.compose.foundation.Image(
+                                                    painter = coil.compose.rememberAsyncImagePainter(profile.avatarUrl),
+                                                    contentDescription = profile.displayName,
+                                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = profile.displayName.trim().firstOrNull()?.uppercase() ?: "U",
+                                                    color = Color(0xFF2563EB),
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(14.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = profile.displayName.ifBlank { "KnotLink User" },
+                                                color = animTextColor,
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Text(
+                                                text = "@${profile.username.removePrefix("@")}",
+                                                color = Color(0xFF60A5FA),
+                                                fontSize = 13.sp,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-
-                GlassPanel(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp),
-                    cornerRadius = 24.dp
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = null,
-                            tint = BitOnSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = "Invite Friends", color = BitOnSurface, fontSize = 14.sp)
-                    }
-                }
-            }
-
+            } else {
             // Favorites Row
             if (favorites.isNotEmpty()) {
                 Column(modifier = Modifier.fillMaxWidth()) {
@@ -430,6 +472,29 @@ fun ContactsScreen(
                     }
                 }
             }
+        }
+
+        val profile = selectedPublicProfile
+        if (profile != null) {
+            PublicProfilePreviewSheet(
+                profile = profile,
+                isNightMode = isNightMode,
+                onDismiss = { selectedPublicProfile = null },
+                onStartChat = { uid, name ->
+                    selectedPublicProfile = null
+                    onContactClick(
+                        ContactEntity(
+                            id = uid,
+                            name = name.ifBlank { profile.username },
+                            statusText = "@${profile.username.removePrefix("@")}",
+                            isOnline = false,
+                            isFavorite = false,
+                            categoryLetter = name.ifBlank { profile.username }.trim().firstOrNull()?.uppercase() ?: "#",
+                            avatarType = profile.avatarUrl.orEmpty()
+                        )
+                    )
+                }
+            )
         }
     }
 }
