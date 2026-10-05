@@ -371,7 +371,7 @@ fun BitChatNavHost(
                         identity.isVerified &&
                         identity.username.isNotBlank() &&
                         identity.fullName.isNotBlank() &&
-                        identity.avatarPath.isNotBlank()
+                        !identity.avatarPath.isNullOrBlank()
 
                     if (profileComplete) {
                         navController.navigate(BitChatRoutes.CHATS) {
