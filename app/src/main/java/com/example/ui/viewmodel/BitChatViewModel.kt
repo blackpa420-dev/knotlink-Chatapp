@@ -2919,11 +2919,20 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         // Extract publicId / username / raw identifier
         val publicId = when {
+            cleanPayload.startsWith("KNOTLINK:USER:", ignoreCase = true) -> {
+                cleanPayload.substringAfter("KNOTLINK:USER:", "").trim()
+            }
             cleanPayload.startsWith("BITCHAT:USER:", ignoreCase = true) -> {
                 cleanPayload.substringAfter("BITCHAT:USER:", "").trim()
             }
+            cleanPayload.startsWith("https://knotlink.app/u/", ignoreCase = true) -> {
+                cleanPayload.substringAfter("https://knotlink.app/u/", "").trim()
+            }
             cleanPayload.startsWith("https://bitchat.app/u/", ignoreCase = true) -> {
                 cleanPayload.substringAfter("https://bitchat.app/u/", "").trim()
+            }
+            cleanPayload.startsWith("knotlink://user/", ignoreCase = true) -> {
+                cleanPayload.substringAfter("knotlink://user/", "").trim()
             }
             cleanPayload.startsWith("bitchat://user/", ignoreCase = true) -> {
                 cleanPayload.substringAfter("bitchat://user/", "").trim()
@@ -2949,6 +2958,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 profession = profile.profession,
                 mutualGroups = profile.mutualGroups.ifEmpty { listOf("BitChat Network") },
                 avatarType = profile.avatarType,
+                avatarUrl = profile.avatarUrl,
                 uid = profile.uid
             )
             return ScannedUserResult.Success(scannedUser)
@@ -3215,6 +3225,7 @@ data class ScannedUser(
     val joinedDate: String = "",
     val mutualGroups: List<String> = emptyList(),
     val avatarType: String = "default",
+    val avatarUrl: String? = null,
     val uid: String = ""
 )
 
