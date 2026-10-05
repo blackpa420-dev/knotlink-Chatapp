@@ -1108,7 +1108,7 @@ object SupabaseService {
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=ignore-duplicates,return=representation")
+                .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
