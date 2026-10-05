@@ -244,25 +244,11 @@ fun UsernameAvailabilityScreen(
                     suggestions = emptyList()
                 }
             } else {
-                // Fallback check via profile
-                val profileRes = SupabaseService.getProfileByUsername(fullHandle).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(clean).getOrNull()
-                if (profileRes != null) {
-                    status = AvailabilityStatus.TAKEN
-                    val isMine = clean == myUsername || profileRes.id == currentUid || (profileRes.email.isNotBlank() && profileRes.email.equals(user?.email, ignoreCase = true))
-                    val holderName = if (isMine) "you (Your current username)" else (profileRes.fullName.ifBlank { profileRes.username } ?: "Another user")
-                    currentTakenUserDisplay = holderName
-                    statusMessage = if (isMine) {
-                        "@$clean.link is already registered to you (Your current username)."
-                    } else {
-                        "@$clean.link is already registered to $holderName."
-                    }
-                    suggestions = generateSuggestions(clean)
-                } else {
-                    status = AvailabilityStatus.AVAILABLE
-                    statusMessage = "Congratulations! @$clean.link is available to claim."
-                    suggestions = emptyList()
-                }
+                // Never show AVAILABLE when the remote availability check failed.
+                status = AvailabilityStatus.INVALID
+                statusMessage = "Could not verify username availability. Please check your connection and try again."
+                currentTakenUserDisplay = null
+                suggestions = emptyList()
             }
         }
     }
