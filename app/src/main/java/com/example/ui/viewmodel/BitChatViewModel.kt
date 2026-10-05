@@ -1758,29 +1758,64 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 return@launch
             }
 
-            // 2. Upload local avatar photo to Cloud Storage / Supabase so it's globally visible
-            var publicAvatarUrl = avatarPath
+            // 2. The profile photo is mandatory. A local/content URI is not
+            // considered a completed profile; it must be uploaded successfully
+            // before the remote profile row is created.
+            var publicAvatarUrl = ""
             try {
-                if (avatarPath.startsWith("/") || avatarPath.startsWith("file://") || avatarPath.startsWith("content://")) {
-                    val bytes = if (avatarPath.startsWith("content://")) {
-                        getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(avatarPath))?.use { it.readBytes() }
-                    } else {
-                        val path = if (avatarPath.startsWith("file://")) avatarPath.removePrefix("file://") else avatarPath
-                        val f = java.io.File(path)
-                        if (f.exists()) f.readBytes() else null
-                    }
-
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        val myUid = repository.userIdentity.firstOrNull()?.let { it.supabaseUid.ifBlank { it.email } } ?: UUID.randomUUID().toString()
-                        val fileName = "avatar_${myUid}_${System.currentTimeMillis()}.jpg"
-                        val uploadRes = SupabaseService.uploadAvatar(fileName, bytes, "image/jpeg")
-                        if (uploadRes.isSuccess) {
-                            publicAvatarUrl = uploadRes.getOrNull() ?: avatarPath
-                        }
-                    }
+                val bytes = if (avatarPath.startsWith("content://")) {
+                    getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(avatarPath))?.use { it.readBytes() }
+                } else {
+                    val path = if (avatarPath.startsWith("file://")) avatarPath.removePrefix("file://") else avatarPath
+                    val f = java.io.File(path)
+                    if (f.exists()) f.readBytes() else null
                 }
+
+                if (bytes == null || bytes.isEmpty()) {
+                    val err = "Profile photo could not be read. Please select a photo again."
+                    _isCheckingUsername.value = false
+                    withContext(Dispatchers.Main) {
+                        showToast(err, isError = true)
+                        onError?.invoke(err)
+                    }
+                    return@launch
+                }
+
+                val myUid = repository.userIdentity.firstOrNull()?.let {
+                    it.supabaseUid.ifBlank { it.email }
+                } ?: SupabaseService.getAuthenticatedUserId()
+
+                if (myUid.isNullOrBlank()) {
+                    val err = "Your account session is missing. Please verify the OTP again."
+                    _isCheckingUsername.value = false
+                    withContext(Dispatchers.Main) {
+                        showToast(err, isError = true)
+                        onError?.invoke(err)
+                    }
+                    return@launch
+                }
+
+                val fileName = "avatar_${myUid}_${System.currentTimeMillis()}.jpg"
+                val uploadRes = SupabaseService.uploadAvatar(fileName, bytes, "image/jpeg")
+                if (uploadRes.isFailure || uploadRes.getOrNull().isNullOrBlank()) {
+                    val err = "Profile photo upload failed. Please select the photo again and try."
+                    _isCheckingUsername.value = false
+                    withContext(Dispatchers.Main) {
+                        showToast(err, isError = true)
+                        onError?.invoke(err)
+                    }
+                    return@launch
+                }
+                publicAvatarUrl = uploadRes.getOrNull().orEmpty()
             } catch (e: Exception) {
                 Log.w("BitChatViewModel", "Avatar upload exception: ${e.message}")
+                val err = "Profile photo upload failed. Please try again."
+                _isCheckingUsername.value = false
+                withContext(Dispatchers.Main) {
+                    showToast(err, isError = true)
+                    onError?.invoke(err)
+                }
+                return@launch
             }
 
             val existingIdentity = repository.userIdentity.firstOrNull()
@@ -1795,6 +1830,30 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             val selectedProfession = _enteredProfession.value.ifBlank { "🎓 Student" }
 
+            // Persist the remote profile first. This guarantees an incomplete
+            // profile is never represented in public.profiles.
+            val supabaseProf = com.example.data.supabase.SupabaseProfile(
+                id = authUid,
+                email = existingEmail,
+                username = fullUsername,
+                fullName = fullName,
+                avatarUrl = publicAvatarUrl,
+                profession = selectedProfession,
+                isVerified = true
+            )
+            val upsertRes = SupabaseService.upsertProfile(supabaseProf)
+            if (upsertRes.isFailure) {
+                val err = upsertRes.exceptionOrNull()?.message ?: "Failed to save profile to database"
+                Log.e("BitChatViewModel", "Supabase profile upsert error: $err")
+                _isCheckingUsername.value = false
+                withContext(Dispatchers.Main) {
+                    showToast(err, isError = true)
+                    onError?.invoke(err)
+                }
+                return@launch
+            }
+
+            // Only after the remote profile is complete do we mirror it locally.
             val finalIdentity = (existingIdentity ?: UserIdentityEntity()).copy(
                 id = 1,
                 supabaseUid = authUid,
@@ -1811,21 +1870,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             repository.saveUserIdentity(finalIdentity)
             repository.recordLoginSession()
 
-            // Save to Supabase remote profiles table
-            val supabaseProf = com.example.data.supabase.SupabaseProfile(
-                id = authUid,
-                email = existingEmail,
-                username = fullUsername,
-                fullName = fullName,
-                avatarUrl = publicAvatarUrl,
-                profession = selectedProfession,
-                isVerified = true
-            )
-            val upsertRes = SupabaseService.upsertProfile(supabaseProf)
-            if (upsertRes.isFailure) {
-                val err = upsertRes.exceptionOrNull()?.message ?: "Failed to save profile to database"
-                Log.e("BitChatViewModel", "Supabase profile upsert error: $err")
-                _isCheckingUsername.value = false
+            _isCheckingUsername.value = false
                 showToast(err, isError = true)
                 withContext(Dispatchers.Main) {
                     onError?.invoke(err)
