@@ -1767,14 +1767,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 val isTaken = isTakenRes.getOrDefault(false)
                 _usernameAvailability.value = !isTaken
             } else {
-                val fullCheck = if (clean.endsWith(".link")) clean else "$clean.link"
-                val res = SupabaseService.getProfileByUsername(fullCheck).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(clean).getOrNull()
-                if (res != null && (currentUid == null || res.id != currentUid)) {
-                    _usernameAvailability.value = false
-                } else {
-                    _usernameAvailability.value = true
-                }
+                // A failed remote availability check must never be treated as AVAILABLE.
+                _usernameAvailability.value = null
             }
             _isCheckingUsername.value = false
         }
@@ -1815,6 +1809,17 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             // 1. Synchronous blocking database check before proceeding
             val takenRes = SupabaseService.isUsernameTaken(username)
+            if (takenRes.isFailure) {
+                _usernameAvailability.value = null
+                _isCheckingUsername.value = false
+                val err = takenRes.exceptionOrNull()?.message
+                    ?: "Could not verify username availability. Please try again."
+                withContext(Dispatchers.Main) {
+                    showToast(err, isError = true)
+                    onError?.invoke(err)
+                }
+                return@launch
+            }
             val isTaken = takenRes.getOrDefault(false)
             if (isTaken) {
                 _usernameAvailability.value = false
