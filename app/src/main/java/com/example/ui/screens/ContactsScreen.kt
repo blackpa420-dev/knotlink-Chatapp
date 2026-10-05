@@ -293,7 +293,9 @@ fun ContactsScreen(
                                             )
                                             Spacer(modifier = Modifier.height(3.dp))
                                             Text(
-                                                text = "@${profile.username.removePrefix("@")}",
+                                                text = profile.username.trim().let { username ->
+                                                    if (username.startsWith("@")) username else "@$username"
+                                                },
                                                 color = Color(0xFF60A5FA),
                                                 fontSize = 13.sp,
                                                 maxLines = 1
