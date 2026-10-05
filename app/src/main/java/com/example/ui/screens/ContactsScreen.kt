@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
@@ -35,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -474,27 +476,29 @@ fun ContactsScreen(
             }
         }
 
-        val profile = selectedPublicProfile
-        if (profile != null) {
-            PublicProfilePreviewSheet(
-                profile = profile,
-                isNightMode = isNightMode,
-                onDismiss = { selectedPublicProfile = null },
-                onStartChat = { uid, name ->
-                    selectedPublicProfile = null
-                    onContactClick(
-                        ContactEntity(
-                            id = uid,
-                            name = name.ifBlank { profile.username },
-                            statusText = "@${profile.username.removePrefix("@")}",
-                            isOnline = false,
-                            isFavorite = false,
-                            categoryLetter = name.ifBlank { profile.username }.trim().firstOrNull()?.uppercase() ?: "#",
-                            avatarType = profile.avatarUrl.orEmpty()
-                        )
-                    )
-                }
-            )
         }
+    }
+
+    val profile = selectedPublicProfile
+    if (profile != null) {
+        PublicProfilePreviewSheet(
+            profile = profile,
+            isNightMode = isNightMode,
+            onDismiss = { selectedPublicProfile = null },
+            onStartChat = { uid, name ->
+                selectedPublicProfile = null
+                onContactClick(
+                    ContactEntity(
+                        id = uid,
+                        name = name.ifBlank { profile.username },
+                        statusText = "@${profile.username.removePrefix("@")}",
+                        isOnline = false,
+                        isFavorite = false,
+                        categoryLetter = name.ifBlank { profile.username }.trim().firstOrNull()?.uppercase() ?: "#",
+                        avatarType = profile.avatarUrl.orEmpty()
+                    )
+                )
+            }
+        )
     }
 }
