@@ -1004,7 +1004,7 @@ object SupabaseService {
 
             // Availability checks must query only matching rows, never download all profiles.
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                "?username.eq.$encCanonical&select=id,username&limit=20"
+                "?username=eq.$encCanonical&select=id,username&limit=20"
 
             val req = Request.Builder()
                 .url(url)
@@ -1015,7 +1015,13 @@ object SupabaseService {
 
             val resp = httpClient.newCall(req).execute()
             val str = resp.body?.string() ?: ""
-            if (!resp.isSuccessful || str.isBlank()) {
+            if (!resp.isSuccessful) {
+                Log.w(TAG, "Username availability HTTP ${resp.code}: $str")
+                return@withContext Result.failure(
+                    Exception("Could not verify username availability. Please try again.")
+                )
+            }
+            if (str.isBlank()) {
                 return@withContext Result.success(false)
             }
 
