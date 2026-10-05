@@ -6977,8 +6977,6 @@ fun ChatProfileDetailsPage(
                             ) {
                             Surface(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(y = 48.dp)
                                     .width(260.dp)
                                     .zIndex(50f),
                                 shape = RoundedCornerShape(16.dp),
