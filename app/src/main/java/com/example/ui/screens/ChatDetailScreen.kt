@@ -7119,7 +7119,7 @@ fun ChatProfileDetailsPage(
                                 .clip(CircleShape),
                             contentScale = ContentScale.Crop
                         )
-                    } else if (directUserAvatar != null) {
+                    } else if (targetParticipantUid.isNotBlank() && directUserAvatar != null) {
                         AsyncImage(
                             model = if (directUserAvatar.startsWith("/")) File(directUserAvatar) else directUserAvatar,
                             contentDescription = "User Avatar",
