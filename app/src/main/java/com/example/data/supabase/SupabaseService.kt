@@ -1073,7 +1073,7 @@ object SupabaseService {
             val safeOffset = offset.coerceAtLeast(0)
             val safeLimit = limit.coerceIn(1, 500)
             val timestamp = java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&created_at=gt.$timestamp&order=created_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&updated_at=gt.$timestamp&order=updated_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
