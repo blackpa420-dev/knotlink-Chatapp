@@ -830,9 +830,14 @@ fun EmailAuthScreen(
                                                     showPasswordInstantError = true
                                                     Toast.makeText(context, "Passwords do not match", Toast.LENGTH_SHORT).show()
                                                 } else {
-                                                    bitChatViewModel.registerWithEmailAndSendOtp {
-                                                        onNavigateToOtp(enteredEmail)
-                                                    }
+                                                    bitChatViewModel.registerWithEmailAndSendOtp(
+                                                        onSuccess = {
+                                                            onNavigateToOtp(enteredEmail)
+                                                        },
+                                                        onIncompleteProfile = {
+                                                            onAuthSuccess()
+                                                        }
+                                                    )
                                                 }
                                             }
                                             AuthMode.RESET_PASSWORD -> {

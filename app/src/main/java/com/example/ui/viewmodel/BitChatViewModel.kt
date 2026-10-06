@@ -1163,7 +1163,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun registerWithEmailAndSendOtp(onSuccess: () -> Unit) {
+    fun registerWithEmailAndSendOtp(
+        onSuccess: () -> Unit,
+        onIncompleteProfile: (() -> Unit)? = null
+    ) {
         val email = _enteredEmail.value.trim().lowercase()
         _enteredEmail.value = email
         val pass = _enteredPassword.value
@@ -1211,6 +1214,67 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 // registration cannot inherit the old username/avatar/chats.
                 SupabaseService.setSession(null)
                 repository.clearAllLocalData()
+
+                // First try the exact credentials against Supabase Auth.
+                // This handles the important recovery case where the user previously
+                // verified the email but left the mandatory profile unfinished. In that
+                // state the account already exists, so sending another signup OTP is
+                // confusing and may not send anything. Correct credentials prove ownership,
+                // so we restore the authenticated session and go directly to profile setup.
+                val existingAuth = SupabaseService.signInWithEmail(email, pass)
+                if (existingAuth.isSuccess) {
+                    val session = existingAuth.getOrNull()
+                    val uid = session?.user?.id?.trim().orEmpty()
+                    if (uid.isBlank()) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("Authentication succeeded without a user ID")
+                    }
+
+                    val existingProfile = SupabaseService.getProfile(uid).getOrNull()
+                    val profileComplete = existingProfile != null &&
+                        existingProfile.isVerified &&
+                        existingProfile.username.isNotBlank() &&
+                        existingProfile.fullName.isNotBlank() &&
+                        !existingProfile.avatarUrl.isNullOrBlank()
+
+                    if (profileComplete) {
+                        // Create Account must never silently open an already completed account.
+                        // Ask the user to use Log In instead.
+                        SupabaseService.setSession(null)
+                        _isSendingOtp.value = false
+                        val err = "This email is already registered. Please log in instead."
+                        _emailAuthError.value = err
+                        showToast(err, isError = true)
+                        return@launch
+                    }
+
+                    if (!repository.prepareForAuthenticatedUser(uid)) {
+                        SupabaseService.setSession(null)
+                        throw IllegalStateException("Authenticated identity could not be established")
+                    }
+
+                    val current = repository.userIdentity.firstOrNull()
+                    val incompleteIdentity = (current ?: UserIdentityEntity()).copy(
+                        id = 1,
+                        supabaseUid = uid,
+                        email = email,
+                        username = "",
+                        fullName = "",
+                        avatarPath = "",
+                        isEmailVerified = true,
+                        isVerified = false,
+                        loginTimestamp = 0L
+                    )
+                    repository.saveUserIdentity(incompleteIdentity)
+
+                    _isSendingOtp.value = false
+                    _emailAuthError.value = null
+                    showToast("Account found. Please complete your profile.")
+                    withContext(Dispatchers.Main) {
+                        (onIncompleteProfile ?: onSuccess).invoke()
+                    }
+                    return@launch
+                }
 
                 // Registration is OTP-first. Supabase Auth /otp creates (or resumes)
                 // the email identity and sends the OTP email. The password is applied only
@@ -3198,205 +3262,3 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateGroupName(chatId: String, newName: String) {
         viewModelScope.launch {
-            val cleanName = newName.trim().take(60)
-            if (cleanName.isNotBlank()) {
-                val formattedName = if (cleanName.startsWith("[Group]")) cleanName else "[Group] $cleanName"
-                val all = repository.allChats.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList()).value
-                val existing = all.find { it.id == chatId }
-                if (existing != null) {
-                    val updated = existing.copy(name = formattedName)
-                    repository.insertChats(listOf(updated))
-                }
-            }
-        }
-    }
-
-    fun updateGroupAvatar(chatId: String, newAvatarPath: String) {
-        viewModelScope.launch {
-            val all = repository.allChats.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList()).value
-            val existing = all.find { it.id == chatId }
-            if (existing != null) {
-                val updated = existing.copy(avatarType = newAvatarPath)
-                repository.insertChats(listOf(updated))
-            }
-        }
-    }
-
-    fun leaveOrDeleteGroup(groupId: String, onSuccess: () -> Unit) {
-        viewModelScope.launch {
-            repository.deleteChat(groupId)
-            onSuccess()
-        }
-    }
-
-    fun createGroupChat(
-        groupName: String,
-        avatarPathOrType: String,
-        memberNames: List<String>,
-        onSuccess: (ChatEntity) -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            val groupId = "group_${System.currentTimeMillis()}"
-            val cleanName = if (groupName.startsWith("[Group]")) groupName else "[Group] $groupName"
-            val membersText = (listOf("You") + memberNames).joinToString(", ")
-            val newGroupChat = ChatEntity(
-                id = groupId,
-                name = cleanName,
-                lastMessage = "Group created with $membersText",
-                timeString = "Just now",
-                unreadCount = 0,
-                isOnline = true,
-                category = "Personal",
-                avatarType = if (avatarPathOrType.isBlank()) "group_default" else avatarPathOrType,
-                chatType = "GROUP"
-            )
-            repository.insertChats(listOf(newGroupChat))
-            onSuccess(newGroupChat)
-        }
-    }
-
-    suspend fun createGroupChat(
-        title: String,
-        description: String?,
-        avatarUrl: String?,
-        memberUids: List<String>
-    ): String {
-        return repository.createGroupChat(title, description, avatarUrl, memberUids)
-    }
-
-    suspend fun getChatById(chatId: String) = repository.getChatById(chatId)
-
-    suspend fun leaveGroup(chatId: String) = repository.leaveGroup(chatId)
-
-    suspend fun addMemberToGroupChat(chatId: String, newUid: String) {
-        repository.addMemberToGroup(chatId, newUid)
-    }
-
-    suspend fun removeMemberFromGroupChat(chatId: String, targetUid: String) {
-        repository.removeMemberFromGroup(chatId, targetUid)
-    }
-
-    suspend fun promoteAdmin(chatId: String, targetUid: String) {
-        repository.promoteAdmin(chatId, targetUid)
-    }
-
-    suspend fun demoteAdmin(chatId: String, targetUid: String) {
-        repository.demoteAdmin(chatId, targetUid)
-    }
-
-    suspend fun transferOwnership(chatId: String, newOwnerUid: String) {
-        repository.transferOwnership(chatId, newOwnerUid)
-    }
-
-    suspend fun updateGroupDetails(
-        chatId: String,
-        name: String,
-        description: String?,
-        avatarUrl: String?,
-        permissionsJson: String?
-    ) {
-        repository.updateGroupDetails(chatId, name, description, avatarUrl, permissionsJson)
-    }
-
-    fun toggleMuteChat(chatId: String, currentIsMuted: Boolean) {
-        viewModelScope.launch {
-            repository.toggleMuteChat(chatId, !currentIsMuted)
-            showToast(if (!currentIsMuted) "Notifications muted for this group" else "Notifications unmuted")
-        }
-    }
-
-    suspend fun reportMemberOrGroup(
-        chatId: String,
-        targetUid: String?,
-        reason: String,
-        details: String?
-    ) {
-        repository.reportMemberOrGroup(chatId, targetUid, reason, details)
-    }
-
-    suspend fun uploadMedia(
-        chatId: String,
-        fileUri: android.net.Uri,
-        mimeType: String,
-        context: android.content.Context
-    ): String {
-        return repository.uploadMedia(chatId, fileUri, mimeType, context = context)
-    }
-}
-
-sealed interface ScannedUserResult {
-    data class Success(val user: ScannedUser) : ScannedUserResult
-    object UserNotFound : ScannedUserResult
-    object InvalidQr : ScannedUserResult
-}
-
-data class ScannedUser(
-    val publicId: String,
-    val name: String,
-    val username: String,
-    val bio: String,
-    val profession: String,
-    val joinedDate: String = "",
-    val mutualGroups: List<String> = emptyList(),
-    val avatarType: String = "default",
-    val avatarUrl: String? = null,
-    val uid: String = ""
-)
-
-data class ActiveCallState(
-    val isActive: Boolean = false,
-    val isConnected: Boolean = false,
-    val contactId: String = "",
-    val contactName: String = "Alex Rivera",
-    val contactAvatar: String = "",
-    val callType: String = "AUDIO",
-    val secondsElapsed: Int = 0,
-    val isMuted: Boolean = false,
-    val isSpeaker: Boolean = false,
-    val callStatus: String = "RINGING" // "RINGING", "CONNECTED", "BUSY", "TIMEOUT", "ENDED"
-)
-
-data class DeletedChatInfo(
-    val chat: ChatEntity,
-    val deletedAtMillis: Long = System.currentTimeMillis()
-)
-
-data class GroupMember(
-    val id: String,
-    val name: String,
-    val nickname: String = "",
-    val isAdmin: Boolean = false,
-    val isOwner: Boolean = false,
-    val avatarType: String = "default",
-    val canDeleteMessages: Boolean = true,
-    val canPinMessages: Boolean = true,
-    val canChangeGroupInfo: Boolean = true,
-    val canInviteMembers: Boolean = true,
-    val canMuteMembers: Boolean = true
-)
-
-data class GroupJoinRequest(
-    val id: String,
-    val userId: String,
-    val userName: String,
-    val requestTime: String = "Just now"
-)
-
-data class CallLog(
-    val id: String = java.util.UUID.randomUUID().toString(),
-    val contactId: String,
-    val contactName: String,
-    val callType: String = "AUDIO", // "AUDIO" or "VIDEO"
-    val direction: String = "OUTGOING", // "INCOMING", "OUTGOING", "MISSED"
-    val timestampMillis: Long = System.currentTimeMillis(),
-    val timeString: String = "Just now",
-    val durationSeconds: Int = 0,
-    val avatarType: String = "default"
-)
-
-data class ModernToastData(
-    val id: Long = System.currentTimeMillis(),
-    val message: String,
-    val isError: Boolean = false
-)
-
