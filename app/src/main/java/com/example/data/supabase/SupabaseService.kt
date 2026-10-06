@@ -802,47 +802,9 @@ object SupabaseService {
         }
     }
 
+    // Recipient FCM tokens are resolved only inside the server-side FCM Edge Function.
+    // The Android client never reads another user's push token.
     suspend fun getFcmTokenForUser(targetKey: String): String? = null
-
-    private val fcmTokenCache = java.util.concurrent.ConcurrentHashMap<String, String>()
-
-    suspend fun getFcmTokenForUser(targetKey: String): String? = withContext(Dispatchers.IO) {
-        if (targetKey.isBlank()) return@withContext null
-
-        val cleanKey = targetKey.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-
-        val cached = fcmTokenCache[targetKey] ?: fcmTokenCache[cleanKey]
-        if (!cached.isNullOrBlank()) {
-            return@withContext cached
-        }
-
-        try {
-            var prof = getProfile(targetKey).getOrNull()
-                ?: getProfileByUsername(targetKey).getOrNull()
-                ?: getProfileByEmail(targetKey).getOrNull()
-                ?: (if (cleanKey.isNotBlank() && cleanKey != targetKey) {
-                    getProfile(cleanKey).getOrNull()
-                        ?: getProfileByUsername(cleanKey).getOrNull()
-                        ?: getProfileByEmail(cleanKey).getOrNull()
-                } else null)
-
-            // Do not scan the entire profiles table for an FCM token.
-            // If the targeted profile lookup has no token, return null and let the caller handle it.
-
-            val token = prof?.fcmToken?.trim()
-            if (!token.isNullOrBlank()) {
-                fcmTokenCache[targetKey] = token
-                fcmTokenCache[cleanKey] = token
-                if (prof.id.isNotBlank()) fcmTokenCache[prof.id] = token
-                if (prof.username.isNotBlank()) fcmTokenCache[prof.username] = token
-                if (prof.email.isNotBlank()) fcmTokenCache[prof.email] = token
-                return@withContext token
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error fetching FCM token for $targetKey: ${e.message}")
-        }
-        return@withContext null
-    }
 
     suspend fun fetchAllProfiles(): Result<List<SupabaseProfile>> = withContext(Dispatchers.IO) {
         try {
@@ -1198,153 +1160,99 @@ object SupabaseService {
 
     suspend fun markMessageDelivered(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (messageId.isBlank()) return@withContext Result.success(true)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId&status=eq.sent"
-            val bodyObj = JSONObject().apply {
-                put("status", "delivered")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/mark_message_delivered")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(response.body?.string()?.trim()?.toBoolean() == true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun markMessagesAsRead(chatId: String, currentUserId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&sender_id=neq.$currentUserId&status=neq.read"
-            val bodyObj = JSONObject().apply {
-                put("status", "read")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!chatId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            if (!currentUserId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            if (getCurrentUserId()?.equals(currentUserId.trim(), ignoreCase = true) != true) return@withContext Result.failure(Exception("Authenticated user mismatch"))
+            val body = JSONObject().put("p_chat_id", chatId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/mark_chat_messages_read")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            if (messageIds.isEmpty()) return@withContext Result.success(true)
-            val idsIn = "in.(${messageIds.joinToString(",")})"
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&id=$idsIn"
-            val bodyObj = JSONObject().apply {
-                put("status", "READ")
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else response.body?.string(); Result.success(true)
             }
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Boolean> =
+        markMessagesAsRead(chatId, getCurrentUserId().orEmpty())
     suspend fun editMessage(messageId: String, newText: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("text", newText)
-                put("is_edited", true)
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_body", newText.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/edit_message")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun updateMessagePinnedStatus(messageId: String, isPinned: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("is_pinned", isPinned)
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_pinned", isPinned)
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/set_message_pinned")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(response.body?.string()?.trim()?.toBoolean() == true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun deleteMessageForEveryone(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("is_deleted_for_everyone", true)
-                put("text", "")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/delete_message_for_everyone")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
-    // ==========================================
-    // TYPING INDICATOR API
-    // ==========================================
-
-    /**
-     * Typing is transported through Supabase Realtime broadcast.
-     * Keep this method for source compatibility, but never persist high-frequency
-     * typing state in Postgres because that creates unnecessary REST traffic.
-     */
     suspend fun sendTypingStatus(
         chatId: String,
         userId: String,
