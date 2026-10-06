@@ -1300,10 +1300,8 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         // 1. Check if message was sent BY ME
-        val isFromMe = supaMsg.senderId == myUid ||
-            (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
-            (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
-            (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true))
+        // Sender identity is canonical Auth UUID only.
+        val isFromMe = supaMsg.senderId.equals(myUid, ignoreCase = true)
 
         if (isFromMe) {
             val clientKey = supaMsg.clientMsgId ?: ""
@@ -1409,20 +1407,12 @@ class BitChatRepository(val dao: BitChatDao) {
 
         val myFullName = currentIdentity?.fullName?.trim()?.lowercase() ?: ""
 
-        val isDirectRecipient = (
-            supaMsg.receiverId.isBlank() ||
-            supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
-            (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
-            (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-            (myFullName.isNotBlank() && supaMsg.receiverId.equals(myFullName, ignoreCase = true)) ||
-            (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
-        )
+        // Direct message routing is UUID-only. Blank/username/email/name recipients are
+        // legacy data and must never be treated as a valid recipient.
+        val isDirectRecipient = supaMsg.receiverId.isNotBlank() &&
+            supaMsg.receiverId.equals(myUid, ignoreCase = true)
 
-        val existingChatById = dao.getChatById(supaMsg.chatId)
-        val isChatParticipant = existingChatById != null ||
-            (supaMsg.senderId.isNotBlank() && dao.getAllContactsList().any { it.id == supaMsg.senderId || it.name.equals(supaMsg.senderName, ignoreCase = true) })
-
-        if (!isGroupOrBroadcast && !isDirectRecipient && !isChatParticipant) {
+        if (!isGroupOrBroadcast && !isDirectRecipient) {
             Log.d("BitChatRepo", "Ignoring 3rd party message not addressed to me: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
             return MessageEntity(
                 id = 0L,
