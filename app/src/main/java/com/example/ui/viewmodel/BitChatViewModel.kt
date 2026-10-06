@@ -289,12 +289,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 SupabaseRealtimeManager.incomingMessages.collect { supaMsg ->
                     val currentIdentity = repository.userIdentity.firstOrNull()
                     val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email }?.ifBlank { currentIdentity.username } ?: ""
-                    val currentUsername = currentIdentity?.username ?: ""
-                    val currentCleanName = currentUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
-
-                    val isFromMe = supaMsg.senderId == currentUid ||
-                        (currentUsername.isNotBlank() && supaMsg.senderId.equals(currentUsername, ignoreCase = true)) ||
-                        (currentCleanName.isNotBlank() && currentCleanName != "user" && currentCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == currentCleanName)
+                    // Message ownership is UUID-only. Username/email/display name are never
+                    // accepted as sender identity because they can collide or be stale.
+                    val isFromMe = currentUid.isNotBlank() &&
+                        supaMsg.senderId.trim().equals(currentUid.trim(), ignoreCase = true)
 
                     val activeChat = _activeChatId.value
                     val handledEntity = repository.handleIncomingMessage(supaMsg, activeChat)
