@@ -1872,7 +1872,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.insertChats(chatsToUpdate.values.toList())
             }
 
-            val latestRemoteTimestamp = uniqueMessages.maxOfOrNull { it.timestamp } ?: previousSync
+            val latestRemoteTimestamp = uniqueMessages.maxOfOrNull { it.updatedAt } ?: previousSync
             if (latestRemoteTimestamp > previousSync) {
                 dao.upsertSyncState(SyncStateEntity(syncKey, latestRemoteTimestamp))
             }
