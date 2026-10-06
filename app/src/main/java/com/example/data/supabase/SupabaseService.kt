@@ -1543,6 +1543,35 @@ object SupabaseService {
             Result.failure(e)
         }
     }
+    suspend fun getUserCallHistory(userId: String): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
+        try {
+            val uid = userId.trim()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!uid.matches(uuidRegex)) return@withContext Result.success(emptyList())
+
+            val url = SupabaseConfig.REST_BASE_URL + "/" + SupabaseConfig.TABLE_CALL_SESSIONS +
+                "?or=(caller_id.eq." + uid + ",callee_id.eq." + uid + ")&order=created_at.desc&limit=100&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer " + getAccessToken())
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load call history: " + response.code))
+                }
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseCallSession.fromJson(arr.getJSONObject(it)) })
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error loading call history", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun getIncomingCalls(userId: String, username: String? = null, email: String? = null): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
         try {
             val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
