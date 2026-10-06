@@ -179,6 +179,22 @@ object SupabaseService {
 
     fun getSession(): SupabaseAuthSession? = currentSession
 
+    suspend fun getValidAccessToken(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            if (currentSession == null) return@withContext Result.failure(Exception("Authenticated Supabase session required"))
+            if (!isJwtValid(currentSession?.accessToken)) {
+                if (!refreshSession()) return@withContext Result.failure(Exception("Supabase session expired"))
+            }
+            val token = currentSession?.accessToken.orEmpty()
+            if (token.isBlank() || token == SupabaseConfig.ANON_KEY) {
+                return@withContext Result.failure(Exception("Authenticated Supabase session required"))
+            }
+            Result.success(token)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun getAccessToken(): String {
         val token = currentSession?.accessToken
         // Return the current session token even when it is near/just past expiry.
