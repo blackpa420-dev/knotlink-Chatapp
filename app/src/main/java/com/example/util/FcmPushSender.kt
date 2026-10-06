@@ -3,6 +3,8 @@ package com.example.util
 import android.util.Log
 import com.example.data.supabase.SupabaseConfig
 import com.example.data.supabase.SupabaseService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
