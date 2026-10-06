@@ -390,7 +390,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val isReceiverMe = (currentUid.isNotBlank() && call.receiverId == currentUid) || (currentUsername.isNotBlank() && call.receiverId == currentUsername)
                     val isForMe = isReceiverMe && !isCallerMe
 
-                    if (isForMe && !_activeCall.value.isActive && call.status == "RINGING") {
+                    if (isForMe && !_activeCall.value.isActive && call.status.equals("ringing", ignoreCase = true)) {
                         if (_incomingCallSession.value?.id != call.id) {
                             _incomingCallSession.value = call
                             viewModelScope.launch(Dispatchers.IO) {
