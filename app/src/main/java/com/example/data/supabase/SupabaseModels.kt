@@ -182,7 +182,7 @@ data class SupabaseMessage(
 
     companion object {
         fun fromJson(json: JSONObject): SupabaseMessage {
-            val status = json.optString("status", "SENT")
+            val status = json.optString("status", "sent").uppercase()
             val replyId = when {
                 json.has("reply_to_id") && !json.isNull("reply_to_id") -> json.optString("reply_to_id")
                 json.has("reply_to_message_id") && !json.isNull("reply_to_message_id") -> json.optString("reply_to_message_id")
@@ -200,7 +200,7 @@ data class SupabaseMessage(
                     val raw = json.opt("created_at")
                     when (raw) {
                         is Number -> raw.toLong()
-                        is String -> raw.toLongOrNull() ?: System.currentTimeMillis()
+                        is String -> parseIsoTimestamp(raw)
                         else -> System.currentTimeMillis()
                     }
                 }
@@ -231,6 +231,25 @@ data class SupabaseMessage(
                 clientMsgId = clientMsgId
             )
         }
+        private fun parseIsoTimestamp(value: String): Long {
+            val raw = value.trim()
+            raw.toLongOrNull()?.let { return it }
+            return try {
+                val base = raw.take(19)
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                var result = sdf.parse(base)?.time ?: System.currentTimeMillis()
+                val dot = raw.indexOf('.')
+                if (dot >= 0) {
+                    val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                    if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+                }
+                result
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+
     }
 }
 
