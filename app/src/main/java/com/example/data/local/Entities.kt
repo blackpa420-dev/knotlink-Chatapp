@@ -86,8 +86,7 @@ data class GroupMemberEntity(
     val joinedAt: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "messages")
-data class MessageEntity(
+@Entity(\n    tableName = "messages",\n    indices = [Index(value = ["serverMessageId"], unique = true)]\n)\ndata class MessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val chatId: String,
     val senderName: String,
