@@ -281,19 +281,23 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                     timestamp = ts,
                                     messageType = "TEXT"
                                 )
-                                dao.insertMessage(newMsg)
+                                dao.insertMessageIfAbsent(newMsg)
                                 try {
                                     SupabaseService.markMessageDelivered(msgId)
                                 } catch (_: Throwable) {}
                             }
 
                             val allLocal = dao.getAllChatsList()
-                            val existingChat = dao.getChatById(chatId) 
+                            // Direct-chat identity is UUID-only. Never map a push to
+                            // an existing chat by display name; names are mutable/display data.
+                            val existingChat = dao.getChatById(chatId)
                                 ?: allLocal.find { chat ->
-                                    chat.chatType != "GROUP" && chat.category != "Group" && (
-                                        (senderId.isNotBlank() && chat.participantUids.split(",").map { it.trim().lowercase() }.contains(senderId.lowercase())) ||
-                                        (callerName.isNotBlank() && callerName != "User" && callerName != "Contact" && chat.name.equals(callerName, ignoreCase = true))
-                                    )
+                                    chat.chatType != "GROUP" &&
+                                        chat.category != "Group" &&
+                                        senderId.isNotBlank() &&
+                                        chat.participantUids.split(",")
+                                            .map { it.trim().lowercase() }
+                                            .contains(senderId.lowercase())
                                 }
 
                             if (existingChat != null) {
