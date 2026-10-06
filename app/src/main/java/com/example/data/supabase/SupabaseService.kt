@@ -1453,50 +1453,35 @@ object SupabaseService {
 
     suspend fun updatePresence(userId: String, isOnline: Boolean, force: Boolean = false): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank()) return@withContext Result.success(false)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+
             val now = System.currentTimeMillis()
-
-            // Avoid repeated identical presence PATCHes from multiple lifecycle/realtime paths.
-            // Online heartbeats are sent at most once every 15 seconds; offline transitions are immediate.
-            if (isOnline) {
-                val last = presenceUpdateTimes[userId] ?: 0L
-                if (!force && now - last < PRESENCE_HEARTBEAT_TTL_MS) {
-                    return@withContext Result.success(true)
-                }
-                presenceUpdateTimes[userId] = now
-            } else {
-                presenceUpdateTimes.remove(userId)
+            val last = presenceUpdateTimes[userId] ?: 0L
+            if (isOnline && !force && now - last < 30_000L) {
+                return@withContext Result.success(true)
             }
-            val bodyObj = JSONObject().apply {
+            presenceUpdateTimes[userId] = now
+
+            val body = JSONObject().apply {
+                put("user_id", userId.trim())
                 put("is_online", isOnline)
-                put("last_seen", now)
-            }
-            val requestBody = bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE)
-
-            val isUuid = userId.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            val url = if (isUuid) {
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$userId"
-            } else if (userId.contains("@")) {
-                val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?email=ilike.$enc"
-            } else {
-                val clean = userId.trim().removePrefix("@").lowercase().removeSuffix(".link")
-                val encClean = java.net.URLEncoder.encode(clean, "UTF-8")
-                val encLink = java.net.URLEncoder.encode("$clean.link", "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$encClean,username.ilike.$encLink)"
+                put("last_seen_at", isoTimestampMillis(now))
             }
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(requestBody)
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
+            httpClient.newCall(request).execute().use { response ->
+                if (!isOnline) presenceUpdateTimes.remove(userId)
+                Result.success(response.isSuccessful)
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1504,20 +1489,10 @@ object SupabaseService {
 
     suspend fun getUserPresence(userId: String): Result<Pair<Boolean, Long>> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank()) return@withContext Result.success(Pair(false, 0L))
-            val isUuid = userId.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            val url = if (isUuid) {
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$userId&select=is_online,last_seen"
-            } else if (userId.contains("@")) {
-                val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?email=ilike.$enc&select=is_online,last_seen"
-            } else {
-                val clean = userId.trim().removePrefix("@").lowercase().removeSuffix(".link")
-                val encClean = java.net.URLEncoder.encode(clean, "UTF-8")
-                val encLink = java.net.URLEncoder.encode("$clean.link", "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$encClean,username.ilike.$encLink)&select=is_online,last_seen"
-            }
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(Pair(false, 0L))
 
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}?user_id=eq.$userId&select=is_online,last_seen_at"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1525,21 +1500,17 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-            if (!response.isSuccessful || resStr.isBlank()) {
-                return@withContext Result.success(Pair(false, 0L))
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful || responseBody.isBlank()) return@withContext Result.success(Pair(false, 0L))
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(Pair(false, 0L))
+                val obj = arr.getJSONObject(0)
+                val online = obj.optBoolean("is_online", false)
+                val lastSeen = obj.optString("last_seen_at").let { parseIsoTimestamp(it) }
+                val recentlyActive = online && lastSeen > 0L && System.currentTimeMillis() - lastSeen <= 30_000L
+                Result.success(Pair(recentlyActive, lastSeen))
             }
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() == 0) return@withContext Result.success(Pair(false, 0L))
-            val obj = jsonArray.getJSONObject(0)
-            val isOnline = obj.optBoolean("is_online", false)
-            val lastSeen = obj.optLong("last_seen", 0L)
-            val now = System.currentTimeMillis()
-            val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-            // Strictly active if is_online is true, lastSeen is recorded and updated within the last 30 seconds
-            val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-            Result.success(Pair(isRecentlyActive, lastSeen))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1547,7 +1518,7 @@ object SupabaseService {
 
     suspend fun getAllUserPresence(): Result<Map<String, Pair<Boolean, Long>>> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?select=id,username,email,full_name,is_online,last_seen"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}?select=user_id,is_online,last_seen_at"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1555,52 +1526,21 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-            if (!response.isSuccessful || resStr.isBlank()) {
-                return@withContext Result.success(emptyMap())
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful || responseBody.isBlank()) return@withContext Result.success(emptyMap())
+                val arr = JSONArray(responseBody)
+                val result = mutableMapOf<String, Pair<Boolean, Long>>()
+                val now = System.currentTimeMillis()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val uid = obj.optString("user_id", "")
+                    val lastSeen = parseIsoTimestamp(obj.optString("last_seen_at"))
+                    val online = obj.optBoolean("is_online", false) && lastSeen > 0L && now - lastSeen <= 30_000L
+                    if (uid.isNotBlank()) result[uid] = Pair(online, lastSeen)
+                }
+                Result.success(result)
             }
-            val jsonArray = JSONArray(resStr)
-            val resultMap = mutableMapOf<String, Pair<Boolean, Long>>()
-            val now = System.currentTimeMillis()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val id = obj.optString("id", "").trim()
-                val username = obj.optString("username", "").trim()
-                val email = obj.optString("email", "").trim()
-                val fullName = obj.optString("full_name", "").trim()
-                val isOnline = obj.optBoolean("is_online", false)
-                val lastSeen = obj.optLong("last_seen", 0L)
-                val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-                // Strictly active if is_online is true, lastSeen is recorded and updated within the last 30 seconds
-                val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-                val presencePair = Pair(isRecentlyActive, lastSeen)
-
-                if (id.isNotBlank()) {
-                    resultMap[id] = presencePair
-                    resultMap[id.lowercase()] = presencePair
-                }
-                if (username.isNotBlank()) {
-                    resultMap[username] = presencePair
-                    resultMap[username.lowercase()] = presencePair
-                    val clean = username.lowercase().removePrefix("@").removeSuffix(".link")
-                    resultMap[clean] = presencePair
-                    resultMap["$clean.link"] = presencePair
-                    resultMap["@$clean"] = presencePair
-                    resultMap["@$clean.link"] = presencePair
-                }
-                if (email.isNotBlank()) {
-                    resultMap[email] = presencePair
-                    resultMap[email.lowercase()] = presencePair
-                    val prefix = email.substringBefore("@").lowercase()
-                    resultMap[prefix] = presencePair
-                }
-                if (fullName.isNotBlank()) {
-                    resultMap[fullName] = presencePair
-                    resultMap[fullName.lowercase()] = presencePair
-                }
-            }
-            Result.success(resultMap)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -2060,6 +2000,25 @@ object SupabaseService {
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
         sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
         return sdf.format(java.util.Date(millis))
+    }
+
+    private fun parseIsoTimestamp(value: String): Long {
+        val raw = value.trim()
+        if (raw.isBlank()) return 0L
+        return try {
+            val base = raw.take(19)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            var result = sdf.parse(base)?.time ?: 0L
+            val dot = raw.indexOf('.')
+            if (dot >= 0) {
+                val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+            }
+            result
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     private fun parseErrorMessage(responseBody: String, defaultMsg: String): String {
