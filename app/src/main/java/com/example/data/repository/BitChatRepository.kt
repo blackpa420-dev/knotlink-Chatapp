@@ -798,11 +798,9 @@ class BitChatRepository(val dao: BitChatDao) {
             )
             dao.insertMessage(syncedMessage)
 
-            // Now that the authoritative write succeeded, notify the peer immediately.
-            SupabaseRealtimeManager.broadcastNewMessage(
-                sendResult.copy(id = finalServerId)
-            )
-
+            // The database write is the authoritative event.
+            // Supabase Realtime postgres_changes delivers it to the recipient.
+            // Do not send a second custom broadcast: that would create duplicate messages.
             if (finalServerId.isNotBlank()) {
                 dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
             }
