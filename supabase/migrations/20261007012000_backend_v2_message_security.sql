@@ -1,3 +1,9 @@
+
+
+alter table public.messages
+  add column if not exists is_pinned boolean not null default false,
+  add column if not exists pinned_by uuid references auth.users(id) on delete set null,
+  add column if not exists pinned_at timestamptz;
 -- Backend v2 hardening: immutable usernames and server-authorized message state mutations.
 -- No OTP/SMS provider is involved here.
 
@@ -168,13 +174,18 @@ declare
 begin
   if me is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
 
-  update public.messages m
-     set updated_at = now()
-   where false;
+  update public.messages
+     set is_pinned = coalesce(p_pinned, false),
+         pinned_by = case when p_pinned then me else null end,
+         pinned_at = case when p_pinned then now() else null end
+   where id = p_message_id
+     and exists (
+       select 1 from public.chat_participants cp
+       where cp.chat_id = messages.chat_id and cp.user_id = me
+     );
 
-  -- Pin state is intentionally not stored in the v2 message row yet.
-  -- Return false so callers cannot silently mutate a nonexistent legacy column.
-  return false;
+  get diagnostics changed = row_count;
+  return changed > 0;
 end;
 $$;
 
@@ -191,7 +202,7 @@ begin
   if me is null then raise exception 'not_authenticated' using errcode = '28000'; end if;
 
   update public.messages
-     set body = null,
+     set body = '',
          media_url = null,
          deleted_at = now()
    where id = p_message_id
