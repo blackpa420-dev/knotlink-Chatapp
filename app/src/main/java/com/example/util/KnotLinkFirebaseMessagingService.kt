@@ -292,7 +292,6 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                 // delivery only after Room reconciliation.
                                 try {
                                     val db2 = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
-                                    val identity2 = db2.bitChatDao().getUserIdentitySync()
                                     val repository = com.example.data.repository.BitChatRepository(db2.bitChatDao())
                                     repository.syncMessagesForChat(chatId)
                                     SupabaseService.markMessageDelivered(msgId)
