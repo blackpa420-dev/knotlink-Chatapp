@@ -1609,10 +1609,10 @@ object SupabaseService {
         try {
             val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
             // Do not accept an SDP answer after the call has already been declined/cancelled/ended.
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.(RINGING,ACCEPTED)"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.(ringing,accepted)"
             val bodyObj = JSONObject().apply {
                 put("sdp_answer", answerSdp)
-                put("status", "ACCEPTED")
+                put("status", "accepted")
             }
             var updated = false
             for (attempt in 1..4) {
