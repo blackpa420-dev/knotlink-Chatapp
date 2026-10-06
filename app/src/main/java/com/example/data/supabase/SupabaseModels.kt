@@ -146,7 +146,8 @@ data class SupabaseMessage(
     val isEdited: Boolean = false,
     val isDeletedForEveryone: Boolean = false,
     val isPinned: Boolean = false,
-    val clientMsgId: String? = null
+    val clientMsgId: String? = null,
+    val updatedAt: Long = timestamp
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -208,6 +209,10 @@ data class SupabaseMessage(
                 json.has("timestamp") -> json.optLong("timestamp", System.currentTimeMillis())
                 else -> System.currentTimeMillis()
             }
+            val updatedAt = when {
+                json.has("updated_at") -> parseIsoTimestamp(json.optString("updated_at", ""))
+                else -> ts
+            }
             val msgId = json.opt("id")?.toString() ?: ""
             return SupabaseMessage(
                 id = msgId,
@@ -220,6 +225,7 @@ data class SupabaseMessage(
                 timestampString = json.optString("timestamp_string", ""),
                 status = status,
                 isRead = (status == "READ" || json.optBoolean("is_read", false)),
+                updatedAt = if (updatedAt > 0L) updatedAt else ts,
                 mediaUrl = if (json.has("media_url") && !json.isNull("media_url")) json.optString("media_url") else null,
                 mediaType = if (json.has("media_type") && !json.isNull("media_type")) json.optString("media_type") else null,
                 messageType = mType,
