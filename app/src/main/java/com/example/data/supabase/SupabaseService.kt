@@ -1038,7 +1038,7 @@ object SupabaseService {
     suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             if (chatId.isBlank()) return@withContext Result.success(emptyList())
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.${java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")}&order=created_at.asc&limit=$limit&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&updated_at=gt.${java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")}&order=updated_at.asc&limit=$limit&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
