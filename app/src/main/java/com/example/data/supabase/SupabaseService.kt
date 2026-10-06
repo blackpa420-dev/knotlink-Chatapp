@@ -1105,34 +1105,25 @@ object SupabaseService {
         offset: Int = 0
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) ids.add(email)
-            val orParts = ids.filter { it.isNotBlank() }.distinct().flatMap {
-                val enc = java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20")
-                listOf("recipient_id.eq.$enc", "sender_id.eq.$enc")
-            }
-            if (orParts.isEmpty()) return@withContext Result.success(emptyList())
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
             val safeOffset = offset.coerceAtLeast(0)
             val safeLimit = limit.coerceIn(1, 500)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
+            val timestamp = java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&created_at=gt.$timestamp&order=created_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .get()
                 .build()
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed user messages: ${response.code}"))
-            val arr = JSONArray(body)
-            val list = mutableListOf<SupabaseMessage>()
-            for (i in 0 until arr.length()) list.add(SupabaseMessage.fromJson(arr.getJSONObject(i)))
-            Result.success(list)
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed user messages: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseMessage.fromJson(arr.getJSONObject(it)) })
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in fetchUserMessagesSince", e)
             Result.failure(e)
@@ -1181,46 +1172,24 @@ object SupabaseService {
         offset: Int = 0
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) {
-                ids.add(email)
-            }
-            val orParts = mutableListOf<String>()
-            for (id in ids.filter { it.isNotBlank() }.distinct()) {
-                val enc = java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20")
-                orParts.add("recipient_id.eq.$enc")
-                orParts.add("sender_id.eq.$enc")
-            }
-            if (orParts.isEmpty()) return@withContext Result.success(emptyList())
-
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
             val safeOffset = offset.coerceAtLeast(0)
             val safeLimit = limit.coerceIn(1, 500)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&order=created_at.desc&limit=$safeLimit&offset=$safeOffset&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&order=created_at.desc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .get()
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch user messages: ${response.code}"))
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch user messages: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseMessage.fromJson(arr.getJSONObject(it)) })
             }
-
-            val jsonArray = JSONArray(resStr)
-            val list = mutableListOf<SupabaseMessage>()
-            for (i in 0 until jsonArray.length()) {
-                list.add(SupabaseMessage.fromJson(jsonArray.getJSONObject(i)))
-            }
-            Result.success(list)
         } catch (e: Exception) {
             Log.e(TAG, "Error in fetchUserMessages", e)
             Result.failure(e)
@@ -1230,9 +1199,9 @@ object SupabaseService {
     suspend fun markMessageDelivered(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             if (messageId.isBlank()) return@withContext Result.success(true)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId&status=eq.SENT"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId&status=eq.sent"
             val bodyObj = JSONObject().apply {
-                put("status", "DELIVERED")
+                put("status", "delivered")
             }
 
             val request = Request.Builder()
@@ -1252,9 +1221,9 @@ object SupabaseService {
 
     suspend fun markMessagesAsRead(chatId: String, currentUserId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&sender_id=neq.$currentUserId&status=neq.READ"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&sender_id=neq.$currentUserId&status=neq.read"
             val bodyObj = JSONObject().apply {
-                put("status", "READ")
+                put("status", "read")
             }
 
             val request = Request.Builder()
