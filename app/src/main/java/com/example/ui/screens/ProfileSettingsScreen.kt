@@ -195,14 +195,14 @@ fun ProfileSettingsScreen(
 
     // QR Code State & Memory Caching
     val haptic = LocalHapticFeedback.current
-    val publicId = remember(user) { user?.publicId ?: "usr_8921" }
+    val publicId = remember(user) { user?.supabaseUid?.trim().orEmpty() }
 
     var isQrVisible by remember { mutableStateOf(false) }
     var qrCountdownSeconds by remember { mutableIntStateOf(10) }
 
     // Memory cached QR Code Bitmap (regenerates ONLY if publicId changes)
     val cachedQrBitmap = remember(publicId, context) {
-        QRCodeGenerator.generateProfileQRCode(publicId = publicId, context = context, size = 512)
+        QRCodeGenerator.generateProfileQRCode(userId = publicId, context = context, size = 512)
     }
 
     // Auto-hide 10-second timer
@@ -227,7 +227,7 @@ fun ProfileSettingsScreen(
 
     // Username is fixed with .link
     val rawUsername = user?.username ?: "user"
-    val cleanName = rawUsername.removePrefix("@").removeSuffix(".chat").removeSuffix(".bit").removeSuffix(".link")
+    val cleanName = rawUsername.removePrefix("@").removeSuffix(".link")
     val formattedHandle = "${cleanName.ifBlank { "user" }}.link"
 
     val bdDateToday = remember { com.example.data.local.getBdCurrentJoinedDate() }
