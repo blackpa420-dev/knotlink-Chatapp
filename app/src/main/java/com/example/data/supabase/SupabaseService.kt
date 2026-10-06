@@ -1737,7 +1737,7 @@ object SupabaseService {
             bytes = imageBytes,
             fileName = fileName,
             mimeType = mimeType,
-            folder = "avatars"
+            folder = "avatar"
         )
     }
 
