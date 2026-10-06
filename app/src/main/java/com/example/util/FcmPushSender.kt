@@ -20,75 +20,12 @@ import java.util.concurrent.TimeUnit
  */
 object FcmPushSender {
     private const val TAG = "FcmPushSender"
-    private const val FUNCTION_NAME = "fcm-send"
     private const val USER_FUNCTION_NAME = "fcm-send-v2"
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
-
-    fun sendPushToToken(
-        targetFcmToken: String,
-        type: String,
-        title: String,
-        body: String,
-        callerName: String,
-        chatId: String,
-        callType: String = "Voice",
-        senderAvatar: String? = null,
-        senderId: String? = null,
-        serverMessageId: String? = null,
-        messageType: String? = null
-    ) {
-        if (targetFcmToken.isBlank()) {
-            Log.w(TAG, "Cannot send FCM push: target token is blank")
-            return
-        }
-
-        val accessToken = SupabaseService.getAccessToken()
-        if (accessToken.isBlank() || accessToken == SupabaseConfig.ANON_KEY) {
-            Log.w(TAG, "Cannot send FCM push: authenticated Supabase session is required")
-            return
-        }
-
-        Thread {
-            try {
-                val data = JSONObject().apply {
-                    put("targetFcmToken", targetFcmToken)
-                    put("type", type)
-                    put("title", title)
-                    put("messageBody", body)
-                    put("callerName", callerName)
-                    put("chatId", chatId)
-                    put("callType", callType)
-                    put("senderAvatar", senderAvatar ?: "")
-                    put("senderId", senderId ?: "")
-                    if (!serverMessageId.isNullOrBlank()) put("serverMessageId", serverMessageId)
-                    if (!messageType.isNullOrBlank()) put("messageType", messageType)
-                }
-
-                val request = Request.Builder()
-                    .url("${SupabaseConfig.PROJECT_URL}/functions/v1/$FUNCTION_NAME")
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer $accessToken")
-                    .addHeader("Content-Type", "application/json")
-                    .post(data.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string().orEmpty()
-                    if (response.isSuccessful) {
-                        Log.i(TAG, "FCM push accepted by server (type=$type)")
-                    } else {
-                        Log.w(TAG, "FCM server rejected push: HTTP ${response.code}: $responseBody")
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "FCM server request failed: ${e.message}", e)
-            }
-        }.start()
-    }
 
     suspend fun sendPushToUser(
         targetUserIdOrName: String,
@@ -109,16 +46,11 @@ object FcmPushSender {
         }
 
         try {
-            val directUuid = targetUserIdOrName.trim()
-                .removePrefix("chat_")
-                .removePrefix("user_")
-                .removePrefix("@")
+            val targetUuid = targetUserIdOrName.trim()
             val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-            val targetUuid = if (directUuid.matches(uuidRegex)) {
-                directUuid
-            } else {
-                SupabaseService.getProfileByUsername(targetUserIdOrName).getOrNull()?.id.orEmpty()
+            if (!targetUuid.matches(uuidRegex)) {
+                Log.w(TAG, "FCM Push skipped: recipient must be a canonical UUID")
+                return@withContext
             }
 
             if (!targetUuid.matches(uuidRegex)) {
