@@ -71,6 +71,30 @@ object SupabaseRealtimeManager {
 
     fun getCurrentUserId(): String? = currentUserId
 
+    fun broadcastMessageMutation(message: SupabaseMessage, mutation: String) {
+        val socket = webSocket ?: return
+        try {
+            val inner = message.toJson().apply {
+                put("event", "message_mutation")
+                put("mutation", mutation)
+            }
+            val payload = JSONObject().apply {
+                put("type", "broadcast")
+                put("event", "message_mutation")
+                put("payload", inner)
+            }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", payload)
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) {
+            Log.w(TAG, "message mutation broadcast failed: " + e.message)
+        }
+    }
+
     fun startRealtime(userId: String, username: String? = null, email: String? = null) {
         val identityChanged = currentUserId != userId ||
             (!username.isNullOrBlank() && currentUsername != username) ||
