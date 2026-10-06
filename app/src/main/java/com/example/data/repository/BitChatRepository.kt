@@ -1936,7 +1936,7 @@ class BitChatRepository(val dao: BitChatDao) {
             if (res.isSuccess) {
                 val messages = res.getOrNull().orEmpty()
                 for (supaMsg in messages) handleIncomingMessage(supaMsg, chatId)
-                val newest = messages.maxOfOrNull { it.timestamp } ?: latestLocal
+                val newest = messages.maxOfOrNull { it.updatedAt } ?: latestLocal
                 if (newest > latestLocal) {
                     dao.upsertSyncState(SyncStateEntity("chat:$chatId", newest))
                 }
