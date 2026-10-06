@@ -1826,11 +1826,12 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val myUid = repository.userIdentity.firstOrNull()?.let {
-                    it.supabaseUid.ifBlank { it.email }
-                } ?: SupabaseService.getAuthenticatedUserId()
+                // The Supabase Auth UUID is the only canonical owner ID for R2 objects.
+                // Never fall back to email/username here: r2-media-url validates
+                // users/<auth-uuid>/... against the authenticated JWT subject.
+                val myUid = SupabaseService.getAuthenticatedUserId()
 
-                if (myUid.isNullOrBlank()) {
+                if (myUid.isNullOrBlank() || !Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$").matches(myUid)) {
                     val err = "Your account session is missing. Please verify the OTP again."
                     _isCheckingUsername.value = false
                     withContext(Dispatchers.Main) {
@@ -1840,10 +1841,12 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                val fileName = "avatar_${myUid}_${System.currentTimeMillis()}.jpg"
+                val fileName = "avatar_${System.currentTimeMillis()}.jpg"
                 val uploadRes = SupabaseService.uploadAvatar(fileName, bytes, "image/jpeg")
                 if (uploadRes.isFailure || uploadRes.getOrNull().isNullOrBlank()) {
-                    val err = "Profile photo upload failed. Please select the photo again and try."
+                    val remoteError = uploadRes.exceptionOrNull()?.message.orEmpty()
+                    Log.e("BitChatViewModel", "Profile avatar R2 upload failed for uid=${myUid}: $remoteError")
+                    val err = "Profile photo upload failed. Please try again."
                     _isCheckingUsername.value = false
                     withContext(Dispatchers.Main) {
                         showToast(err, isError = true)
