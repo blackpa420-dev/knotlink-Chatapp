@@ -183,11 +183,21 @@ object SupabaseRealtimeManager {
                                         put("filter", "sender_id=eq.$realtimeUid")
                                     })
                                 }
-                                put(JSONObject().apply {
-                                    put("event", "*")
-                                    put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
-                                })
+                                val callUid = currentUserId
+                                if (!callUid.isNullOrBlank()) {
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
+                                        put("filter", "caller_id=eq.$callUid")
+                                    })
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
+                                        put("filter", "callee_id=eq.$callUid")
+                                    })
+                                }
                                 put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
