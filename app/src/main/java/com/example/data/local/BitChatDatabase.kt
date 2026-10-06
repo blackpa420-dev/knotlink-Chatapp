@@ -33,7 +33,7 @@ abstract class BitChatDatabase : RoomDatabase() {
             // Durable local idempotency boundary: one authoritative server UUID
             // can exist only once in Room. NULL remains allowed for optimistic rows.
             db.execSQL(
-                "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_serverMessageId ON messages(serverMessageId)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_serverMessageId_unique ON messages(serverMessageId) WHERE serverMessageId IS NOT NULL AND serverMessageId != ''"
             )
         }
     }
