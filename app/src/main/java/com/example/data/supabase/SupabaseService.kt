@@ -2136,47 +2136,21 @@ object SupabaseService {
     // STORAGE API (PROFILE PHOTOS & MEDIA)
     // ==========================================
 
+    // ==========================================
+    // MEDIA API (CLOUDFLARE R2)
+    // ==========================================
+
     suspend fun uploadAvatar(
         fileName: String,
         imageBytes: ByteArray,
         mimeType: String = "image/jpeg"
     ): Result<String> = withContext(Dispatchers.IO) {
-        // Direct zero-egress Cloudflare R2 upload
-        val r2Result = com.example.data.cloudflare.CloudflareR2Service.uploadFile(
+        com.example.data.cloudflare.CloudflareR2Service.uploadFile(
             bytes = imageBytes,
             fileName = fileName,
             mimeType = mimeType,
             folder = "avatars"
         )
-        if (r2Result.isSuccess) {
-            return@withContext r2Result
-        }
-
-        try {
-            val url = "${SupabaseConfig.STORAGE_BASE_URL}/object/${SupabaseConfig.BUCKET_AVATARS}/$fileName"
-            val mediaType = mimeType.toMediaType()
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", mimeType)
-                .addHeader("x-upsert", "true")
-                .post(imageBytes.toRequestBody(mediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                val errorMsg = response.body?.string() ?: "Upload error"
-                return@withContext Result.failure(Exception("Avatar upload failed: $errorMsg"))
-            }
-
-            val publicUrl = "${SupabaseConfig.STORAGE_BASE_URL}/object/public/${SupabaseConfig.BUCKET_AVATARS}/$fileName"
-            Result.success(publicUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in uploadAvatar", e)
-            Result.failure(e)
-        }
     }
 
     suspend fun uploadAvatar(
@@ -2190,42 +2164,12 @@ object SupabaseService {
         mediaBytes: ByteArray,
         mimeType: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        // Direct zero-egress Cloudflare R2 upload
-        val r2Result = com.example.data.cloudflare.CloudflareR2Service.uploadFile(
+        com.example.data.cloudflare.CloudflareR2Service.uploadFile(
             bytes = mediaBytes,
             fileName = fileName,
             mimeType = mimeType,
             folder = "chat_media"
         )
-        if (r2Result.isSuccess) {
-            return@withContext r2Result
-        }
-
-        try {
-            val url = "${SupabaseConfig.STORAGE_BASE_URL}/object/${SupabaseConfig.BUCKET_CHAT_MEDIA}/$fileName"
-            val mediaType = mimeType.toMediaType()
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", mimeType)
-                .addHeader("x-upsert", "true")
-                .post(mediaBytes.toRequestBody(mediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                val errorMsg = response.body?.string() ?: "Upload error"
-                return@withContext Result.failure(Exception("Media upload failed: $errorMsg"))
-            }
-
-            val publicUrl = "${SupabaseConfig.STORAGE_BASE_URL}/object/public/${SupabaseConfig.BUCKET_CHAT_MEDIA}/$fileName"
-            Result.success(publicUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in uploadChatMedia", e)
-            Result.failure(e)
-        }
     }
 
     // ==========================================
