@@ -144,6 +144,75 @@ object SupabaseRealtimeManager {
         onAppBackground()
     }
 
+    fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {
+        val socket = webSocket ?: return
+        if (chatId.isBlank() || userId.isBlank()) return
+        try {
+            val payload = JSONObject().apply {
+                put("chat_id", chatId)
+                put("user_id", userId)
+                put("user_name", userName)
+                put("is_typing", isTyping)
+                put("event", "typing")
+            }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("event", "typing")
+                    put("payload", payload)
+                })
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) { Log.w(TAG, "typing broadcast failed: " + e.message) }
+    }
+
+    fun broadcastNewMessage(message: SupabaseMessage) {
+        val socket = webSocket ?: return
+        try {
+            val inner = message.toJson().apply { put("event", "new_message") }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("event", "new_message")
+                    put("payload", inner)
+                })
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) { Log.w(TAG, "new message broadcast failed: " + e.message) }
+    }
+
+    private fun clearTypingForChat(chatId: String) {
+        if (chatId.isBlank()) return
+        val map = _typingUsersByChat.value.toMutableMap()
+        map.remove(chatId)
+        _typingUsersByChat.value = map
+        typingExpiryJobs.remove(chatId)?.cancel()
+    }
+
+    private fun handleTypingUpdate(chatId: String, userId: String, userName: String, isTyping: Boolean) {
+        if (chatId.isBlank() || userId.isBlank() || isFromMe(userId, userName)) return
+        val map = _typingUsersByChat.value.toMutableMap()
+        val users = map[chatId].orEmpty().toMutableList()
+        if (isTyping) {
+            if (!users.any { it.equals(userId, ignoreCase = true) }) users += userId
+            map[chatId] = users
+            _typingUsersByChat.value = map
+            typingExpiryJobs.remove(chatId)?.cancel()
+            typingExpiryJobs[chatId] = scope.launch {
+                delay(5000L)
+                clearTypingForChat(chatId)
+            }
+        } else {
+            users.removeAll { it.equals(userId, ignoreCase = true) }
+            if (users.isEmpty()) map.remove(chatId) else map[chatId] = users
+            _typingUsersByChat.value = map
+        }
+    }
+
     fun setCurrentActiveChat(chatId: String?) {
         currentChatId = chatId
     }
