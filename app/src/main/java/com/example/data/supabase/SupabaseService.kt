@@ -976,161 +976,59 @@ object SupabaseService {
     // CHATS & MESSAGES API (REST)
     // ==========================================
 
-    suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            if (chatId.isBlank()) return@withContext Result.failure(Exception("Chat ID cannot be blank"))
-            val currentUid = getAuthenticatedUserId()?.trim().orEmpty()
-            if (currentUid.isBlank()) {
-                return@withContext Result.failure(Exception("No authenticated Supabase UUID"))
-            }
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CHATS}"
-            val body = JSONObject().apply {
-                put("id", chatId)
-                put("type", type)
-            }
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
-                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(
-                    Exception(parseErrorMessage(responseBody, "Failed to create chat (${response.code})"))
-                )
-            }
-
-            // Only a newly-created chat gets an automatic current-user membership.
-            // Existing chats must already be joined, preventing guessed chat IDs
-            // from becoming a way to join another user's conversation.
-            val createdNewChat = try {
-                responseBody.isNotBlank() && JSONArray(responseBody).length() > 0
-            } catch (_: Exception) {
-                false
-            }
-
-            if (createdNewChat) {
-                val participantUrl = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
-                val participantBody = JSONObject().apply {
-                    put("chat_id", chatId)
-                    put("user_id", currentUid)
-                }
-                val participantRequest = Request.Builder()
-                    .url(participantUrl)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
-                    .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-                httpClient.newCall(participantRequest).execute().use { participantResponse ->
-                    if (!participantResponse.isSuccessful) {
-                        val pBody = participantResponse.body?.string().orEmpty()
-                        return@withContext Result.failure(
-                            Exception(parseErrorMessage(pBody, "Failed to register chat participant (${participantResponse.code})"))
-                        )
-                    }
-                }
-            }
-            Result.success(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in ensureChatExists", e)
-            Result.failure(e)
-        }
-    }
-
-    private suspend fun ensureChatParticipants(
-        chatId: String,
-        senderId: String,
-        recipientId: String
-    ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            if (chatId.isBlank() || senderId.isBlank() || recipientId.isBlank()) {
-                return@withContext Result.failure(Exception("Chat participants require canonical user IDs"))
-            }
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
-            fun addParticipant(userId: String): Boolean {
-                val body = JSONObject().apply {
-                    put("chat_id", chatId)
-                    put("user_id", userId)
-                }
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
-                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Failed to add chat participant $userId: ${response.code}")
-                    }
-                    return response.isSuccessful
-                }
-            }
-
-            if (!addParticipant(senderId)) return@withContext Result.failure(Exception("Could not register sender in chat"))
-            if (recipientId != senderId && !addParticipant(recipientId)) {
-                return@withContext Result.failure(Exception("Could not register recipient in chat"))
-            }
-            Result.success(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in ensureChatParticipants", e)
-            Result.failure(e)
-        }
+    suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> {
+        // Legacy callers may still pass a local/hash chat ID. V2 creates direct chats
+        // from the canonical recipient UUID inside sendMessage(), so this method is
+        // intentionally a no-op for compatibility.
+        return Result.success(chatId.isNotBlank())
     }
 
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
-            val senderId = message.senderId.trim()
             val recipientId = message.receiverId.trim()
-            if (senderId.isBlank() || recipientId.isBlank()) {
-                return@withContext Result.failure(Exception("Message sender and recipient must be canonical user IDs"))
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!recipientId.matches(uuidRegex)) {
+                return@withContext Result.failure(Exception("Message recipient must be a canonical UUID"))
             }
 
-            val chatResult = ensureChatExists(message.chatId)
-            if (chatResult.isFailure) return@withContext Result.failure(chatResult.exceptionOrNull() ?: Exception("Could not create chat"))
-
-            val participantResult = ensureChatParticipants(message.chatId, senderId, recipientId)
-            if (participantResult.isFailure) {
-                return@withContext Result.failure(
-                    participantResult.exceptionOrNull() ?: Exception("Could not register chat participants")
-                )
+            val clientMessageId = (message.clientMsgId?.takeIf { it.matches(uuidRegex) } ?: java.util.UUID.randomUUID().toString())
+            val messageType = message.messageType.lowercase().ifBlank { "text" }
+            val body = JSONObject().apply {
+                put("p_recipient_id", recipientId)
+                put("p_message_type", messageType)
+                if (message.text.isNotBlank()) put("p_body", message.text)
+                if (!message.mediaUrl.isNullOrBlank()) put("p_media_url", message.mediaUrl)
+                put("p_client_message_id", clientMessageId)
+                val replyId = message.replyToMessageId ?: message.replyToId
+                if (!replyId.isNullOrBlank() && replyId.matches(uuidRegex)) {
+                    put("p_reply_to_message_id", replyId)
+                }
             }
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}"
-            val bodyStr = message.toJson().toString()
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/send_direct_message")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=representation")
-                .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to send message (${response.code})"))
+                    )
+                }
 
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(resStr, "Failed to send message (${response.code})")
-                return@withContext Result.failure(Exception(errorMsg))
-            }
+                val json = if (responseBody.trimStart().startsWith("[")) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else {
+                    JSONObject(responseBody)
+                } ?: return@withContext Result.failure(Exception("Message RPC returned no message"))
 
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseMessage.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(message)
+                Result.success(SupabaseMessage.fromJson(json))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in sendMessage", e)
