@@ -682,7 +682,22 @@ class BitChatRepository(val dao: BitChatDao) {
             systemEventType = systemEventType,
             mentionedUids = mentionedUids
         )
-        val localRowId = dao.insertMessage(message)
+        // Idempotency boundary: a retry with the same clientMessageId must reuse the
+        // existing optimistic Room row instead of creating a second local message.
+        val existingByClientId = dao.getMessageByServerOrClientId(null, clientMsgId)
+        val localRowId = if (existingByClientId != null) {
+            val merged = message.copy(
+                id = existingByClientId.id,
+                serverMessageId = existingByClientId.serverMessageId,
+                serverTimestamp = existingByClientId.serverTimestamp,
+                syncStatus = existingByClientId.syncStatus,
+                deliveryState = existingByClientId.deliveryState
+            )
+            dao.insertMessage(merged)
+            existingByClientId.id
+        } else {
+            dao.insertMessage(message)
+        }
 
         val previewText = if (messageType == "SYSTEM_EVENT") text else if (isForwarded) "↪️ Forwarded: $text" else text
         if (existingChat != null) {
@@ -1305,11 +1320,10 @@ class BitChatRepository(val dao: BitChatDao) {
 
         if (isFromMe) {
             val clientKey = supaMsg.clientMsgId ?: ""
+            // Realtime/history reconciliation is strictly ID-based. Never match a
+            // message by text/time: two legitimate identical messages are allowed.
             val existingLocal = dao.findMessageByServerId(supaMsg.id)
-                ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
-                ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-                ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
+                ?: if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null
 
             val updatedEntity = if (existingLocal != null) {
                 existingLocal.copy(
@@ -1329,19 +1343,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingLocal.pinnedAt
                 )
             } else {
-                val pendingRecent = dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                if (pendingRecent != null) {
-                    pendingRecent.copy(
-                        serverMessageId = supaMsg.id,
-                        syncStatus = "SYNCED",
-                        deliveryState = when {
-                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
-                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
-                        else -> "SENT"
-                    }
-                    )
-                } else {
-                    MessageEntity(
+                MessageEntity(
                         chatId = supaMsg.chatId,
                         senderName = "You",
                         text = msgText,
@@ -1426,11 +1428,10 @@ class BitChatRepository(val dao: BitChatDao) {
 
         // Existing message check (to prevent duplicate insertions)
         val clientKey = supaMsg.clientMsgId ?: ""
+        // Strict server/client ID idempotency. Content/time matching can collapse
+        // two different messages with identical text and is therefore forbidden.
         val existingIncoming = dao.findMessageByServerId(supaMsg.id)
-            ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
-            ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-            ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-            ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
+            ?: if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null
 
         if (existingIncoming != null) {
             val updated = existingIncoming.copy(
@@ -1445,6 +1446,13 @@ class BitChatRepository(val dao: BitChatDao) {
                 pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingIncoming.pinnedAt
             )
             dao.insertMessage(updated)
+
+            // Even duplicate delivery events must be acknowledged server-side.
+            // This makes delivery idempotent and allows recovery if the first
+            // acknowledgement was lost during reconnect.
+            if (supaMsg.id.isNotBlank() && !supaMsg.isRead) {
+                try { SupabaseService.markMessageDelivered(supaMsg.id) } catch (_: Exception) {}
+            }
 
             // Update local pinned_messages table
             if (supaMsg.isPinned) {
@@ -1749,6 +1757,17 @@ class BitChatRepository(val dao: BitChatDao) {
                         )
                     }
                 } else {
+                    // Reconcile server delivery/read state without ever regressing a
+                    // stronger local state (READ > DELIVERED > SENT).
+                    val remoteState = when {
+                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                        else -> "SENT"
+                    }
+                    if (supaMsg.id.isNotBlank()) {
+                        dao.updateMessageDeliveryStateByServerId(supaMsg.id, remoteState)
+                    }
+
                     // Real-time update for edits
                     if (supaMsg.text != existing.text || supaMsg.isEdited != existing.isEdited) {
                         dao.updateMessageTextWithRowId(existing.id, supaMsg.id, msgText, System.currentTimeMillis())
