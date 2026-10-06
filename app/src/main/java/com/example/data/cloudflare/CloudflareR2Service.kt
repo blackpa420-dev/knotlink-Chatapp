@@ -85,7 +85,7 @@ object CloudflareR2Service {
         chatId: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val userId = SupabaseService.getCurrentUserId()
+            val userId = SupabaseService.getAuthenticatedUserId()
                 ?: return@withContext Result.failure(Exception("Authenticated user required"))
 
             val normalizedFolder = folder.trim().trim('/').ifBlank { "chat_media" }
