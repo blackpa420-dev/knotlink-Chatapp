@@ -43,9 +43,8 @@ object CloudflareR2Service {
         contentType: String
     ): Result<JSONObject> = withContext(Dispatchers.IO) {
         try {
-            val token = SupabaseService.getAccessToken()
-            if (token.isBlank() || token == SupabaseConfig.ANON_KEY) {
-                return@withContext Result.failure(Exception("Authenticated Supabase session required"))
+            val token = SupabaseService.getValidAccessToken().getOrElse {
+                return@withContext Result.failure(it)
             }
 
             val body = JSONObject().apply {
@@ -67,7 +66,10 @@ object CloudflareR2Service {
                 val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     Log.e(TAG, "Presign failed: HTTP ${response.code}: $responseBody")
-                    return@withContext Result.failure(Exception("R2 authorization failed (${response.code})"))
+                    val serverMessage = try {
+                        JSONObject(responseBody).optString("error").ifBlank { responseBody.take(300) }
+                    } catch (_: Exception) { responseBody.take(300) }
+                    return@withContext Result.failure(Exception("R2 presign failed (${response.code}): $serverMessage"))
                 }
                 Result.success(JSONObject(responseBody))
             }
@@ -120,7 +122,7 @@ object CloudflareR2Service {
                 if (!response.isSuccessful) {
                     val errorBody = response.body?.string().orEmpty()
                     Log.e(TAG, "R2 upload failed: HTTP ${response.code}: $errorBody")
-                    return@withContext Result.failure(Exception("R2 upload failed (${response.code})"))
+                    return@withContext Result.failure(Exception("R2 upload failed (${response.code}): ${errorBody.take(300)}"))
                 }
             }
 
