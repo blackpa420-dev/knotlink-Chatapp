@@ -215,7 +215,7 @@ data class SupabaseMessage(
                 senderId = json.optString("sender_id", ""),
                 senderName = json.optString("sender_name", "User"),
                 receiverId = recId,
-                text = json.optString("text", json.optString("content", "")),
+                text = json.optString("body", json.optString("text", json.optString("content", ""))),
                 timestamp = ts,
                 timestampString = json.optString("timestamp_string", ""),
                 status = status,
