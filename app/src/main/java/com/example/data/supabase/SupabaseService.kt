@@ -1171,8 +1171,14 @@ object SupabaseService {
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) Result.success(false)
-                else Result.success(response.body?.string()?.trim()?.toBoolean() == true)
+                if (!response.isSuccessful) {
+                    Result.success(false)
+                } else {
+                    val body = response.body?.string().orEmpty().trim()
+                    // mark_message_delivered returns the updated message row, not a boolean.
+                    // Any successful RPC response therefore confirms the state transition.
+                    Result.success(body.isNotBlank())
+                }
             }
         } catch (e: Exception) { Result.failure(e) }
     }
