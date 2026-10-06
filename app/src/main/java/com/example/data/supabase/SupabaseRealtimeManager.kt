@@ -92,13 +92,6 @@ object SupabaseRealtimeManager {
             scope.launch(Dispatchers.IO) {
                 try {
                     SupabaseService.updatePresence(uid, true, force = true)
-                    if (!uname.isNullOrBlank() && uname != uid) {
-                        SupabaseService.updatePresence(uname, true, force = true)
-                    }
-                    val presenceRes = SupabaseService.getAllUserPresence()
-                    if (presenceRes.isSuccess) {
-                        _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
-                    }
                 } catch (_: Exception) {}
             }
         }
@@ -112,10 +105,7 @@ object SupabaseRealtimeManager {
         if (!uid.isNullOrBlank()) {
             scope.launch(Dispatchers.IO) {
                 try {
-                    SupabaseService.updatePresence(uid, false)
-                    if (!uname.isNullOrBlank() && uname != uid) {
-                        SupabaseService.updatePresence(uname, false)
-                    }
+                    SupabaseService.updatePresence(uid, false, force = true)
                 } catch (_: Exception) {}
             }
         }
@@ -196,7 +186,7 @@ object SupabaseRealtimeManager {
                                 put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_PROFILES)
+                                    put("table", SupabaseConfig.TABLE_PRESENCE)
                                 })
                             }
                             put("postgres_changes", changes)
@@ -337,8 +327,8 @@ object SupabaseRealtimeManager {
                                             handleTypingUpdate(typing.chatId, typing.userId, typing.userName, typing.isTyping)
                                         }
                                     }
-                                    SupabaseConfig.TABLE_PROFILES, "profiles" -> {
-                                        handleProfilePresenceUpdate(record)
+                                    SupabaseConfig.TABLE_PRESENCE -> {
+                                        handlePresenceUpdate(record)
                                     }
                                 }
                             }
@@ -400,35 +390,27 @@ object SupabaseRealtimeManager {
                     if (!uid.isNullOrBlank()) {
                         SupabaseService.updatePresence(uid, true)
 
-                        if (_userPresenceMap.value.isEmpty() || loopCounter % 1L == 0L) {
-                            val presenceRes = SupabaseService.getAllUserPresence()
-                            if (presenceRes.isSuccess) {
-                                _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
-                            }
-                        }
-
+                        // REST is only a degraded fallback while Realtime is unavailable.
                         if (webSocket == null) {
                             SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
                             SupabaseService.fetchUserMessages(
                                 userId = uid,
-                                username = uname,
-                                email = currentUserEmail,
+                                username = null,
+                                email = null,
                                 limit = 15
                             ).getOrNull()?.forEach { msg ->
                                 handlePolledMessage(msg, uid, uname)
                             }
                         }
                     }
-                    loopCounter++
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in sync loop: " + e.message)
+                    Log.e(TAG, "Error in sync loop: ${e.message}")
                 }
-                // Keep presence fresh enough for chat-list indicators without
-                // hammering the backend; realtime remains the primary fast path.
-                delay(8_000L)
+                delay(30_000L)
             }
         }
     }
+
     private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
         val cleanText = msg.text.trim().take(40)
         val timeBucket = msg.timestamp / 10000L // 10-second window
@@ -739,46 +721,38 @@ object SupabaseRealtimeManager {
         _typingUsersByChat.value = map
     }
 
-    private fun handleProfilePresenceUpdate(record: JSONObject) {
+    private fun handlePresenceUpdate(record: JSONObject) {
         try {
-            val id = record.optString("id", "").trim()
-            val username = record.optString("username", "").trim()
-            val email = record.optString("email", "").trim()
-            val fullName = record.optString("full_name", "").trim()
+            val userId = record.optString("user_id", "").trim()
+            if (userId.isBlank()) return
             val isOnline = record.optBoolean("is_online", false)
-            val lastSeen = record.optLong("last_seen", 0L)
-            val now = System.currentTimeMillis()
-            val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-            val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-            val presencePair = Pair(isRecentlyActive, lastSeen)
-
-            val currentMap = _userPresenceMap.value.toMutableMap()
-            if (id.isNotBlank()) {
-                currentMap[id] = presencePair
-                currentMap[id.lowercase()] = presencePair
-            }
-            if (username.isNotBlank()) {
-                currentMap[username] = presencePair
-                currentMap[username.lowercase()] = presencePair
-                val clean = username.lowercase().removePrefix("@").removeSuffix(".link")
-                currentMap[clean] = presencePair
-                currentMap["$clean.link"] = presencePair
-                currentMap["@$clean"] = presencePair
-                currentMap["@$clean.link"] = presencePair
-            }
-            if (email.isNotBlank()) {
-                currentMap[email] = presencePair
-                currentMap[email.lowercase()] = presencePair
-                val prefix = email.substringBefore("@").lowercase()
-                currentMap[prefix] = presencePair
-            }
-            if (fullName.isNotBlank()) {
-                currentMap[fullName] = presencePair
-                currentMap[fullName.lowercase()] = presencePair
-            }
-            _userPresenceMap.value = currentMap
+            val lastSeen = parseIsoTimestamp(record.optString("last_seen_at", ""))
+            val recent = isOnline && lastSeen > 0L && System.currentTimeMillis() - lastSeen <= 30_000L
+            val map = _userPresenceMap.value.toMutableMap()
+            map[userId] = Pair(recent, lastSeen)
+            _userPresenceMap.value = map
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating presence from WS record: ${e.message}")
+            Log.e(TAG, "Error updating presence from Realtime: ${e.message}")
         }
     }
+
+    private fun parseIsoTimestamp(value: String): Long {
+        val raw = value.trim()
+        if (raw.isBlank()) return 0L
+        return try {
+            val base = raw.take(19)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            var result = sdf.parse(base)?.time ?: 0L
+            val dot = raw.indexOf('.')
+            if (dot >= 0) {
+                val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+            }
+            result
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
 }
