@@ -880,7 +880,7 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.markMessagesAsReadByServerIds(messageIds)
         val result = SupabaseService.markMessagesAsRead(chatId, messageIds)
         val reader = dao.getUserIdentity().firstOrNull()
-        val readerUid = reader?.supabaseUid?.ifBlank { reader.email }?.ifBlank { reader.username }.orEmpty()
+        val readerUid = reader?.supabaseUid?.trim().orEmpty()
         if (result.isSuccess && readerUid.isNotBlank()) {
             messageIds.forEach { serverId ->
                 val local = dao.findMessageByServerId(serverId)
@@ -1400,11 +1400,23 @@ class BitChatRepository(val dao: BitChatDao) {
             ?: if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null
 
         if (existingIncoming != null) {
+            val remoteState = when {
+                supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                else -> "SENT"
+            }
+            val localState = existingIncoming.deliveryState.ifBlank { "SENT" }
+            val monotonicState = when {
+                localState == "READ" || remoteState == "READ" -> "READ"
+                localState == "DELIVERED" || remoteState == "DELIVERED" -> "DELIVERED"
+                else -> "SENT"
+            }
             val updated = existingIncoming.copy(
                 serverMessageId = supaMsg.id,
                 syncStatus = "SYNCED",
                 text = msgText,
-                isRead = existingIncoming.isRead || supaMsg.isRead,
+                isRead = existingIncoming.isRead || supaMsg.isRead || monotonicState == "READ",
+                deliveryState = monotonicState,
                 isEdited = supaMsg.isEdited,
                 isDeletedForEveryone = supaMsg.isDeletedForEveryone,
                 isPinned = supaMsg.isPinned,
