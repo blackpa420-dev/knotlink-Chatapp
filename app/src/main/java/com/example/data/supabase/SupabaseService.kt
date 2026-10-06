@@ -1076,7 +1076,7 @@ object SupabaseService {
     suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             if (chatId.isBlank()) return@withContext Result.success(emptyList())
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.${java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")}&order=created_at.asc&limit=$limit&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -2054,6 +2054,12 @@ object SupabaseService {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    private fun isoTimestampMillis(millis: Long): String {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        return sdf.format(java.util.Date(millis))
     }
 
     private fun parseErrorMessage(responseBody: String, defaultMsg: String): String {
