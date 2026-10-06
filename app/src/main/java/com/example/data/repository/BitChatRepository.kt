@@ -2084,7 +2084,7 @@ class BitChatRepository(val dao: BitChatDao) {
             ?: throw IllegalArgumentException("Cannot read file")
         val ext = if (mimeType.contains("png")) "png" else "jpg"
         val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.$ext"
-        return SupabaseService.uploadChatMedia(fileName, bytes, mimeType).getOrThrow()
+        return SupabaseService.uploadChatMedia(chatId, fileName, bytes, mimeType).getOrThrow()
     }
 
     suspend fun createGroupChat(
