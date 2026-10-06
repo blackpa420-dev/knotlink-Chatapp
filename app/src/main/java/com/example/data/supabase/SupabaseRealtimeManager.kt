@@ -421,6 +421,10 @@ object SupabaseRealtimeManager {
     // durable idempotency boundary, so a reconnect/duplicate event can never cause
     // a message to be dropped before it is persisted or acknowledged.
 
+    // Legacy polling helper retained for compatibility. Message identity is now
+    // reconciled in Room, never by an in-memory transport cache.
+    private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean = false
+
     private val lastSeenMessageTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private suspend fun handlePolledMessage(msg: SupabaseMessage, uid: String, uname: String?) {
