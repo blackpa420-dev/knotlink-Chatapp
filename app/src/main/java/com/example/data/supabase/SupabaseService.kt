@@ -560,39 +560,44 @@ object SupabaseService {
 
     suspend fun upsertProfile(profile: SupabaseProfile): Result<SupabaseProfile> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}"
-            val normalizedProfile = if (profile.username.isBlank()) profile
-            else profile.copy(username = canonicalUsername(profile.username))
-            val bodyStr = normalizedProfile.toJson().toString()
-            Log.d(TAG, "upsertProfile sending payload: $bodyStr")
+            val username = canonicalUsername(profile.username)
+            if (username.isBlank() || profile.fullName.isBlank() || profile.avatarUrl.isNullOrBlank()) {
+                return@withContext Result.failure(Exception("Profile requires username, full name and avatar"))
+            }
+
+            val body = JSONObject().apply {
+                put("p_username", username)
+                put("p_full_name", profile.fullName.trim())
+                put("p_avatar_url", profile.avatarUrl)
+                put("p_designation", profile.profession.takeIf { it.isNotBlank() })
+            }
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/complete_profile")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates,return=representation")
-                .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to complete profile (${response.code})"))
+                    )
+                }
 
-            if (!response.isSuccessful) {
-                Log.e(TAG, "upsertProfile failed HTTP ${response.code}: $resStr")
-                val errorMsg = parseErrorMessage(resStr, "Failed to save profile (${response.code})")
-                return@withContext Result.failure(Exception(errorMsg))
-            }
+                val obj = if (responseBody.trimStart().startsWith("[")) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else {
+                    JSONObject(responseBody)
+                } ?: return@withContext Result.failure(Exception("Profile completion returned no profile"))
 
-            Log.d(TAG, "upsertProfile success: $resStr")
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                val profile = SupabaseProfile.fromJson(jsonArray.getJSONObject(0))
-                cacheProfile(profile)
-                Result.success(profile)
-            } else {
-                Result.success(profile)
+                val saved = SupabaseProfile.fromJson(obj)
+                cacheProfile(saved)
+                Result.success(saved)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in upsertProfile", e)
