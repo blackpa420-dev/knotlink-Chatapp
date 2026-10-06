@@ -127,23 +127,13 @@ object SupabaseRealtimeManager {
 
     private fun isFromMe(userId: String?, userName: String?): Boolean {
         val myUid = currentUserId?.trim()?.lowercase()
-        val myUname = currentUsername?.trim()?.lowercase()
-        val myClean = myUname?.removePrefix("@")?.removeSuffix(".link")
-
         val uId = userId?.trim()?.lowercase()
-        val uName = userName?.trim()?.lowercase()
-        val uClean = uName?.removePrefix("@")?.removeSuffix(".link")
-
-        if (!myUid.isNullOrBlank() && myUid != "user_me" && myUid != "null") {
-            if (uId == myUid) return true
-        }
-        if (!myUname.isNullOrBlank() && myUname != "me" && myUname != "someone" && myUname != "user" && myUname != "null") {
-            if (uId == myUname || uName == myUname) return true
-        }
-        if (!myClean.isNullOrBlank() && myClean != "me" && myClean != "someone" && myClean != "user" && myClean != "null") {
-            if (uClean == myClean || uId == myClean || uName == myClean) return true
-        }
-        return false
+        // Internal message ownership is UUID-only. Username/email/name are display/search
+        // identifiers and must never be accepted as message sender identity.
+        return !myUid.isNullOrBlank() &&
+            myUid != "user_me" &&
+            myUid != "null" &&
+            uId == myUid
     }
 
     private fun connectWebSocket() {
@@ -418,15 +408,10 @@ object SupabaseRealtimeManager {
 
                         // REST is only a degraded fallback while Realtime is unavailable.
                         if (webSocket == null) {
+                            // Do not poll the entire message set every 30 seconds. That was
+                            // an avoidable egress source. Missed messages are recovered by
+                            // authenticated bootstrap/active-chat sync and the FCM wake path.
                             SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
-                            SupabaseService.fetchUserMessages(
-                                userId = uid,
-                                username = null,
-                                email = null,
-                                limit = 15
-                            ).getOrNull()?.forEach { msg ->
-                                handlePolledMessage(msg, uid, uname)
-                            }
                         }
                     }
                 } catch (e: Exception) {
@@ -438,27 +423,14 @@ object SupabaseRealtimeManager {
     }
 
     private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
-        val cleanText = msg.text.trim().take(40)
-        val timeBucket = msg.timestamp / 10000L // 10-second window
-        val contentBucketKey = "${msg.chatId}_${msg.senderId}_${cleanText}_$timeBucket"
-        val idKey = if (msg.id.isNotBlank() && !msg.id.startsWith("msg_")) "id_${msg.id}" else contentBucketKey
-        val clientKey = if (!msg.clientMsgId.isNullOrBlank()) "client_${msg.clientMsgId}" else null
-
-        val isAlreadyProcessed = processedMessageIds.contains(contentBucketKey) ||
-            processedMessageIds.contains(idKey) ||
-            (clientKey != null && processedMessageIds.contains(clientKey))
-
-        if (isAlreadyProcessed) {
-            return true
-        }
-        processedMessageIds.add(contentBucketKey)
-        if (idKey != contentBucketKey) {
-            processedMessageIds.add(idKey)
-        }
-        if (clientKey != null) {
-            processedMessageIds.add(clientKey)
-        }
-        return false
+        // Never deduplicate by message text/time: two legitimate identical messages can
+        // occur close together. Server UUID is authoritative; client_message_id provides
+        // idempotency during optimistic-send reconciliation.
+        val idKey = msg.id.trim().takeIf { it.isNotBlank() }?.let { "id_" + it }
+        val clientKey = msg.clientMsgId?.trim()?.takeIf { it.isNotBlank() }?.let { "client_" + it }
+        val alreadyById = idKey != null && !processedMessageIds.add(idKey)
+        val alreadyByClient = clientKey != null && !processedMessageIds.add(clientKey)
+        return alreadyById || alreadyByClient
     }
 
     private val lastSeenMessageTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
