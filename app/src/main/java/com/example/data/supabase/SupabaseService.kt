@@ -983,6 +983,43 @@ object SupabaseService {
         return Result.success(chatId.isNotBlank())
     }
 
+    suspend fun getOrCreateDirectChat(otherUserId: String): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!otherUserId.trim().matches(uuidRegex)) {
+                return@withContext Result.failure(Exception("Direct chat recipient must be a canonical UUID"))
+            }
+
+            val body = JSONObject().apply {
+                put("other_user_id", otherUserId.trim())
+            }
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/get_or_create_direct_chat")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to resolve direct chat (${response.code})"))
+                    )
+                }
+                val chatId = responseBody.trim().trim('"')
+                if (!chatId.matches(uuidRegex)) {
+                    return@withContext Result.failure(Exception("Server returned an invalid direct chat UUID"))
+                }
+                Result.success(chatId)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getOrCreateDirectChat", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
             val recipientId = message.receiverId.trim()
