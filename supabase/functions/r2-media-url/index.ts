@@ -2,10 +2,10 @@ import { withSupabase } from "npm:@supabase/server@1";
 import { S3Client, GetObjectCommand, PutObjectCommand } from "npm:@aws-sdk/client-s3";
 import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner";
 
-const ACCOUNT_ID = Deno.env.get("R2_ACCOUNT_ID")!;
-const BUCKET = Deno.env.get("R2_BUCKET")!;
-const ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID")!;
-const SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY")!;
+const ACCOUNT_ID = Deno.env.get("R2_ACCOUNT_ID") ?? "";
+const BUCKET = Deno.env.get("R2_BUCKET") ?? "";
+const ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID") ?? "";
+const SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY") ?? "";
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
@@ -40,10 +40,12 @@ export default withSupabase({ auth: "user" }, async (req, ctx) => {
   if (!validKey(objectKey)) return json({ error: "Invalid object key" }, 400);
 
   const parsed = parseKey(objectKey);
-  if (parsed.kind === "invalid") return json({ error: "Object key must start with users/<user_uuid>/ or chats/<chat_uuid>/" }, 400);
+  if (parsed.kind === "invalid") {
+    return json({ error: "Object key must start with users/<user_uuid>/ or chats/<chat_uuid>/" }, 400);
+  }
 
-  if (parsed.kind === "user" && parsed.userId !== userId) {
-    return json({ error: "User object access denied" }, 403);
+  if (parsed.kind === "user" && action === "upload" && parsed.userId !== userId) {
+    return json({ error: "User object upload denied" }, 403);
   }
 
   if (parsed.kind === "chat") {
