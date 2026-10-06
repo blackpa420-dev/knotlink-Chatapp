@@ -1588,53 +1588,48 @@ class BitChatRepository(val dao: BitChatDao) {
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
             val historyEmail = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername }
 
-            // Always fetch a recent server window when the app returns from a long
-            // background/closed period. This is the recovery path when an FCM data
-            // message was delayed, dropped, or the service process was killed.
-            // Import the complete account history in pages. Never use a fixed
-            // "latest 500" window as the user's permanent history.
-            val historyPageSize = 500
-            var historyOffset = 0
-            while (true) {
-                val pageRes = SupabaseService.fetchUserMessages(
-                    userId = myUid,
-                    username = historyUsername,
-                    email = historyEmail,
-                    limit = historyPageSize,
-                    offset = historyOffset
-                )
-                if (pageRes.isFailure) {
-                    Log.w("BitChatRepo", "History page failed at offset $historyOffset")
-                    return@withLock false
-                }
-                val page = pageRes.getOrNull().orEmpty()
-                fetchedMessages.addAll(page)
-                if (page.size < historyPageSize) break
-                historyOffset += historyPageSize
-            }
-
-            // Also fetch the incremental window with a small overlap so timestamp
-            // boundaries and delayed delivery cannot leave a permanent hole.
-            if (previousSync > 0L) {
-                val sincePageSize = 500
-                var sinceOffset = 0
+            // Bootstrap once, then recover only the incremental window.
+            // Re-fetching the complete account history on every 30-second sync
+            // defeats Room caching and unnecessarily consumes Supabase egress.
+            val pageSize = 500
+            if (previousSync <= 0L) {
+                var offset = 0
                 while (true) {
-                    val sinceRes = SupabaseService.fetchUserMessagesSince(
+                    val pageRes = SupabaseService.fetchUserMessages(
+                        userId = myUid,
+                        username = historyUsername,
+                        email = historyEmail,
+                        limit = pageSize,
+                        offset = offset
+                    )
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Initial history page failed at offset $offset")
+                        return@withLock false
+                    }
+                    val page = pageRes.getOrNull().orEmpty()
+                    fetchedMessages.addAll(page)
+                    if (page.size < pageSize) break
+                    offset += pageSize
+                }
+            } else {
+                var offset = 0
+                while (true) {
+                    val pageRes = SupabaseService.fetchUserMessagesSince(
                         userId = myUid,
                         username = historyUsername,
                         email = historyEmail,
                         sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
-                        limit = sincePageSize,
-                        offset = sinceOffset
+                        limit = pageSize,
+                        offset = offset
                     )
-                    if (sinceRes.isFailure) {
-                        Log.w("BitChatRepo", "Incremental history page failed at offset $sinceOffset")
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Incremental history page failed at offset $offset")
                         return@withLock false
                     }
-                    val page = sinceRes.getOrNull().orEmpty()
+                    val page = pageRes.getOrNull().orEmpty()
                     fetchedMessages.addAll(page)
-                    if (page.size < sincePageSize) break
-                    sinceOffset += sincePageSize
+                    if (page.size < pageSize) break
+                    offset += pageSize
                 }
             }
 
@@ -1669,16 +1664,10 @@ class BitChatRepository(val dao: BitChatDao) {
             val existingChatMap = existingChats.associateBy { it.id }.toMutableMap()
 
             for (supaMsg in uniqueMessages) {
-                val isSentByMe = supaMsg.senderId == myUid ||
-                        (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
-                        (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
-
-                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
-                        (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
-                        (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
-                        existingChatMap.containsKey(supaMsg.chatId)
+                // Direct message ownership is UUID-only. Username/email/name and
+                // an existing local chat are never valid routing fallbacks.
+                val isSentByMe = supaMsg.senderId.equals(myUid, ignoreCase = true)
+                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true)
 
                 if (!isSentByMe && !isReceivedByMe) continue
 
