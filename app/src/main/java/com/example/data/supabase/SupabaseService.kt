@@ -1484,67 +1484,39 @@ object SupabaseService {
 
     suspend fun updateCallSessionStatus(callId: String, status: String, endedAt: Long? = null, connectedAt: Long? = null): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (callId.isBlank() || status.isBlank()) return@withContext Result.success(false)
-
-            // Terminal call states must never be overwritten by a late WebRTC callback.
-            val normalizedStatus = status.uppercase()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!callId.trim().matches(uuidRegex) || status.isBlank()) return@withContext Result.success(false)
+            val normalizedStatus = status.lowercase()
             val allowedPreviousStates = when (normalizedStatus) {
-                "ACCEPTED" -> "RINGING"
-                "CONNECTED" -> "RINGING,ACCEPTED"
-                "ENDED", "DECLINED", "CANCELLED" -> "RINGING,ACCEPTED,CONNECTED"
-                else -> "RINGING,ACCEPTED,CONNECTED"
+                "accepted" -> "ringing"
+                "ended", "declined", "missed", "failed" -> "ringing,accepted"
+                else -> "ringing,accepted"
             }
-
-            val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
-                "?id=eq.$encodedCallId&status=in.($allowedPreviousStates)&select=id,status,ended_at,connected_at"
-
+            val encodedCallId = java.net.URLEncoder.encode(callId.trim(), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.($allowedPreviousStates)&select=id,status,ended_at,answered_at"
             val bodyObj = JSONObject().apply {
                 put("status", normalizedStatus)
-                if (connectedAt != null) put("connected_at", connectedAt)
-                if (endedAt != null) put("ended_at", endedAt)
+                if (connectedAt != null) put("answered_at", isoTimestampMillis(connectedAt))
+                if (endedAt != null) put("ended_at", isoTimestampMillis(endedAt))
             }
-
             for (attempt in 1..3) {
-                try {
-                    val request = Request.Builder()
-                        .url(url)
-                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                        .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                        .addHeader("Content-Type", "application/json")
-                        .addHeader("Prefer", "return=representation")
-                        .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                        .build()
-
-                    val response = httpClient.newCall(request).execute()
+                val request = Request.Builder().url(url)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Prefer", "return=representation")
+                    .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+                httpClient.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        Log.w(TAG, "updateCallSessionStatus($callId,$normalizedStatus) HTTP ${response.code}: $responseBody")
-                    } else {
+                    if (response.isSuccessful) {
                         val rows = try { JSONArray(responseBody).length() } catch (_: Throwable) { 0 }
-                        if (rows > 0) {
-                            Log.d(TAG, "Call session $callId transitioned to $normalizedStatus")
-                            return@withContext Result.success(true)
-                        }
-
-                        // Zero rows means the session is already terminal or not eligible for this transition.
-                        val current = getCallSession(callId).getOrNull()
-                        if (current != null && current.status.equals(normalizedStatus, ignoreCase = true)) {
-                            return@withContext Result.success(true)
-                        }
-                        if (current != null && current.status.uppercase() in setOf("ENDED", "DECLINED", "CANCELLED")) {
-                            Log.d(TAG, "Ignoring stale $normalizedStatus transition; session is already ${current.status}")
-                            return@withContext Result.success(false)
-                        }
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "updateCallSessionStatus attempt $attempt failed: ${e.message}")
+                        if (rows > 0) return@withContext Result.success(true)
+                    } else Log.w(TAG, "updateCallSessionStatus($callId,$normalizedStatus) HTTP ${response.code}: $responseBody")
                 }
                 if (attempt < 3) delay(250L * attempt)
             }
-
-            Result.success(false)
+            val current = getCallSession(callId).getOrNull()
+            Result.success(current?.status.equals(status, ignoreCase = true))
         } catch (e: Exception) {
             Log.e(TAG, "Error in updateCallSessionStatus", e)
             Result.failure(e)
@@ -1552,94 +1524,22 @@ object SupabaseService {
     }
     suspend fun getIncomingCalls(userId: String, username: String? = null, email: String? = null): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
         try {
-            val thirtySecondsAgo = System.currentTimeMillis() - 45000
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) {
-                ids.add(email)
-            }
-            val orFilter = ids.filter { it.isNotBlank() }.distinct().joinToString(",") { 
-                val enc = java.net.URLEncoder.encode(it, "UTF-8")
-                "receiver_id.eq.$enc" 
-            }
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?or=($orFilter)&status=eq.RINGING&started_at=gt.$thirtySecondsAgo&select=*"
-
-            val request = Request.Builder()
-                .url(url)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val since = java.net.URLEncoder.encode(isoTimestampMillis(System.currentTimeMillis() - 45_000L), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?callee_id=eq.${userId.trim()}&status=eq.ringing&created_at=gt.$since&order=created_at.desc&select=*"
+            val request = Request.Builder().url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch incoming calls"))
+                .get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch incoming calls: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseCallSession.fromJson(arr.getJSONObject(it)) })
             }
-
-            val jsonArray = JSONArray(resStr)
-            val list = mutableListOf<SupabaseCallSession>()
-            for (i in 0 until jsonArray.length()) {
-                list.add(SupabaseCallSession.fromJson(jsonArray.getJSONObject(i)))
-            }
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
-    suspend fun getUserCallHistory(
-        userId: String,
-        username: String? = null,
-        email: String? = null,
-        limit: Int = 100
-    ): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
-        try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) ids.add(email)
-
-            val filters = ids.filter { it.isNotBlank() }.distinct().flatMap {
-                val enc = java.net.URLEncoder.encode(it, "UTF-8")
-                listOf("caller_id.eq.$" + enc, "receiver_id.eq.$" + enc)
-            }
-            if (filters.isEmpty()) return@withContext Result.success(emptyList())
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
-                "?or=(${filters.joinToString(",")})&order=started_at.desc&limit=${limit}&select=*"
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch call history: ${response.code}"))
-            }
-
-            val arr = JSONArray(body)
-            val list = mutableListOf<SupabaseCallSession>()
-            for (i in 0 until arr.length()) {
-                list.add(SupabaseCallSession.fromJson(arr.getJSONObject(i)))
-            }
-            Result.success(list)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in getUserCallHistory", e)
-            Result.failure(e)
-        }
-    }
-
     suspend fun getCallSession(callId: String): Result<SupabaseCallSession> = withContext(Dispatchers.IO) {
         try {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId&select=*"
