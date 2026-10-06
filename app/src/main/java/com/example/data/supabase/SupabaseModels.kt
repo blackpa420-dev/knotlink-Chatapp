@@ -297,7 +297,7 @@ data class SupabaseCallSession(
     val callerName: String,
     val callerAvatar: String? = null,
     val callType: String = "audio",
-    val status: String = "RINGING",
+    val status: String = "ringing",
     val sdpOffer: String = "",
     val sdpAnswer: String = "",
     val iceCandidates: String = "[]",
