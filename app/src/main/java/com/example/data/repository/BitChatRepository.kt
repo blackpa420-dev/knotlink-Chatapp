@@ -1095,8 +1095,18 @@ class BitChatRepository(val dao: BitChatDao) {
         val cleanOpponentUid = opponentUid.trim()
         val cleanOpponentName = opponentName.trim()
 
+        // V2 direct chats are server-generated UUIDs. Resolve the canonical chat once
+        // when opening the conversation; never derive chat identity from username/hash.
+        val resolvedCanonicalChatId = if (
+            cleanOpponentUid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+        ) {
+            SupabaseService.getOrCreateDirectChat(cleanOpponentUid).getOrNull() ?: chatId
+        } else {
+            chatId
+        }
+
         // 1. Direct ID match
-        val byId = allChats.find { it.id == chatId }
+        val byId = allChats.find { it.id == resolvedCanonicalChatId }
         if (byId != null) {
             val isCurrentNameUgly = byId.name.isBlank() || 
                 byId.name == "Contact" || 
@@ -1150,7 +1160,7 @@ class BitChatRepository(val dao: BitChatDao) {
         // 3. Create new canonical ChatEntity
         val sortedUids = listOf(myUid, cleanOpponentUid).filter { it.isNotBlank() }.distinct().sorted()
         val newChat = ChatEntity(
-            id = chatId,
+            id = resolvedCanonicalChatId,
             name = opponentName.ifBlank { "Contact" },
             lastMessage = "",
             timeString = "Just now",
