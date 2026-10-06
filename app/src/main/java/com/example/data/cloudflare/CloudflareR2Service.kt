@@ -81,14 +81,25 @@ object CloudflareR2Service {
         bytes: ByteArray,
         fileName: String,
         mimeType: String = "image/jpeg",
-        folder: String = "chat_media"
+        folder: String = "chat_media",
+        chatId: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val userId = SupabaseService.getCurrentUserId()
                 ?: return@withContext Result.failure(Exception("Authenticated user required"))
 
             val normalizedFolder = folder.trim().trim('/').ifBlank { "chat_media" }
-            val objectKey = "users/$userId/$normalizedFolder/${UUID.randomUUID()}-${safeFileName(fileName)}"
+            val objectKey = when (normalizedFolder) {
+                "avatar" -> "users/$userId/avatar/${UUID.randomUUID()}-${safeFileName(fileName)}"
+                "chat_media" -> {
+                    val canonicalChatId = chatId?.trim().orEmpty()
+                    if (canonicalChatId.isBlank()) {
+                        return@withContext Result.failure(Exception("Chat UUID required for chat media"))
+                    }
+                    "chats/$canonicalChatId/media/$userId/${UUID.randomUUID()}-${safeFileName(fileName)}"
+                }
+                else -> return@withContext Result.failure(Exception("Unsupported R2 media scope"))
+            }
 
             val presigned = presign("upload", objectKey, mimeType).getOrElse {
                 return@withContext Result.failure(it)
