@@ -258,9 +258,7 @@ object SupabaseRealtimeManager {
                                 val myName = currentUsername
                                 val myClean = myName?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
 
-                                val isFromMe = (myUid != null && msg.senderId == myUid) ||
-                                    (myName != null && msg.senderId.equals(myName, ignoreCase = true)) ||
-                                    (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+                                val isFromMe = isFromMe(msg.senderId, msg.senderName)
 
                                 val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
 
@@ -302,9 +300,7 @@ object SupabaseRealtimeManager {
                                         val myName = currentUsername
                                         val myClean = myName?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
 
-                                        val isFromMe = (myUid != null && msg.senderId == myUid) ||
-                                            (myName != null && msg.senderId.equals(myName, ignoreCase = true)) ||
-                                            (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+                                        val isFromMe = isFromMe(msg.senderId, msg.senderName)
 
                                         val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
                                         val changeType = data.optString("type", "INSERT")
@@ -330,7 +326,7 @@ object SupabaseRealtimeManager {
                                     }
                                     SupabaseConfig.TABLE_CALL_SESSIONS -> {
                                         val call = SupabaseCallSession.fromJson(record)
-                                        if (call.receiverId == currentUserId || (currentUsername?.isNotBlank() == true && call.receiverId == currentUsername)) {
+                                        if (call.receiverId.equals(currentUserId, ignoreCase = true)) {
                                             scope.launch { _incomingCalls.emit(call) }
                                         }
                                         scope.launch { _callSessionUpdates.emit(call) }
@@ -436,10 +432,7 @@ object SupabaseRealtimeManager {
     private val lastSeenMessageTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private suspend fun handlePolledMessage(msg: SupabaseMessage, uid: String, uname: String?) {
-        val myClean = uname?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
-        val isFromMe = msg.senderId == uid ||
-            (!uname.isNullOrBlank() && msg.senderId.equals(uname, ignoreCase = true)) ||
-            (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+        val isFromMe = msg.senderId.equals(uid, ignoreCase = true)
 
         val previousText = lastSeenMessageTexts[msg.id]
         val isTextChanged = previousText != null && previousText != msg.text
