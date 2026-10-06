@@ -409,7 +409,12 @@ object SupabaseService {
         token: String,
         type: String = "signup"
     ): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
-        val typesToTry = if (type == "signup") listOf("signup", "email", "magiclink", "recovery") else listOf("email", "signup", "magiclink", "recovery")
+        val typesToTry = when (type.lowercase()) {
+            "signup", "email" -> listOf("email")
+            "recovery" -> listOf("recovery")
+            "magiclink" -> listOf("magiclink")
+            else -> listOf(type)
+        }
         var lastError: Exception? = null
 
         for (t in typesToTry) {
