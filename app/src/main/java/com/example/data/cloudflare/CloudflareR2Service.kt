@@ -21,7 +21,6 @@ import java.util.UUID
  */
 object CloudflareR2Config {
     const val BUCKET_NAME = "knotlink-media"
-    const val PUBLIC_DEV_URL = "https://pub-70e023b4fd5d4025a978d48768b63499.r2.dev"
     const val PRESIGN_FUNCTION = "r2-media-url"
 }
 
@@ -114,9 +113,10 @@ object CloudflareR2Service {
                 }
             }
 
-            val publicUrl = "${CloudflareR2Config.PUBLIC_DEV_URL}/$objectKey"
             Log.d(TAG, "R2 upload complete: $objectKey")
-            Result.success(publicUrl)
+            // Keep chat media private. The server issues a short-lived signed GET URL
+            // when the media is actually needed.
+            Result.success(objectKey)
         } catch (e: Exception) {
             Log.e(TAG, "Exception during R2 upload", e)
             Result.failure(e)
