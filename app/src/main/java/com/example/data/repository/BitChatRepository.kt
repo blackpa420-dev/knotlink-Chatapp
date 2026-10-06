@@ -649,7 +649,16 @@ class BitChatRepository(val dao: BitChatDao) {
             }
         }
 
-        val targetChatId = existingChat?.id ?: chatId
+        // For direct chats, the server-generated UUID chat is authoritative.
+        // Never write a new message against an old hash/username-derived chat id.
+        val canonicalDirectChatId = if (
+            isFromUser &&
+            !chatId.startsWith("group_") &&
+            otherParticipant.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+        ) {
+            SupabaseService.getOrCreateDirectChat(otherParticipant).getOrNull()
+        } else null
+        val targetChatId = canonicalDirectChatId ?: existingChat?.id ?: chatId
 
         val message = MessageEntity(
             chatId = targetChatId,
@@ -716,19 +725,21 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         try {
-            val serverMsgId = "msg_" + UUID.randomUUID().toString().take(8)
             val serverTs = System.currentTimeMillis()
 
-            val syncedMessage = message.copy(
+            // Keep the optimistic row PENDING until the authoritative server write succeeds.
+            // A network/RLS failure must never appear as a successfully sent message.
+            val pendingMessage = message.copy(
                 id = localRowId,
-                serverMessageId = serverMsgId,
-                serverTimestamp = serverTs,
-                syncStatus = "SYNCED",
-                deliveryState = "SENT"
+                serverMessageId = "",
+                serverTimestamp = 0L,
+                syncStatus = "PENDING",
+                deliveryState = "SENDING"
             )
-            dao.insertMessage(syncedMessage)
+            dao.insertMessage(pendingMessage)
 
-            // Send to Supabase REST
+            // Send to Supabase RPC; the server creates the authoritative UUID message id.
+
             val remoteText = if (!replySnippet.isNullOrBlank() || !replySenderName.isNullOrBlank()) {
                 val encSender = java.net.URLEncoder.encode(replySenderName ?: "User", "UTF-8")
                 val encSnippet = java.net.URLEncoder.encode(replySnippet ?: "", "UTF-8")
@@ -738,7 +749,7 @@ class BitChatRepository(val dao: BitChatDao) {
             }
 
             val supaMsg = SupabaseMessage(
-                id = serverMsgId,
+                id = "",
                 chatId = targetChatId,
                 senderId = currentUid,
                 senderName = mySenderName,
@@ -767,7 +778,25 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.insertMessage(failedMessage)
                 return failedMessage
             }
-            val finalServerId = sendResult.id.ifBlank { serverMsgId }
+            val finalServerId = sendResult.id.trim()
+            if (finalServerId.isBlank()) {
+                val failedMessage = message.copy(
+                    id = localRowId,
+                    syncStatus = "FAILED",
+                    deliveryState = "FAILED"
+                )
+                dao.insertMessage(failedMessage)
+                return failedMessage
+            }
+
+            val syncedMessage = message.copy(
+                id = localRowId,
+                serverMessageId = finalServerId,
+                serverTimestamp = sendResult.timestamp,
+                syncStatus = "SYNCED",
+                deliveryState = "SENT"
+            )
+            dao.insertMessage(syncedMessage)
 
             // Now that the authoritative write succeeded, notify the peer immediately.
             SupabaseRealtimeManager.broadcastNewMessage(
