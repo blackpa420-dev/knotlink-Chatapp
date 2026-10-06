@@ -246,7 +246,7 @@ object SupabaseRealtimeManager {
                                 if (!isFromMe && isForMe && msg.id.isNotBlank()) {
                                     scope.launch {
                                         _incomingMessages.emit(msg)
-                                        if (msg.status.equals("READ", ignoreCase = true) || msg.isRead) {
+                                        if (msg.status.equals("DELIVERED", ignoreCase = true) || msg.status.equals("READ", ignoreCase = true) || msg.isRead || msg.isEdited) {
                                             _messageStatusUpdates.emit(msg)
                                         }
                                     }
