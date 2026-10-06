@@ -168,11 +168,21 @@ object SupabaseRealtimeManager {
                                 put("ack", false)
                             })
                             val changes = JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("event", "*")
-                                    put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_MESSAGES)
-                                })
+                                val realtimeUid = currentUserId
+                                if (!realtimeUid.isNullOrBlank()) {
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_MESSAGES)
+                                        put("filter", "recipient_id=eq.$realtimeUid")
+                                    })
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_MESSAGES)
+                                        put("filter", "sender_id=eq.$realtimeUid")
+                                    })
+                                }
                                 put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
