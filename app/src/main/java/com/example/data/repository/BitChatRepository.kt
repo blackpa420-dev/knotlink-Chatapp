@@ -470,89 +470,34 @@ class BitChatRepository(val dao: BitChatDao) {
         myUsername: String,
         myEmail: String
     ): String? {
+        // Direct messaging is UUID-only. Display/search identifiers are never
+        // promoted to a message recipient because doing so can route to the
+        // wrong account when stale/local data is present.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-        // 1. Direct check: if candidate is already a valid UUID and not self
-        val cleanCandidate = candidate.trim()
-        if (cleanCandidate.isNotBlank() && cleanCandidate.matches(uuidRegex) && !cleanCandidate.equals(currentUid, ignoreCase = true)) {
-            return cleanCandidate
-        }
-
-        // 2. Build list of potential candidate identifiers
-        val candidateList = mutableListOf<String>()
-        if (candidate.isNotBlank()) {
-            candidateList.add(candidate.trim())
-            val stripped = candidate.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            if (stripped.isNotBlank()) candidateList.add(stripped)
-        }
-
-        if (existingChat != null) {
-            val uids = existingChat.participantUids.split(",").map { it.trim() }.filter { 
-                it.isNotBlank() && 
-                !it.equals(currentUid, ignoreCase = true) && 
-                !it.equals(myUsername, ignoreCase = true) && 
-                !it.equals(myEmail, ignoreCase = true) 
+        val candidates = buildList {
+            fun addUuid(value: String?) {
+                val v = value?.trim().orEmpty()
+                if (v.matches(uuidRegex) && !v.equals(currentUid.trim(), ignoreCase = true)) add(v)
             }
-            candidateList.addAll(uids)
-            if (existingChat.name.isNotBlank() && !existingChat.name.startsWith("[Group]")) {
-                candidateList.add(existingChat.name.trim())
-            }
-        }
-
-        if (chatId.isNotBlank()) {
-            val cleanChat = chatId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            if (cleanChat.isNotBlank() && cleanChat != "global" && cleanChat != "bitassistant") {
-                candidateList.add(cleanChat)
-            }
-        }
-
-        // Try Room Contacts lookup
-        val matchingContact = dao.getAllContactsList().find { c ->
-            c.id.equals(candidate, ignoreCase = true) || 
-            c.id.equals(chatId, ignoreCase = true) || 
-            (existingChat != null && c.name.equals(existingChat.name, ignoreCase = true))
-        }
-        if (matchingContact != null) {
-            if (matchingContact.id.isNotBlank()) candidateList.add(matchingContact.id.trim())
-            if (matchingContact.name.isNotBlank()) candidateList.add(matchingContact.name.trim())
-        }
-
-        val distinctCandidates = candidateList.distinct().filter {
-            it.isNotBlank() &&
-            it != "global" &&
-            it != "bitassistant" &&
-            !it.equals(currentUid, ignoreCase = true) &&
-            !it.equals(myUsername, ignoreCase = true) &&
-            !it.equals(myEmail, ignoreCase = true)
-        }
-
-        // 3. Prefer local profile cache; hit Supabase only when cache misses
-        for (cand in distinctCandidates) {
-            if (cand.matches(uuidRegex)) {
-                val cached = getLocalProfile(cand)
-                if (cached?.id?.matches(uuidRegex) == true) return cached.id
-                return cand
-            }
-            val cached = getLocalProfile(cand)
-            if (cached?.id?.matches(uuidRegex) == true) return cached.id
-
-            // Always try the canonical profile resolver first. A KnotLink username
-            // such as @drdoom.link contains both "@" and ".", so treating every
-            // dotted identifier as an email can silently lose the real UUID.
-            val prof = SupabaseService.getProfile(cand).getOrNull()
-                ?: SupabaseService.getProfileByUsername(cand).getOrNull()
-                ?: if (cand.contains("@")) {
-                    SupabaseService.getProfileByEmail(cand).getOrNull()
-                } else {
-                    null
+            addUuid(candidate)
+            addUuid(chatId)
+            existingChat?.participantUids
+                ?.split(",")
+                ?.forEach { addUuid(it) }
+            dao.getAllContactsList()
+                .firstOrNull { contact ->
+                    contact.id.equals(candidate, ignoreCase = true) ||
+                        contact.id.equals(chatId, ignoreCase = true)
                 }
-            if (prof != null && prof.id.isNotBlank() && prof.id.matches(uuidRegex)) {
-                cacheProfileLocally(prof)
-                return prof.id
-            }
-        }
+                ?.let { addUuid(it.id) }
+        }.distinct()
 
-        // No table-wide profile scan. Specific UID/email/username lookups above are sufficient.
+        // Prefer a locally cached UUID, but the UUID itself remains authoritative.
+        for (uid in candidates) {
+            val cached = getLocalProfile(uid)
+            if (cached?.id?.matches(uuidRegex) == true) return cached.id
+            return uid
+        }
         return null
     }
 
@@ -576,9 +521,33 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentTime = sdf.format(Date())
         val clientMsgId = existingClientMessageId ?: UUID.randomUUID().toString()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
-        val currentUid = currentIdentity?.supabaseUid?.trim()
-            ?.ifBlank { currentIdentity.email?.trim().orEmpty() }
-            .orEmpty()
+        val currentUid = currentIdentity?.supabaseUid?.trim().orEmpty()
+        if (!isValidUuid(currentUid)) {
+            val failed = MessageEntity(
+                chatId = chatId,
+                senderName = senderName,
+                text = text,
+                timestampString = currentTime,
+                isFromUser = isFromUser,
+                isRead = false,
+                senderUid = "",
+                receiverUid = "",
+                clientMessageId = clientMsgId,
+                syncStatus = "FAILED",
+                deliveryState = "FAILED",
+                timestamp = System.currentTimeMillis(),
+                replyToMessageId = replyToMessageId,
+                replySnippet = replySnippet,
+                replySenderName = replySenderName,
+                isForwarded = isForwarded,
+                forwardedFromMessageId = forwardedFromMessageId,
+                messageType = messageType,
+                systemEventType = systemEventType,
+                mentionedUids = mentionedUids
+            )
+            dao.insertMessage(failed)
+            return failed
+        }
         // Do not throw here. A stale local identity can exist after an account/database reset;
         // the remote write will be rejected safely and the message will be marked FAILED.
         val mySenderName = if (isFromUser) {
