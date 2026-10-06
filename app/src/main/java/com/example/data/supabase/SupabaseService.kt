@@ -1748,6 +1748,7 @@ object SupabaseService {
     ): Result<String> = uploadAvatar(fileName, imageBytes, mimeType)
 
     suspend fun uploadChatMedia(
+        chatId: String,
         fileName: String,
         mediaBytes: ByteArray,
         mimeType: String
