@@ -1712,7 +1712,8 @@ object SupabaseService {
             bytes = mediaBytes,
             fileName = fileName,
             mimeType = mimeType,
-            folder = "chat_media"
+            folder = "chat_media",
+            chatId = chatId
         )
     }
 
