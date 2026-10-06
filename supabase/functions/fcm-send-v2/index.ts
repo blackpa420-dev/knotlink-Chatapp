@@ -1,63 +1,32 @@
+import { withSupabase } from "npm:@supabase/server@1";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { GoogleAuth } from "npm:google-auth-library";
+import { GoogleAuth } from "npm:google-auth-library@9";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+  return Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+export default withSupabase({ auth: "user" }, async (req, ctx) => {
   if (req.method !== "POST") return json({ error: "POST required" }, 405);
 
-  const authHeader = req.headers.get("Authorization") ?? "";
-  const accessToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-  if (!accessToken) return json({ error: "Missing bearer token" }, 401);
-
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SERVICE_ROLE_KEY) {
-    return json({ error: "Supabase server configuration missing" }, 503);
-  }
-
-  const authClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data: { user }, error: authError } = await authClient.auth.getUser(accessToken);
-  if (authError || !user) return json({ error: "Invalid session" }, 401);
-
-  let body: Record<string, unknown>;
+  let body: Record<string, string | undefined>;
   try { body = await req.json(); } catch { return json({ error: "Invalid JSON" }, 400); }
 
-  const targetUserId = String(body.targetUserId ?? "").trim();
-  const type = String(body.type ?? "message").trim().slice(0, 32);
-  const title = String(body.title ?? "KnotLink").trim().slice(0, 120);
-  const messageBody = String(body.messageBody ?? "").trim().slice(0, 240);
-  const chatId = String(body.chatId ?? "").trim().slice(0, 128);
-  const senderName = String(body.callerName ?? "").trim().slice(0, 120);
-  const callType = String(body.callType ?? "").trim().slice(0, 32);
-  const senderAvatar = String(body.senderAvatar ?? "").trim().slice(0, 1000);
-  const senderId = String(body.senderId ?? user.id).trim();
-  const serverMessageId = String(body.serverMessageId ?? "").trim();
-  const messageType = String(body.messageType ?? "").trim().slice(0, 32);
+  const callerId = String(ctx.userClaims?.sub ?? "");
+  if (!callerId) return json({ error: "Unauthenticated" }, 401);
 
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) {
-    return json({ error: "targetUserId must be a canonical UUID" }, 400);
-  }
-  if (targetUserId === user.id) return json({ sent: 0, reason: "self_target" });
+  const targetUserId = body.targetUserId?.trim() ?? "";
+  if (!UUID_RE.test(targetUserId)) return json({ error: "targetUserId must be a canonical UUID" }, 400);
+  if (targetUserId === callerId) return json({ sent: 0, reason: "self_target" });
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  if (!serviceKey || !supabaseUrl) return json({ error: "Supabase server credentials are not configured" }, 503);
+
+  const admin = createClient(supabaseUrl, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
 
   const { data: tokens, error: tokenError } = await admin
@@ -84,6 +53,17 @@ Deno.serve(async (req) => {
   const oauthToken = typeof tokenResponse === "string" ? tokenResponse : tokenResponse?.token;
   if (!oauthToken) return json({ error: "Unable to obtain Firebase access token" }, 503);
 
+  const type = (body.type ?? body.knotlinkMessageType ?? "message").trim().slice(0, 32);
+  const title = (body.title ?? "KnotLink").trim().slice(0, 120);
+  const messageBody = (body.messageBody ?? body.body ?? "").trim().slice(0, 240);
+  const chatId = (body.chatId ?? "").trim().slice(0, 128);
+  const senderId = (body.senderId ?? callerId).trim();
+  const senderName = (body.senderName ?? body.callerName ?? "").trim().slice(0, 120);
+  const senderAvatar = (body.senderAvatar ?? "").trim().slice(0, 1000);
+  const callType = (body.callType ?? "").trim().slice(0, 32);
+  const serverMessageId = (body.serverMessageId ?? "").trim();
+  const messageType = (body.messageType ?? "").trim().slice(0, 32);
+
   const dataPayload: Record<string, string> = {
     knotlink_message_type: type,
     title,
@@ -99,12 +79,13 @@ Deno.serve(async (req) => {
 
   let sent = 0;
   let failed = 0;
+  const isCall = ["call", "incoming_call", "call_ended", "call_declined", "call_cancelled"].includes(type);
 
   for (const row of tokens) {
     const fcmToken = String(row.fcm_token ?? "").trim();
     if (!fcmToken) continue;
 
-    const fcmResponse = await fetch(
+    const response = await fetch(
       `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
       {
         method: "POST",
@@ -116,21 +97,16 @@ Deno.serve(async (req) => {
           message: {
             token: fcmToken,
             data: dataPayload,
-            android: {
-              priority: "HIGH",
-              ttl: "3600s",
-            },
+            android: { priority: "HIGH", ttl: isCall ? "60s" : "3600s" },
           },
         }),
       },
     );
 
-    if (fcmResponse.ok) {
-      sent++;
-    } else {
+    if (response.ok) sent++;
+    else {
       failed++;
-      const errorText = await fcmResponse.text();
-      console.warn("FCM delivery failed", fcmResponse.status, errorText.slice(0, 500));
+      console.warn("FCM provider rejected token", response.status, (await response.text()).slice(0, 500));
     }
   }
 
