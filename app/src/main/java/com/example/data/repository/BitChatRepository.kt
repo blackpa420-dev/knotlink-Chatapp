@@ -928,14 +928,13 @@ class BitChatRepository(val dao: BitChatDao) {
             val identity = dao.getUserIdentity().firstOrNull()
             val calls = SupabaseService.getUserCallHistory(
                 userId = myUid,
-                username = myUsername.takeIf { it.isNotBlank() && it != myUid },
-                email = identity?.email?.takeIf { !it.isNullOrBlank() && it != myUid && it != myUsername },
+                username = "",
+                email = "",
                 limit = 100
             ).getOrNull().orEmpty()
 
             for (call in calls) {
-                val incoming = call.receiverId.equals(myUid, ignoreCase = true) ||
-                    call.receiverId.equals(myUsername, ignoreCase = true)
+                val incoming = call.receiverId.equals(myUid, ignoreCase = true)
 
                 val otherId = if (incoming) call.callerId else call.receiverId
                 val existingChat = dao.getAllChatsList().firstOrNull { chat ->
