@@ -53,7 +53,6 @@ object SupabaseRealtimeManager {
     private var currentUserEmail: String? = null
 
     private val typingExpiryJobs = ConcurrentHashMap<String, Job>()
-    private val processedMessageIds = ConcurrentHashMap.newKeySet<String>()
 
     private var webSocket: WebSocket? = null
     private val wsClient = OkHttpClient.Builder()
@@ -262,7 +261,7 @@ object SupabaseRealtimeManager {
 
                                 val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
 
-                                if (!isFromMe && isForMe && !isDuplicateAndTrack(msg)) {
+                                if (!isFromMe && isForMe) {
                                     clearTypingForChat(msg.chatId)
                                     if (msg.senderId.isNotBlank()) {
                                         clearTypingForChat(msg.senderId)
@@ -309,7 +308,7 @@ object SupabaseRealtimeManager {
                                         val shouldEmit = if (isUpdateOrDelete) {
                                             isForMe || isFromMe
                                         } else {
-                                            !isFromMe && isForMe && !isDuplicateAndTrack(msg)
+                                            !isFromMe && isForMe
                                         }
 
                                         if (shouldEmit) {
@@ -418,16 +417,9 @@ object SupabaseRealtimeManager {
         }
     }
 
-    private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
-        // Never deduplicate by message text/time: two legitimate identical messages can
-        // occur close together. Server UUID is authoritative; client_message_id provides
-        // idempotency during optimistic-send reconciliation.
-        val idKey = msg.id.trim().takeIf { it.isNotBlank() }?.let { "id_" + it }
-        val clientKey = msg.clientMsgId?.trim()?.takeIf { it.isNotBlank() }?.let { "client_" + it }
-        val alreadyById = idKey != null && !processedMessageIds.add(idKey)
-        val alreadyByClient = clientKey != null && !processedMessageIds.add(clientKey)
-        return alreadyById || alreadyByClient
-    }
+    // Realtime transport intentionally does not deduplicate messages. Room is the
+    // durable idempotency boundary, so a reconnect/duplicate event can never cause
+    // a message to be dropped before it is persisted or acknowledged.
 
     private val lastSeenMessageTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
