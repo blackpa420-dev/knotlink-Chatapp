@@ -1,6 +1,11 @@
 -- Backend v2 hardening: immutable usernames and server-authorized message state mutations.
 -- No OTP/SMS provider is involved here.
 
+alter table public.call_sessions drop constraint if exists call_sessions_status_check;
+alter table public.call_sessions
+  add constraint call_sessions_status_check
+  check (status in ('ringing','accepted','connected','declined','missed','ended','cancelled','failed'));
+
 alter table public.messages
   add column if not exists is_pinned boolean not null default false,
   add column if not exists pinned_by uuid references auth.users(id) on delete set null,
