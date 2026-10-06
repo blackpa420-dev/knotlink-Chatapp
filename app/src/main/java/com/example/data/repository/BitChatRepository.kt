@@ -926,12 +926,7 @@ class BitChatRepository(val dao: BitChatDao) {
         if (myUid.isBlank()) return
         try {
             val identity = dao.getUserIdentity().firstOrNull()
-            val calls = SupabaseService.getUserCallHistory(
-                userId = myUid,
-                username = "",
-                email = "",
-                limit = 100
-            ).getOrNull().orEmpty()
+            val calls = SupabaseService.getUserCallHistory(myUid).getOrNull().orEmpty()
 
             for (call in calls) {
                 val incoming = call.receiverId.equals(myUid, ignoreCase = true)
@@ -1329,7 +1324,6 @@ class BitChatRepository(val dao: BitChatDao) {
                         replySenderName = replySenderName
                     )
                 }
-            }
             dao.insertMessage(updatedEntity)
 
             var resolvedOpponentName = ""
