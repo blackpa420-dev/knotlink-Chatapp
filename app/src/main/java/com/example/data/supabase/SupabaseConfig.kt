@@ -10,6 +10,8 @@ object SupabaseConfig {
     const val TABLE_MESSAGES = "messages"
     const val TABLE_TYPING_STATUS = "typing_status"
     const val TABLE_CALL_SESSIONS = "call_sessions"
+    const val TABLE_PUSH_TOKENS = "push_tokens"
+    const val TABLE_PRESENCE = "presence"
     const val TABLE_STATUS_STORIES = "status_stories"
     const val TABLE_ABUSE_REPORTS = "abuse_reports"
     const val TABLE_CONTACTS = "contacts"
