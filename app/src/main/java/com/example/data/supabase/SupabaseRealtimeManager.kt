@@ -192,6 +192,10 @@ object SupabaseRealtimeManager {
                             put("postgres_changes", changes)
                         }
                         put("config", config)
+                        val realtimeToken = SupabaseService.getAccessToken()
+                        if (realtimeToken.isNotBlank() && realtimeToken != SupabaseConfig.ANON_KEY) {
+                            put("access_token", realtimeToken)
+                        }
                     }
 
                     val joinMsg = JSONObject().apply {
@@ -339,6 +343,7 @@ object SupabaseRealtimeManager {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (this@SupabaseRealtimeManager.webSocket === webSocket) this@SupabaseRealtimeManager.webSocket = null
                     Log.w(TAG, "WebSocket connection failed: ${t.message}. Reconnecting in 5s...")
                     scope.launch {
                         delay(5000)
@@ -349,6 +354,7 @@ object SupabaseRealtimeManager {
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (this@SupabaseRealtimeManager.webSocket === webSocket) this@SupabaseRealtimeManager.webSocket = null
                     Log.d(TAG, "WebSocket closed: $reason")
                 }
             })
