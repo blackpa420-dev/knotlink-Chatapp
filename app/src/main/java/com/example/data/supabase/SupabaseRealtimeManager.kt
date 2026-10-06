@@ -465,260 +465,27 @@ object SupabaseRealtimeManager {
         }
     }
 
-    fun isMessageForUser(msg: SupabaseMessage, uid: String?, uname: String?, email: String? = null, knownChatIds: Set<String> = emptySet()): Boolean {
-        // If the message was sent BY ME, it's not an incoming message for me
-        if (isFromMe(msg.senderId, msg.senderName)) return false
+    fun isMessageForUser(
+        msg: SupabaseMessage,
+        uid: String?,
+        uname: String?,
+        email: String? = null,
+        knownChatIds: Set<String> = emptySet()
+    ): Boolean {
+        val myUid = uid?.trim().orEmpty()
+        if (myUid.isBlank()) return false
+        if (msg.senderId.equals(myUid, ignoreCase = true)) return false
 
-        val myUid = (uid ?: currentUserId)?.trim() ?: ""
-        val myUname = (uname ?: currentUsername)?.trim() ?: ""
-        val myEmail = (email ?: currentUserEmail)?.trim() ?: ""
-        val myClean = myUname.removePrefix("@").lowercase().removeSuffix(".link")
+        val recipient = msg.receiverId.trim()
+        if (recipient.equals(myUid, ignoreCase = true)) return true
 
-        val recUid = msg.receiverId.trim()
-        val recClean = recUid.removePrefix("@").lowercase().removeSuffix(".link")
-
-        val chat = msg.chatId.trim()
-
-        // 1. Direct 1-on-1 exact recipient check (STRICT equality, NO substring matches) - CHECK THIS FIRST!
-        val isDirectRecipient = (
-            (myUid.isNotBlank() && recUid.equals(myUid, ignoreCase = true)) ||
-            (myUname.isNotBlank() && recUid.equals(myUname, ignoreCase = true)) ||
-            (myEmail.isNotBlank() && recUid.equals(myEmail, ignoreCase = true)) ||
-            (myClean.isNotBlank() && myClean != "user" && myClean != "me" && recClean.equals(myClean, ignoreCase = true))
-        )
-        if (isDirectRecipient) return true
-
-        // 2. Group or Broadcast messages
-        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) || 
-            recUid.equals("group", ignoreCase = true) || 
-            chat == "global" || 
-            chat.startsWith("group_") ||
-            msg.messageType == "SYSTEM_EVENT"
-
-        if (isGroupOrBroadcast) {
-            if (chat == "global") return true
-            if (knownChatIds.contains(chat)) return true
-            // If it's a group/system message and receiver is specifically 'all' or 'group', allow if user is in group
-            return recUid.equals("all", ignoreCase = true)
+        // Group/system compatibility: direct messages remain UUID-only.
+        val chatId = msg.chatId.trim()
+        if (msg.messageType.equals("SYSTEM", ignoreCase = true) ||
+            msg.messageType.equals("SYSTEM_EVENT", ignoreCase = true)) {
+            return knownChatIds.contains(chatId)
         }
-
-        // 3. Unaddressed messages (blank receiver and not group) MUST NOT leak to 3rd party users
-        if (recUid.isBlank()) {
-            return knownChatIds.contains(chat)
-        }
-
-        // 4. Known local chat match check
-        if (chat.isNotBlank() && knownChatIds.contains(chat)) {
-            return true
-        }
-
-        // 5. Otherwise, reject 3rd party message
         return false
-    }
-
-    fun broadcastNewMessage(msg: SupabaseMessage) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) {
-                    connectWebSocket()
-                }
-
-                val msgRef = "bc_msg_${System.currentTimeMillis()}"
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "new_message")
-                    put("payload", JSONObject().apply {
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("message_type", msg.messageType)
-                        put("reply_to_id", msg.replyToId ?: "")
-                        put("is_forwarded", msg.isForwarded)
-                        put("status", msg.status)
-                    })
-                }
-                val broadcastMsg = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", msgRef)
-                }
-                webSocket?.send(broadcastMsg.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending new_message broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun broadcastMessageMutation(msg: SupabaseMessage, mutation: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) connectWebSocket()
-
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "message_mutation")
-                    put("payload", JSONObject().apply {
-                        put("mutation", mutation)
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("status", msg.status)
-                        put("message_type", msg.messageType)
-                        put("is_edited", msg.isEdited)
-                        put("is_deleted_for_everyone", msg.isDeletedForEveryone)
-                        put("is_pinned", msg.isPinned)
-                        put("client_msg_id", msg.clientMsgId ?: "")
-                    })
-                }
-                val packet = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", "mutation_${System.currentTimeMillis()}")
-                }
-                webSocket?.send(packet.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending message mutation broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) {
-                    connectWebSocket()
-                }
-
-                val msgRef = "typing_${System.currentTimeMillis()}"
-
-                // 1. Send WebSocket Realtime broadcast packet
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "typing")
-                    put("payload", JSONObject().apply {
-                        put("chat_id", chatId)
-                        put("user_id", userId)
-                        put("user_name", userName)
-                        put("is_typing", isTyping)
-                        put("timestamp", System.currentTimeMillis())
-                    })
-                }
-                val broadcastMsg = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", msgRef)
-                }
-                webSocket?.send(broadcastMsg.toString())
-
-                // Also send for sanitized/unprefixed chatId if applicable
-                if (chatId.startsWith("chat_")) {
-                    val rawChatId = chatId.removePrefix("chat_")
-                    val rawPayload = JSONObject().apply {
-                        put("type", "broadcast")
-                        put("event", "typing")
-                        put("payload", JSONObject().apply {
-                            put("chat_id", rawChatId)
-                            put("user_id", userId)
-                            put("user_name", userName)
-                            put("is_typing", isTyping)
-                            put("timestamp", System.currentTimeMillis())
-                        })
-                    }
-                    val rawMsg = JSONObject().apply {
-                        put("topic", "realtime:public")
-                        put("event", "broadcast")
-                        put("payload", rawPayload)
-                        put("ref", "${msgRef}_raw")
-                    }
-                    webSocket?.send(rawMsg.toString())
-                }
-
-                // Typing is Realtime broadcast-only; do not persist keystrokes in Postgres.
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending typing broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun handleTypingUpdate(chatId: String, userId: String, userName: String, isTyping: Boolean) {
-        val key = "$chatId:$userId"
-        val altKey = if (chatId.startsWith("chat_")) "${chatId.removePrefix("chat_")}:$userId" else "chat_$chatId:$userId"
-        val name = userName.ifBlank { "Someone" }
-        val cleanName = name.trim().lowercase().removePrefix("@").removeSuffix(".link")
-
-        val keysToUpdate = mutableSetOf<String>()
-        if (chatId.isNotBlank()) {
-            keysToUpdate.add(chatId)
-            if (chatId.startsWith("chat_")) {
-                keysToUpdate.add(chatId.removePrefix("chat_"))
-            } else {
-                keysToUpdate.add("chat_$chatId")
-            }
-        }
-
-        val map = _typingUsersByChat.value.toMutableMap()
-
-        if (isTyping) {
-            var mapChanged = false
-            keysToUpdate.forEach { k ->
-                val list = (map[k] ?: emptyList()).toMutableList()
-                if (!list.contains(name)) {
-                    list.add(name)
-                    map[k] = list
-                    mapChanged = true
-                }
-            }
-            if (mapChanged) {
-                _typingUsersByChat.value = map
-            }
-
-            // Cancel any previous expiry timer for this user and reschedule timer without re-triggering StateFlow
-            typingExpiryJobs[key]?.cancel()
-            typingExpiryJobs[altKey]?.cancel()
-
-            // Auto-clear typing status after 3.5s if no new typing event is received
-            val job = scope.launch {
-                delay(3500)
-                handleTypingUpdate(chatId, userId, userName, false)
-            }
-            typingExpiryJobs[key] = job
-        } else {
-            typingExpiryJobs.remove(key)?.cancel()
-            typingExpiryJobs.remove(altKey)?.cancel()
-
-            keysToUpdate.forEach { k ->
-                val list = (map[k] ?: emptyList()).toMutableList()
-                list.remove(name)
-                if (list.isEmpty()) {
-                    map.remove(k)
-                } else {
-                    map[k] = list
-                }
-            }
-            _typingUsersByChat.value = map
-        }
-    }
-
-    fun clearTypingForChat(chatId: String) {
-        val map = _typingUsersByChat.value.toMutableMap()
-        map.remove(chatId)
-        if (chatId.startsWith("chat_")) {
-            map.remove(chatId.removePrefix("chat_"))
-        } else {
-            map.remove("chat_$chatId")
-        }
-        _typingUsersByChat.value = map
     }
 
     private fun handlePresenceUpdate(record: JSONObject) {
