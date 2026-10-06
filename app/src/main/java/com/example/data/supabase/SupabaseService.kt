@@ -609,16 +609,11 @@ object SupabaseService {
         try {
             val raw = userId.trim()
             if (raw.isBlank()) return@withContext Result.success(null)
-
             getCachedProfile(raw)?.let { return@withContext Result.success(it) }
 
-            val isUuid = raw.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            if (!isUuid) {
-                // If not a UUID, delegate to username or email lookup to avoid Postgres 22P02 UUID syntax error
-                val byUname = getProfileByUsername(raw).getOrNull()
-                if (byUname != null) return@withContext Result.success(byUname)
-                val byEmail = getProfileByEmail(raw).getOrNull()
-                return@withContext Result.success(byEmail)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!raw.matches(uuidRegex)) {
+                return@withContext getProfileByUsername(raw)
             }
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
@@ -629,18 +624,16 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
-            }
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseProfile.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(null)
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
+                }
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(null)
+                val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                cacheProfile(profile)
+                Result.success(profile)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in getProfile", e)
@@ -649,33 +642,11 @@ object SupabaseService {
     }
 
     suspend fun getProfileByEmail(email: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
-        try {
-            val clean = email.trim().lowercase()
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(email.ilike.$clean,secondary_email.ilike.$clean)&select=*"
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to check email: ${response.code}"))
-            }
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseProfile.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(null)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in getProfileByEmail", e)
-            Result.failure(e)
+        val current = currentSession?.user
+        if (current != null && current.email.equals(email.trim(), ignoreCase = true)) {
+            return@withContext getProfile(current.id)
         }
+        Result.success(null)
     }
 
     suspend fun updateUserPassword(accessToken: String, newPass: String): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -713,8 +684,7 @@ object SupabaseService {
         try {
             val raw = username.trim().removePrefix("@").lowercase()
             if (raw.isBlank()) return@withContext Result.success(null)
-            
-            // Guard against generic non-user placeholder strings that match random profiles
+
             val genericPlaceholders = setOf(
                 "user", "users", "contact", "contacts", "chat", "chat partner", "chat_partner",
                 "someone", "me", "you", "admin", "null", "default", "undefined", "member",
@@ -723,62 +693,29 @@ object SupabaseService {
             if (genericPlaceholders.contains(raw)) return@withContext Result.success(null)
 
             val base = raw.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val withSuffix = "$base.link"
-            if (genericPlaceholders.contains(base)) return@withContext Result.success(null)
+            val canonical = canonicalUsername(base)
+            getCachedProfile(canonical)?.let { return@withContext Result.success(it) }
 
-            // Never download the entire profiles table for a single-user lookup.
-            // Use the indexed/specific REST query first; cache only avoids repeated identical lookups.
-            getCachedProfile(raw)?.let { return@withContext Result.success(it) }
-            getCachedProfile(base)?.let { return@withContext Result.success(it) }
-            getCachedProfile(withSuffix)?.let { return@withContext Result.success(it) }
+            val encoded = java.net.URLEncoder.encode(canonical, "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?username=eq.$encoded&select=*&limit=1"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
 
-            // Query by username or email
-            val queryTerms = listOf(base, withSuffix, raw).distinct()
-            for (term in queryTerms) {
-                val enc = java.net.URLEncoder.encode(term, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.eq.$enc,email.eq.$enc,public_id.eq.$enc,username.ilike.$enc,public_id.ilike.$enc)&select=*"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val resStr = response.body?.string() ?: ""
-                if (response.isSuccessful && resStr.isNotBlank()) {
-                    val arr = JSONArray(resStr)
-                    if (arr.length() > 0) {
-                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
-                        cacheProfile(profile)
-                        return@withContext Result.success(profile)
-                    }
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load username: ${response.code}"))
                 }
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(null)
+                val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                cacheProfile(profile)
+                Result.success(profile)
             }
-
-            // 3. If it is a valid UUID, query by id
-            val isUuid = raw.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            if (isUuid) {
-                val idUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
-                val idReq = Request.Builder()
-                    .url(idUrl)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-                val idResp = httpClient.newCall(idReq).execute()
-                val idBody = idResp.body?.string() ?: ""
-                if (idResp.isSuccessful && idBody.isNotBlank()) {
-                    val arr = JSONArray(idBody)
-                    if (arr.length() > 0) {
-                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
-                        cacheProfile(profile)
-                        return@withContext Result.success(profile)
-                    }
-                }
-            }
-
-            Result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Error in getProfileByUsername", e)
             Result.failure(e)
@@ -790,61 +727,39 @@ object SupabaseService {
             val q = query.trim().removePrefix("@").lowercase()
             if (q.isBlank()) return@withContext Result.success(emptyList())
 
-            val base = q.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val list = mutableListOf<SupabaseProfile>()
-            val seenIds = mutableSetOf<String>()
+            val uuidRegex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+            val url = if (q.matches(uuidRegex)) {
+                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$q&select=*&limit=1"
+            } else {
+                val base = q.removeSuffix(".link")
+                val encoded = java.net.URLEncoder.encode(base, "UTF-8")
+                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.%25$encoded%25,full_name.ilike.%25$encoded%25)&select=*&limit=50"
+            }
 
-            fun addProfiles(json: String) {
-                val arr = JSONArray(json)
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Profile search failed: ${response.code}"))
+                }
+                val arr = JSONArray(responseBody)
+                val list = mutableListOf<SupabaseProfile>()
+                val seen = mutableSetOf<String>()
                 for (i in 0 until arr.length()) {
                     val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
-                    if (profile.id.isNotBlank() && seenIds.add(profile.id)) {
+                    if (profile.id.isNotBlank() && seen.add(profile.id)) {
+                        cacheProfile(profile)
                         list.add(profile)
                     }
                 }
+                Result.success(list)
             }
-
-            fun get(path: String): String {
-                val request = Request.Builder()
-                    .url(path)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Profile search HTTP ${response.code}: $body")
-                    return ""
-                }
-                return body
-            }
-
-            val isUuid = q.matches(
-                Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-            )
-
-            // Canonical identifier lookup: QR UIDs are resolved directly by profiles.id.
-            if (isUuid) {
-                val encodedId = java.net.URLEncoder.encode(q, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                    "?id=eq.$encodedId&select=*&limit=1"
-                val body = get(url)
-                if (body.isNotBlank()) addProfiles(body)
-                return@withContext Result.success(list)
-            }
-
-            // One canonical remote search query for every non-UUID lookup.
-            // QR uses the UUID branch above; manual username/name/email search uses this
-            // same function and the same profile table. There is no local/legacy resolver.
-            val encodedBase = java.net.URLEncoder.encode(base, "UTF-8")
-            val encodedQ = java.net.URLEncoder.encode(q, "UTF-8")
-            val searchUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                "?or=(username.ilike.$encodedBase,username.ilike.${encodedBase}.link,full_name.ilike.%25$encodedQ%25,email.ilike.%25$encodedQ%25)&select=*&limit=50"
-            val body = get(searchUrl)
-            if (body.isNotBlank()) addProfiles(body)
-
-            Result.success(list)
         } catch (e: Exception) {
             Log.e(TAG, "Error in searchProfiles", e)
             Result.failure(e)
