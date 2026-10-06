@@ -6,6 +6,13 @@ alter table public.messages
   add column if not exists pinned_by uuid references auth.users(id) on delete set null,
   add column if not exists pinned_at timestamptz;
 
+alter table public.call_sessions
+  add column if not exists caller_name text,
+  add column if not exists caller_avatar text,
+  add column if not exists sdp_offer text,
+  add column if not exists sdp_answer text,
+  add column if not exists ice_candidates text not null default '[]';
+
 alter table public.profiles drop constraint if exists profiles_username_format;
 alter table public.profiles
   add constraint profiles_username_format
