@@ -285,6 +285,20 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                 try {
                                     SupabaseService.markMessageDelivered(msgId)
                                 } catch (_: Throwable) {}
+                            } else {
+                                // FCM carries only a compact preview for media. Never
+                                // persist that preview as the real message body. Recover
+                                // the authoritative row from Supabase, then acknowledge
+                                // delivery only after Room reconciliation.
+                                try {
+                                    val db2 = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
+                                    val identity2 = db2.bitChatDao().getUserIdentitySync()
+                                    val repository = com.example.data.repository.BitChatRepository(db2.bitChatDao())
+                                    repository.syncMessagesForChat(chatId)
+                                    SupabaseService.markMessageDelivered(msgId)
+                                } catch (e: Throwable) {
+                                    Log.w("KnotLinkFCM", "Media message recovery failed: ${e.message}")
+                                }
                             }
 
                             val allLocal = dao.getAllChatsList()
