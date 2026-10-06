@@ -768,75 +768,41 @@ object SupabaseService {
 
     suspend fun updateFcmToken(userId: String, fcmToken: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank() || fcmToken.isBlank()) return@withContext Result.success(false)
-            val clean = userId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            val enc = java.net.URLEncoder.encode(clean, "UTF-8")
-            val isUuid = clean.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-
-            val bodyObj = JSONObject().apply {
-                put("fcm_token", fcmToken)
-            }
-            val requestBody = bodyObj.toString().toRequestBody("application/json".toMediaType())
-
-            fcmTokenCache[userId] = fcmToken
-            fcmTokenCache[clean] = fcmToken
-
-            // 1. If UUID, update directly by id
-            if (isUuid) {
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$enc"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Prefer", "return=minimal")
-                    .patch(requestBody)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "FCM token updated successfully for UUID $clean")
-                    return@withContext Result.success(true)
-                }
+            val currentUid = getAuthenticatedUserId().orEmpty()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!currentUid.matches(uuidRegex) || !currentUid.equals(userId.trim(), ignoreCase = true) || fcmToken.isBlank()) {
+                return@withContext Result.failure(Exception("Push token registration requires the current user's UUID"))
             }
 
-            // 2. If email or contains @, update by email
-            if (clean.contains("@")) {
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(email.ilike.$enc,secondary_email.ilike.$enc)"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Prefer", "return=minimal")
-                    .patch(requestBody)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "FCM token updated successfully for email $clean")
-                    return@withContext Result.success(true)
-                }
+            val body = JSONObject().apply {
+                put("user_id", currentUid)
+                put("fcm_token", fcmToken.trim())
+                put("platform", "android")
             }
 
-            // 3. Otherwise update by username or fallback email
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$enc,email.ilike.$enc)"
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PUSH_TOKENS}")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Prefer", "return=minimal")
-                .patch(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                Log.i(TAG, "FCM token updated successfully for username $clean")
-            } else {
-                Log.w(TAG, "FCM token update response: ${response.code} for $clean")
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val responseBody = response.body?.string().orEmpty()
+                    Log.w(TAG, "Push token registration failed: ${response.code}: $responseBody")
+                }
+                Result.success(response.isSuccessful)
             }
-            Result.success(response.isSuccessful)
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating FCM token: ${e.message}")
+            Log.e(TAG, "Error updating FCM token", e)
             Result.failure(e)
         }
     }
+
+    suspend fun getFcmTokenForUser(targetKey: String): String? = null
 
     private val fcmTokenCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
