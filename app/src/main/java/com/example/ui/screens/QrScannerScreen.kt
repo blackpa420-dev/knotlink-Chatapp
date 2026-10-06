@@ -186,7 +186,7 @@ fun QrScannerScreen(
             null
         } else {
             try {
-                QRCodeGenerator.generateProfileQRCode(publicId = qrIdentifier, context = context, size = 512)
+                QRCodeGenerator.generateProfileQRCode(userId = qrIdentifier, context = context, size = 512)
             } catch (e: Exception) {
                 null
             }
