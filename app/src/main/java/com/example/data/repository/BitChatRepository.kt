@@ -474,23 +474,21 @@ class BitChatRepository(val dao: BitChatDao) {
         // promoted to a message recipient because doing so can route to the
         // wrong account when stale/local data is present.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        val candidates = buildList {
-            fun addUuid(value: String?) {
-                val v = value?.trim().orEmpty()
-                if (v.matches(uuidRegex) && !v.equals(currentUid.trim(), ignoreCase = true)) add(v)
-            }
-            addUuid(candidate)
-            addUuid(chatId)
-            existingChat?.participantUids
-                ?.split(",")
-                ?.forEach { addUuid(it) }
-            dao.getAllContactsList()
-                .firstOrNull { contact ->
-                    contact.id.equals(candidate, ignoreCase = true) ||
-                        contact.id.equals(chatId, ignoreCase = true)
-                }
-                ?.let { addUuid(it.id) }
-        }.distinct()
+        val matchingContact = dao.getAllContactsList().firstOrNull { contact ->
+            contact.id.equals(candidate, ignoreCase = true) ||
+                contact.id.equals(chatId, ignoreCase = true)
+        }
+        val candidates = mutableListOf<String>()
+        fun addUuid(value: String?) {
+            val v = value?.trim().orEmpty()
+            if (v.matches(uuidRegex) && !v.equals(currentUid.trim(), ignoreCase = true)) candidates.add(v)
+        }
+        addUuid(candidate)
+        addUuid(chatId)
+        existingChat?.participantUids
+            ?.split(",")
+            ?.forEach { addUuid(it) }
+        matchingContact?.let { addUuid(it.id) }
 
         // Prefer a locally cached UUID, but the UUID itself remains authoritative.
         for (uid in candidates) {
