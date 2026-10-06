@@ -1,8 +1,8 @@
 package com.example.data.supabase
 
 object SupabaseConfig {
-    var PROJECT_URL = "https://ykroccabyaxauaxelkhx.supabase.co"
-    var ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlrcm9jY2FieWF4YXVheGVsa2h4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3NTI1MzQsImV4cCI6MjEwNTMyODUzNH0._1UGI-hMViZZuyny0TvRfEwR-ddfRmU6f61j2kXnmGI"
+    var PROJECT_URL = "https://qxeggscatuwdyerqsvyf.supabase.co"
+    var ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF4ZWdnc2NhdHV3ZHllcnFzdnlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDUzNDYsImV4cCI6MjEwNjg4MTM0Nn0.u4YeOh0R4GxfSxvxeYiJ6jhO13JSNTYFSWkJijMrItk"
 
     // Tables
     const val TABLE_PROFILES = "profiles"
