@@ -162,6 +162,7 @@ data class SupabaseMessage(
             put("status", if (isRead) "READ" else status)
             put("message_type", messageType)
             put("created_at", timestamp)
+            put("is_pinned", isPinned)
             if (!clientMsgId.isNullOrBlank()) {
                 put("client_msg_id", clientMsgId)
             }
