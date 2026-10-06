@@ -17,17 +17,25 @@ import java.util.EnumMap
 
 object QRCodeGenerator {
 
+    private val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
     /**
-     * Generates a high quality QR Code bitmap with Level H error correction
-     * and the official KnotLink logo in the center over a white circular background.
+     * Generates the canonical KnotLink profile QR.
+     * The QR contains only the Supabase Auth UUID; usernames are never
+     * used as an internal identity or routing key.
      */
     fun generateProfileQRCode(
-        publicId: String,
+        userId: String,
         context: Context? = null,
         logoBitmap: Bitmap? = null,
         size: Int = 512
     ): Bitmap {
-        val content = if (publicId.startsWith("KNOTLINK:USER:") || publicId.startsWith("BITCHAT:USER:")) publicId else "KNOTLINK:USER:$publicId"
+        val canonicalUserId = userId.trim()
+        val content = if (uuidRegex.matches(canonicalUserId)) {
+            "KNOTLINK:USER:$canonicalUserId"
+        } else {
+            "KNOTLINK:INVALID"
+        }
 
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
             put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H)
@@ -35,9 +43,7 @@ object QRCodeGenerator {
             put(EncodeHintType.CHARACTER_SET, "UTF-8")
         }
 
-        val qrCodeWriter = QRCodeWriter()
-        val bitMatrix = qrCodeWriter.encode(content, BarcodeFormat.QR_CODE, size, size, hints)
-
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, size, size, hints)
         val width = bitMatrix.width
         val height = bitMatrix.height
         val pixels = IntArray(width * height)
@@ -52,20 +58,17 @@ object QRCodeGenerator {
         val qrBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         qrBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        // Draw Center Logo with White Circular Background
         val canvas = Canvas(qrBitmap)
         val centerX = width / 2f
         val centerY = height / 2f
+        val bgRadius = width * 0.125f
 
-        // 1. White Circular background behind logo (~12% radius = 24% width)
-        val bgRadius = (width * 0.125f)
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.FILL
         }
         canvas.drawCircle(centerX, centerY, bgRadius, bgPaint)
 
-        // Blue accent outer ring
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor("#2563EB")
             style = Paint.Style.STROKE
@@ -73,25 +76,16 @@ object QRCodeGenerator {
         }
         canvas.drawCircle(centerX, centerY, bgRadius, borderPaint)
 
-        // 2. Load center BitChat Logo (using attached image / R.drawable.appicon)
         val centerLogo = logoBitmap ?: context?.let { ctx ->
-            try {
-                BitmapFactory.decodeResource(ctx.resources, R.drawable.appicon)
-            } catch (e: Exception) {
-                null
-            }
+            try { BitmapFactory.decodeResource(ctx.resources, R.drawable.appicon) } catch (_: Exception) { null }
         }
 
         if (centerLogo != null) {
             val targetLogoSize = (width * 0.19f).toInt()
             val scaledLogo = Bitmap.createScaledBitmap(centerLogo, targetLogoSize, targetLogoSize, true)
-
-            val left = centerX - (targetLogoSize / 2f)
-            val top = centerY - (targetLogoSize / 2f)
-
+            val left = centerX - targetLogoSize / 2f
+            val top = centerY - targetLogoSize / 2f
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
-            // Clip logo neatly within the circular badge area
             canvas.save()
             val clipPath = Path().apply {
                 addCircle(centerX, centerY, bgRadius * 0.92f, Path.Direction.CW)
@@ -100,34 +94,25 @@ object QRCodeGenerator {
             canvas.drawBitmap(scaledLogo, left, top, paint)
             canvas.restore()
         } else {
-            // Fallback: Custom drawn BitChat symbol if image resource cannot be loaded
-            val logoSize = (width * 0.18f)
+            val logoSize = width * 0.18f
             val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#2563EB")
                 style = Paint.Style.FILL
             }
-
             val iconRadius = logoSize * 0.45f
-            val rect = RectF(
-                centerX - iconRadius,
-                centerY - iconRadius,
-                centerX + iconRadius,
-                centerY + iconRadius
-            )
+            val rect = RectF(centerX - iconRadius, centerY - iconRadius, centerX + iconRadius, centerY + iconRadius)
             canvas.drawRoundRect(rect, iconRadius * 0.4f, iconRadius * 0.4f, logoPaint)
-
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.WHITE
                 textSize = logoSize * 0.55f
                 textAlign = Paint.Align.CENTER
                 isFakeBoldText = true
             }
-            val fontMetrics = textPaint.fontMetrics
-            val textY = centerY - (fontMetrics.ascent + fontMetrics.descent) / 2f
-            canvas.drawText("B", centerX, textY, textPaint)
+            val metrics = textPaint.fontMetrics
+            val textY = centerY - (metrics.ascent + metrics.descent) / 2f
+            canvas.drawText("K", centerX, textY, textPaint)
         }
 
         return qrBitmap
     }
 }
-

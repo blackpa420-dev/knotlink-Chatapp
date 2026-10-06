@@ -54,6 +54,21 @@ object SupabaseService {
         }
     }
 
+    private suspend fun hydrateProfileMedia(profile: SupabaseProfile): SupabaseProfile {
+        val raw = profile.avatarUrl?.trim().orEmpty()
+        if (raw.isBlank() || raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) {
+            return profile
+        }
+        return try {
+            val signed = com.example.data.cloudflare.CloudflareR2Service
+                .getDownloadUrl(raw, "image/*")
+                .getOrNull()
+            if (signed.isNullOrBlank()) profile else profile.copy(avatarUrl = signed)
+        } catch (_: Throwable) {
+            profile
+        }
+    }
+
     private var currentSession: SupabaseAuthSession? = null
     private var prefs: android.content.SharedPreferences? = null
     private val sessionRefreshLock = Any()
@@ -560,39 +575,44 @@ object SupabaseService {
 
     suspend fun upsertProfile(profile: SupabaseProfile): Result<SupabaseProfile> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}"
-            val normalizedProfile = if (profile.username.isBlank()) profile
-            else profile.copy(username = canonicalUsername(profile.username))
-            val bodyStr = normalizedProfile.toJson().toString()
-            Log.d(TAG, "upsertProfile sending payload: $bodyStr")
+            val username = canonicalUsername(profile.username)
+            if (username.isBlank() || profile.fullName.isBlank() || profile.avatarUrl.isNullOrBlank()) {
+                return@withContext Result.failure(Exception("Profile requires username, full name and avatar"))
+            }
+
+            val body = JSONObject().apply {
+                put("p_username", username)
+                put("p_full_name", profile.fullName.trim())
+                put("p_avatar_url", profile.avatarUrl)
+                put("p_designation", profile.profession.takeIf { it.isNotBlank() })
+            }
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/complete_profile")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates,return=representation")
-                .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to complete profile (${response.code})"))
+                    )
+                }
 
-            if (!response.isSuccessful) {
-                Log.e(TAG, "upsertProfile failed HTTP ${response.code}: $resStr")
-                val errorMsg = parseErrorMessage(resStr, "Failed to save profile (${response.code})")
-                return@withContext Result.failure(Exception(errorMsg))
-            }
+                val obj = if (responseBody.trimStart().startsWith("[")) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else {
+                    JSONObject(responseBody)
+                } ?: return@withContext Result.failure(Exception("Profile completion returned no profile"))
 
-            Log.d(TAG, "upsertProfile success: $resStr")
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                val profile = SupabaseProfile.fromJson(jsonArray.getJSONObject(0))
-                cacheProfile(profile)
-                Result.success(profile)
-            } else {
-                Result.success(profile)
+                val saved = SupabaseProfile.fromJson(obj)
+                cacheProfile(saved)
+                Result.success(saved)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in upsertProfile", e)
@@ -604,16 +624,11 @@ object SupabaseService {
         try {
             val raw = userId.trim()
             if (raw.isBlank()) return@withContext Result.success(null)
-
             getCachedProfile(raw)?.let { return@withContext Result.success(it) }
 
-            val isUuid = raw.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            if (!isUuid) {
-                // If not a UUID, delegate to username or email lookup to avoid Postgres 22P02 UUID syntax error
-                val byUname = getProfileByUsername(raw).getOrNull()
-                if (byUname != null) return@withContext Result.success(byUname)
-                val byEmail = getProfileByEmail(raw).getOrNull()
-                return@withContext Result.success(byEmail)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!raw.matches(uuidRegex)) {
+                return@withContext getProfileByUsername(raw)
             }
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
@@ -624,18 +639,16 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
-            }
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseProfile.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(null)
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
+                }
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(null)
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                cacheProfile(profile)
+                Result.success(profile)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in getProfile", e)
@@ -644,33 +657,11 @@ object SupabaseService {
     }
 
     suspend fun getProfileByEmail(email: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
-        try {
-            val clean = email.trim().lowercase()
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(email.ilike.$clean,secondary_email.ilike.$clean)&select=*"
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to check email: ${response.code}"))
-            }
-
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseProfile.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(null)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in getProfileByEmail", e)
-            Result.failure(e)
+        val current = currentSession?.user
+        if (current != null && current.email.equals(email.trim(), ignoreCase = true)) {
+            return@withContext getProfile(current.id)
         }
+        Result.success(null)
     }
 
     suspend fun updateUserPassword(accessToken: String, newPass: String): Result<Boolean> = withContext(Dispatchers.IO) {
@@ -708,8 +699,7 @@ object SupabaseService {
         try {
             val raw = username.trim().removePrefix("@").lowercase()
             if (raw.isBlank()) return@withContext Result.success(null)
-            
-            // Guard against generic non-user placeholder strings that match random profiles
+
             val genericPlaceholders = setOf(
                 "user", "users", "contact", "contacts", "chat", "chat partner", "chat_partner",
                 "someone", "me", "you", "admin", "null", "default", "undefined", "member",
@@ -718,62 +708,29 @@ object SupabaseService {
             if (genericPlaceholders.contains(raw)) return@withContext Result.success(null)
 
             val base = raw.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val withSuffix = "$base.link"
-            if (genericPlaceholders.contains(base)) return@withContext Result.success(null)
+            val canonical = canonicalUsername(base)
+            getCachedProfile(canonical)?.let { return@withContext Result.success(it) }
 
-            // Never download the entire profiles table for a single-user lookup.
-            // Use the indexed/specific REST query first; cache only avoids repeated identical lookups.
-            getCachedProfile(raw)?.let { return@withContext Result.success(it) }
-            getCachedProfile(base)?.let { return@withContext Result.success(it) }
-            getCachedProfile(withSuffix)?.let { return@withContext Result.success(it) }
+            val encoded = java.net.URLEncoder.encode(canonical, "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?username=eq.$encoded&select=*&limit=1"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
 
-            // Query by username or email
-            val queryTerms = listOf(base, withSuffix, raw).distinct()
-            for (term in queryTerms) {
-                val enc = java.net.URLEncoder.encode(term, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.eq.$enc,email.eq.$enc,public_id.eq.$enc,username.ilike.$enc,public_id.ilike.$enc)&select=*"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val resStr = response.body?.string() ?: ""
-                if (response.isSuccessful && resStr.isNotBlank()) {
-                    val arr = JSONArray(resStr)
-                    if (arr.length() > 0) {
-                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
-                        cacheProfile(profile)
-                        return@withContext Result.success(profile)
-                    }
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load username: ${response.code}"))
                 }
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(null)
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                cacheProfile(profile)
+                Result.success(profile)
             }
-
-            // 3. If it is a valid UUID, query by id
-            val isUuid = raw.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            if (isUuid) {
-                val idUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
-                val idReq = Request.Builder()
-                    .url(idUrl)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-                val idResp = httpClient.newCall(idReq).execute()
-                val idBody = idResp.body?.string() ?: ""
-                if (idResp.isSuccessful && idBody.isNotBlank()) {
-                    val arr = JSONArray(idBody)
-                    if (arr.length() > 0) {
-                        val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
-                        cacheProfile(profile)
-                        return@withContext Result.success(profile)
-                    }
-                }
-            }
-
-            Result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Error in getProfileByUsername", e)
             Result.failure(e)
@@ -785,61 +742,39 @@ object SupabaseService {
             val q = query.trim().removePrefix("@").lowercase()
             if (q.isBlank()) return@withContext Result.success(emptyList())
 
-            val base = q.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-            val list = mutableListOf<SupabaseProfile>()
-            val seenIds = mutableSetOf<String>()
+            val uuidRegex = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+            val url = if (q.matches(uuidRegex)) {
+                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$q&select=*&limit=1"
+            } else {
+                val base = q.removeSuffix(".link")
+                val encoded = java.net.URLEncoder.encode(base, "UTF-8")
+                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.%25$encoded%25,full_name.ilike.%25$encoded%25)&select=*&limit=50"
+            }
 
-            fun addProfiles(json: String) {
-                val arr = JSONArray(json)
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Profile search failed: ${response.code}"))
+                }
+                val arr = JSONArray(responseBody)
+                val list = mutableListOf<SupabaseProfile>()
+                val seen = mutableSetOf<String>()
                 for (i in 0 until arr.length()) {
-                    val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
-                    if (profile.id.isNotBlank() && seenIds.add(profile.id)) {
+                    val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(i)))
+                    if (profile.id.isNotBlank() && seen.add(profile.id)) {
+                        cacheProfile(profile)
                         list.add(profile)
                     }
                 }
+                Result.success(list)
             }
-
-            fun get(path: String): String {
-                val request = Request.Builder()
-                    .url(path)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .get()
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Profile search HTTP ${response.code}: $body")
-                    return ""
-                }
-                return body
-            }
-
-            val isUuid = q.matches(
-                Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-            )
-
-            // Canonical identifier lookup: QR UIDs are resolved directly by profiles.id.
-            if (isUuid) {
-                val encodedId = java.net.URLEncoder.encode(q, "UTF-8")
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                    "?id=eq.$encodedId&select=*&limit=1"
-                val body = get(url)
-                if (body.isNotBlank()) addProfiles(body)
-                return@withContext Result.success(list)
-            }
-
-            // One canonical remote search query for every non-UUID lookup.
-            // QR uses the UUID branch above; manual username/name/email search uses this
-            // same function and the same profile table. There is no local/legacy resolver.
-            val encodedBase = java.net.URLEncoder.encode(base, "UTF-8")
-            val encodedQ = java.net.URLEncoder.encode(q, "UTF-8")
-            val searchUrl = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}" +
-                "?or=(username.ilike.$encodedBase,username.ilike.${encodedBase}.link,full_name.ilike.%25$encodedQ%25,email.ilike.%25$encodedQ%25)&select=*&limit=50"
-            val body = get(searchUrl)
-            if (body.isNotBlank()) addProfiles(body)
-
-            Result.success(list)
         } catch (e: Exception) {
             Log.e(TAG, "Error in searchProfiles", e)
             Result.failure(e)
@@ -848,115 +783,43 @@ object SupabaseService {
 
     suspend fun updateFcmToken(userId: String, fcmToken: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank() || fcmToken.isBlank()) return@withContext Result.success(false)
-            val clean = userId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            val enc = java.net.URLEncoder.encode(clean, "UTF-8")
-            val isUuid = clean.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-
-            val bodyObj = JSONObject().apply {
-                put("fcm_token", fcmToken)
-            }
-            val requestBody = bodyObj.toString().toRequestBody("application/json".toMediaType())
-
-            fcmTokenCache[userId] = fcmToken
-            fcmTokenCache[clean] = fcmToken
-
-            // 1. If UUID, update directly by id
-            if (isUuid) {
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$enc"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Prefer", "return=minimal")
-                    .patch(requestBody)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "FCM token updated successfully for UUID $clean")
-                    return@withContext Result.success(true)
-                }
+            val currentUid = getAuthenticatedUserId().orEmpty()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!currentUid.matches(uuidRegex) || !currentUid.equals(userId.trim(), ignoreCase = true) || fcmToken.isBlank()) {
+                return@withContext Result.failure(Exception("Push token registration requires the current user's UUID"))
             }
 
-            // 2. If email or contains @, update by email
-            if (clean.contains("@")) {
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(email.ilike.$enc,secondary_email.ilike.$enc)"
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Prefer", "return=minimal")
-                    .patch(requestBody)
-                    .build()
-                val response = httpClient.newCall(request).execute()
-                if (response.isSuccessful) {
-                    Log.i(TAG, "FCM token updated successfully for email $clean")
-                    return@withContext Result.success(true)
-                }
+            val body = JSONObject().apply {
+                put("user_id", currentUid)
+                put("fcm_token", fcmToken.trim())
+                put("platform", "android")
             }
 
-            // 3. Otherwise update by username or fallback email
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$enc,email.ilike.$enc)"
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PUSH_TOKENS}")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Prefer", "return=minimal")
-                .patch(requestBody)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                Log.i(TAG, "FCM token updated successfully for username $clean")
-            } else {
-                Log.w(TAG, "FCM token update response: ${response.code} for $clean")
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val responseBody = response.body?.string().orEmpty()
+                    Log.w(TAG, "Push token registration failed: ${response.code}: $responseBody")
+                }
+                Result.success(response.isSuccessful)
             }
-            Result.success(response.isSuccessful)
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating FCM token: ${e.message}")
+            Log.e(TAG, "Error updating FCM token", e)
             Result.failure(e)
         }
     }
 
-    private val fcmTokenCache = java.util.concurrent.ConcurrentHashMap<String, String>()
-
-    suspend fun getFcmTokenForUser(targetKey: String): String? = withContext(Dispatchers.IO) {
-        if (targetKey.isBlank()) return@withContext null
-
-        val cleanKey = targetKey.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-
-        val cached = fcmTokenCache[targetKey] ?: fcmTokenCache[cleanKey]
-        if (!cached.isNullOrBlank()) {
-            return@withContext cached
-        }
-
-        try {
-            var prof = getProfile(targetKey).getOrNull()
-                ?: getProfileByUsername(targetKey).getOrNull()
-                ?: getProfileByEmail(targetKey).getOrNull()
-                ?: (if (cleanKey.isNotBlank() && cleanKey != targetKey) {
-                    getProfile(cleanKey).getOrNull()
-                        ?: getProfileByUsername(cleanKey).getOrNull()
-                        ?: getProfileByEmail(cleanKey).getOrNull()
-                } else null)
-
-            // Do not scan the entire profiles table for an FCM token.
-            // If the targeted profile lookup has no token, return null and let the caller handle it.
-
-            val token = prof?.fcmToken?.trim()
-            if (!token.isNullOrBlank()) {
-                fcmTokenCache[targetKey] = token
-                fcmTokenCache[cleanKey] = token
-                if (prof.id.isNotBlank()) fcmTokenCache[prof.id] = token
-                if (prof.username.isNotBlank()) fcmTokenCache[prof.username] = token
-                if (prof.email.isNotBlank()) fcmTokenCache[prof.email] = token
-                return@withContext token
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error fetching FCM token for $targetKey: ${e.message}")
-        }
-        return@withContext null
-    }
+    // Recipient FCM tokens are resolved only inside the server-side FCM Edge Function.
+    // The Android client never reads another user's push token.
+    suspend fun getFcmTokenForUser(targetKey: String): String? = null
 
     suspend fun fetchAllProfiles(): Result<List<SupabaseProfile>> = withContext(Dispatchers.IO) {
         try {
@@ -1090,161 +953,96 @@ object SupabaseService {
     // CHATS & MESSAGES API (REST)
     // ==========================================
 
-    suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> = withContext(Dispatchers.IO) {
+    suspend fun ensureChatExists(chatId: String, type: String = "DIRECT"): Result<Boolean> {
+        // Legacy callers may still pass a local/hash chat ID. V2 creates direct chats
+        // from the canonical recipient UUID inside sendMessage(), so this method is
+        // intentionally a no-op for compatibility.
+        return Result.success(chatId.isNotBlank())
+    }
+
+    suspend fun getOrCreateDirectChat(otherUserId: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            if (chatId.isBlank()) return@withContext Result.failure(Exception("Chat ID cannot be blank"))
-            val currentUid = getAuthenticatedUserId()?.trim().orEmpty()
-            if (currentUid.isBlank()) {
-                return@withContext Result.failure(Exception("No authenticated Supabase UUID"))
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!otherUserId.trim().matches(uuidRegex)) {
+                return@withContext Result.failure(Exception("Direct chat recipient must be a canonical UUID"))
             }
 
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CHATS}"
             val body = JSONObject().apply {
-                put("id", chatId)
-                put("type", type)
+                put("other_user_id", otherUserId.trim())
             }
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/get_or_create_direct_chat")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(
-                    Exception(parseErrorMessage(responseBody, "Failed to create chat (${response.code})"))
-                )
-            }
-
-            // Only a newly-created chat gets an automatic current-user membership.
-            // Existing chats must already be joined, preventing guessed chat IDs
-            // from becoming a way to join another user's conversation.
-            val createdNewChat = try {
-                responseBody.isNotBlank() && JSONArray(responseBody).length() > 0
-            } catch (_: Exception) {
-                false
-            }
-
-            if (createdNewChat) {
-                val participantUrl = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
-                val participantBody = JSONObject().apply {
-                    put("chat_id", chatId)
-                    put("user_id", currentUid)
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to resolve direct chat (${response.code})"))
+                    )
                 }
-                val participantRequest = Request.Builder()
-                    .url(participantUrl)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "resolution=ignore-duplicates,return=minimal")
-                    .post(participantBody.toString().toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-                httpClient.newCall(participantRequest).execute().use { participantResponse ->
-                    if (!participantResponse.isSuccessful) {
-                        val pBody = participantResponse.body?.string().orEmpty()
-                        return@withContext Result.failure(
-                            Exception(parseErrorMessage(pBody, "Failed to register chat participant (${participantResponse.code})"))
-                        )
-                    }
+                val chatId = responseBody.trim().trim('"')
+                if (!chatId.matches(uuidRegex)) {
+                    return@withContext Result.failure(Exception("Server returned an invalid direct chat UUID"))
                 }
+                Result.success(chatId)
             }
-            Result.success(true)
         } catch (e: Exception) {
-            Log.e(TAG, "Error in ensureChatExists", e)
-            Result.failure(e)
-        }
-    }
-
-    private suspend fun ensureChatParticipants(
-        chatId: String,
-        senderId: String,
-        recipientId: String
-    ): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            if (chatId.isBlank() || senderId.isBlank() || recipientId.isBlank()) {
-                return@withContext Result.failure(Exception("Chat participants require canonical user IDs"))
-            }
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/chat_participants"
-            fun addParticipant(userId: String): Boolean {
-                val body = JSONObject().apply {
-                    put("chat_id", chatId)
-                    put("user_id", userId)
-                }
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
-                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Failed to add chat participant $userId: ${response.code}")
-                    }
-                    return response.isSuccessful
-                }
-            }
-
-            if (!addParticipant(senderId)) return@withContext Result.failure(Exception("Could not register sender in chat"))
-            if (recipientId != senderId && !addParticipant(recipientId)) {
-                return@withContext Result.failure(Exception("Could not register recipient in chat"))
-            }
-            Result.success(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in ensureChatParticipants", e)
+            Log.e(TAG, "Error in getOrCreateDirectChat", e)
             Result.failure(e)
         }
     }
 
     suspend fun sendMessage(message: SupabaseMessage): Result<SupabaseMessage> = withContext(Dispatchers.IO) {
         try {
-            val senderId = message.senderId.trim()
             val recipientId = message.receiverId.trim()
-            if (senderId.isBlank() || recipientId.isBlank()) {
-                return@withContext Result.failure(Exception("Message sender and recipient must be canonical user IDs"))
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!recipientId.matches(uuidRegex)) {
+                return@withContext Result.failure(Exception("Message recipient must be a canonical UUID"))
             }
 
-            val chatResult = ensureChatExists(message.chatId)
-            if (chatResult.isFailure) return@withContext Result.failure(chatResult.exceptionOrNull() ?: Exception("Could not create chat"))
-
-            val participantResult = ensureChatParticipants(message.chatId, senderId, recipientId)
-            if (participantResult.isFailure) {
-                return@withContext Result.failure(
-                    participantResult.exceptionOrNull() ?: Exception("Could not register chat participants")
-                )
+            val clientMessageId = (message.clientMsgId?.takeIf { it.matches(uuidRegex) } ?: java.util.UUID.randomUUID().toString())
+            val messageType = message.messageType.lowercase().ifBlank { "text" }
+            val body = JSONObject().apply {
+                put("p_recipient_id", recipientId)
+                put("p_message_type", messageType)
+                if (message.text.isNotBlank()) put("p_body", message.text)
+                if (!message.mediaUrl.isNullOrBlank()) put("p_media_url", message.mediaUrl)
+                put("p_client_message_id", clientMessageId)
+                val replyId = message.replyToMessageId ?: message.replyToId
+                if (!replyId.isNullOrBlank() && replyId.matches(uuidRegex)) {
+                    put("p_reply_to_message_id", replyId)
+                }
             }
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}"
-            val bodyStr = message.toJson().toString()
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/send_direct_message")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=representation")
-                .post(bodyStr.toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(responseBody, "Failed to send message (${response.code})"))
+                    )
+                }
 
-            if (!response.isSuccessful) {
-                val errorMsg = parseErrorMessage(resStr, "Failed to send message (${response.code})")
-                return@withContext Result.failure(Exception(errorMsg))
-            }
+                val json = if (responseBody.trimStart().startsWith("[")) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else {
+                    JSONObject(responseBody)
+                } ?: return@withContext Result.failure(Exception("Message RPC returned no message"))
 
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() > 0) {
-                Result.success(SupabaseMessage.fromJson(jsonArray.getJSONObject(0)))
-            } else {
-                Result.success(message)
+                Result.success(SupabaseMessage.fromJson(json))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in sendMessage", e)
@@ -1255,7 +1053,7 @@ object SupabaseService {
     suspend fun fetchMessagesSince(chatId: String, sinceTimestamp: Long, limit: Int = 100): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
             if (chatId.isBlank()) return@withContext Result.success(emptyList())
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$limit&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.${java.net.URLEncoder.encode(chatId, "UTF-8")}&updated_at=gt.${java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")}&order=updated_at.asc&limit=$limit&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1284,34 +1082,25 @@ object SupabaseService {
         offset: Int = 0
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) ids.add(email)
-            val orParts = ids.filter { it.isNotBlank() }.distinct().flatMap {
-                val enc = java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20")
-                listOf("recipient_id.eq.$enc", "sender_id.eq.$enc")
-            }
-            if (orParts.isEmpty()) return@withContext Result.success(emptyList())
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
             val safeOffset = offset.coerceAtLeast(0)
             val safeLimit = limit.coerceIn(1, 500)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&created_at=gt.$sinceTimestamp&order=created_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
+            val timestamp = java.net.URLEncoder.encode(isoTimestampMillis(sinceTimestamp), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&updated_at=gt.$timestamp&order=updated_at.asc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .get()
                 .build()
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed user messages: ${response.code}"))
-            val arr = JSONArray(body)
-            val list = mutableListOf<SupabaseMessage>()
-            for (i in 0 until arr.length()) list.add(SupabaseMessage.fromJson(arr.getJSONObject(i)))
-            Result.success(list)
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch changed user messages: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseMessage.fromJson(arr.getJSONObject(it)) })
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in fetchUserMessagesSince", e)
             Result.failure(e)
@@ -1360,46 +1149,24 @@ object SupabaseService {
         offset: Int = 0
     ): Result<List<SupabaseMessage>> = withContext(Dispatchers.IO) {
         try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) {
-                ids.add(email)
-            }
-            val orParts = mutableListOf<String>()
-            for (id in ids.filter { it.isNotBlank() }.distinct()) {
-                val enc = java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20")
-                orParts.add("recipient_id.eq.$enc")
-                orParts.add("sender_id.eq.$enc")
-            }
-            if (orParts.isEmpty()) return@withContext Result.success(emptyList())
-
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
             val safeOffset = offset.coerceAtLeast(0)
             val safeLimit = limit.coerceIn(1, 500)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(${orParts.joinToString(",")})&order=created_at.desc&limit=$safeLimit&offset=$safeOffset&select=*"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?or=(recipient_id.eq.$enc,sender_id.eq.$enc)&order=created_at.desc&limit=$safeLimit&offset=$safeOffset&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .get()
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch user messages: ${response.code}"))
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch user messages: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseMessage.fromJson(arr.getJSONObject(it)) })
             }
-
-            val jsonArray = JSONArray(resStr)
-            val list = mutableListOf<SupabaseMessage>()
-            for (i in 0 until jsonArray.length()) {
-                list.add(SupabaseMessage.fromJson(jsonArray.getJSONObject(i)))
-            }
-            Result.success(list)
         } catch (e: Exception) {
             Log.e(TAG, "Error in fetchUserMessages", e)
             Result.failure(e)
@@ -1408,153 +1175,105 @@ object SupabaseService {
 
     suspend fun markMessageDelivered(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (messageId.isBlank()) return@withContext Result.success(true)
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId&status=eq.SENT"
-            val bodyObj = JSONObject().apply {
-                put("status", "DELIVERED")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/mark_message_delivered")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Result.success(false)
+                } else {
+                    val body = response.body?.string().orEmpty().trim()
+                    // mark_message_delivered returns the updated message row, not a boolean.
+                    // Any successful RPC response therefore confirms the state transition.
+                    Result.success(body.isNotBlank())
+                }
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun markMessagesAsRead(chatId: String, currentUserId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&sender_id=neq.$currentUserId&status=neq.READ"
-            val bodyObj = JSONObject().apply {
-                put("status", "READ")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!chatId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            if (!currentUserId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            if (getCurrentUserId()?.equals(currentUserId.trim(), ignoreCase = true) != true) return@withContext Result.failure(Exception("Authenticated user mismatch"))
+            val body = JSONObject().put("p_chat_id", chatId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/mark_chat_messages_read")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            if (messageIds.isEmpty()) return@withContext Result.success(true)
-            val idsIn = "in.(${messageIds.joinToString(",")})"
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?chat_id=eq.$chatId&id=$idsIn"
-            val bodyObj = JSONObject().apply {
-                put("status", "READ")
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else response.body?.string(); Result.success(true)
             }
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Boolean> =
+        markMessagesAsRead(chatId, getCurrentUserId().orEmpty())
     suspend fun editMessage(messageId: String, newText: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("text", newText)
-                put("is_edited", true)
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_body", newText.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/edit_message")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun updateMessagePinnedStatus(messageId: String, isPinned: Boolean): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("is_pinned", isPinned)
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_pinned", isPinned)
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/set_message_pinned")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(response.body?.string()?.trim()?.toBoolean() == true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
     suspend fun deleteMessageForEveryone(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_MESSAGES}?id=eq.$messageId"
-            val bodyObj = JSONObject().apply {
-                put("is_deleted_for_everyone", true)
-                put("text", "")
-            }
-
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim())
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/delete_message_for_everyone")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
-
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) Result.success(false)
+                else Result.success(true)
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
-    // ==========================================
-    // TYPING INDICATOR API
-    // ==========================================
-
-    /**
-     * Typing is transported through Supabase Realtime broadcast.
-     * Keep this method for source compatibility, but never persist high-frequency
-     * typing state in Postgres because that creates unnecessary REST traffic.
-     */
     suspend fun sendTypingStatus(
         chatId: String,
         userId: String,
@@ -1632,50 +1351,35 @@ object SupabaseService {
 
     suspend fun updatePresence(userId: String, isOnline: Boolean, force: Boolean = false): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank()) return@withContext Result.success(false)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+
             val now = System.currentTimeMillis()
-
-            // Avoid repeated identical presence PATCHes from multiple lifecycle/realtime paths.
-            // Online heartbeats are sent at most once every 15 seconds; offline transitions are immediate.
-            if (isOnline) {
-                val last = presenceUpdateTimes[userId] ?: 0L
-                if (!force && now - last < PRESENCE_HEARTBEAT_TTL_MS) {
-                    return@withContext Result.success(true)
-                }
-                presenceUpdateTimes[userId] = now
-            } else {
-                presenceUpdateTimes.remove(userId)
+            val last = presenceUpdateTimes[userId] ?: 0L
+            if (isOnline && !force && now - last < 30_000L) {
+                return@withContext Result.success(true)
             }
-            val bodyObj = JSONObject().apply {
+            presenceUpdateTimes[userId] = now
+
+            val body = JSONObject().apply {
+                put("user_id", userId.trim())
                 put("is_online", isOnline)
-                put("last_seen", now)
-            }
-            val requestBody = bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE)
-
-            val isUuid = userId.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            val url = if (isUuid) {
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$userId"
-            } else if (userId.contains("@")) {
-                val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?email=ilike.$enc"
-            } else {
-                val clean = userId.trim().removePrefix("@").lowercase().removeSuffix(".link")
-                val encClean = java.net.URLEncoder.encode(clean, "UTF-8")
-                val encLink = java.net.URLEncoder.encode("$clean.link", "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$encClean,username.ilike.$encLink)"
+                put("last_seen_at", isoTimestampMillis(now))
             }
 
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "return=minimal")
-                .patch(requestBody)
+                .addHeader("Prefer", "resolution=merge-duplicates,return=minimal")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            Result.success(response.isSuccessful)
+            httpClient.newCall(request).execute().use { response ->
+                if (!isOnline) presenceUpdateTimes.remove(userId)
+                Result.success(response.isSuccessful)
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1683,20 +1387,10 @@ object SupabaseService {
 
     suspend fun getUserPresence(userId: String): Result<Pair<Boolean, Long>> = withContext(Dispatchers.IO) {
         try {
-            if (userId.isBlank()) return@withContext Result.success(Pair(false, 0L))
-            val isUuid = userId.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-            val url = if (isUuid) {
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$userId&select=is_online,last_seen"
-            } else if (userId.contains("@")) {
-                val enc = java.net.URLEncoder.encode(userId.trim(), "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?email=ilike.$enc&select=is_online,last_seen"
-            } else {
-                val clean = userId.trim().removePrefix("@").lowercase().removeSuffix(".link")
-                val encClean = java.net.URLEncoder.encode(clean, "UTF-8")
-                val encLink = java.net.URLEncoder.encode("$clean.link", "UTF-8")
-                "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.$encClean,username.ilike.$encLink)&select=is_online,last_seen"
-            }
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(Pair(false, 0L))
 
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}?user_id=eq.$userId&select=is_online,last_seen_at"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1704,21 +1398,17 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-            if (!response.isSuccessful || resStr.isBlank()) {
-                return@withContext Result.success(Pair(false, 0L))
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful || responseBody.isBlank()) return@withContext Result.success(Pair(false, 0L))
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) return@withContext Result.success(Pair(false, 0L))
+                val obj = arr.getJSONObject(0)
+                val online = obj.optBoolean("is_online", false)
+                val lastSeen = obj.optString("last_seen_at").let { parseIsoTimestamp(it) }
+                val recentlyActive = online && lastSeen > 0L && System.currentTimeMillis() - lastSeen <= 30_000L
+                Result.success(Pair(recentlyActive, lastSeen))
             }
-            val jsonArray = JSONArray(resStr)
-            if (jsonArray.length() == 0) return@withContext Result.success(Pair(false, 0L))
-            val obj = jsonArray.getJSONObject(0)
-            val isOnline = obj.optBoolean("is_online", false)
-            val lastSeen = obj.optLong("last_seen", 0L)
-            val now = System.currentTimeMillis()
-            val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-            // Strictly active if is_online is true, lastSeen is recorded and updated within the last 30 seconds
-            val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-            Result.success(Pair(isRecentlyActive, lastSeen))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1726,7 +1416,7 @@ object SupabaseService {
 
     suspend fun getAllUserPresence(): Result<Map<String, Pair<Boolean, Long>>> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?select=id,username,email,full_name,is_online,last_seen"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PRESENCE}?select=user_id,is_online,last_seen_at"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1734,52 +1424,21 @@ object SupabaseService {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-            if (!response.isSuccessful || resStr.isBlank()) {
-                return@withContext Result.success(emptyMap())
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful || responseBody.isBlank()) return@withContext Result.success(emptyMap())
+                val arr = JSONArray(responseBody)
+                val result = mutableMapOf<String, Pair<Boolean, Long>>()
+                val now = System.currentTimeMillis()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val uid = obj.optString("user_id", "")
+                    val lastSeen = parseIsoTimestamp(obj.optString("last_seen_at"))
+                    val online = obj.optBoolean("is_online", false) && lastSeen > 0L && now - lastSeen <= 30_000L
+                    if (uid.isNotBlank()) result[uid] = Pair(online, lastSeen)
+                }
+                Result.success(result)
             }
-            val jsonArray = JSONArray(resStr)
-            val resultMap = mutableMapOf<String, Pair<Boolean, Long>>()
-            val now = System.currentTimeMillis()
-            for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val id = obj.optString("id", "").trim()
-                val username = obj.optString("username", "").trim()
-                val email = obj.optString("email", "").trim()
-                val fullName = obj.optString("full_name", "").trim()
-                val isOnline = obj.optBoolean("is_online", false)
-                val lastSeen = obj.optLong("last_seen", 0L)
-                val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-                // Strictly active if is_online is true, lastSeen is recorded and updated within the last 30 seconds
-                val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-                val presencePair = Pair(isRecentlyActive, lastSeen)
-
-                if (id.isNotBlank()) {
-                    resultMap[id] = presencePair
-                    resultMap[id.lowercase()] = presencePair
-                }
-                if (username.isNotBlank()) {
-                    resultMap[username] = presencePair
-                    resultMap[username.lowercase()] = presencePair
-                    val clean = username.lowercase().removePrefix("@").removeSuffix(".link")
-                    resultMap[clean] = presencePair
-                    resultMap["$clean.link"] = presencePair
-                    resultMap["@$clean"] = presencePair
-                    resultMap["@$clean.link"] = presencePair
-                }
-                if (email.isNotBlank()) {
-                    resultMap[email] = presencePair
-                    resultMap[email.lowercase()] = presencePair
-                    val prefix = email.substringBefore("@").lowercase()
-                    resultMap[prefix] = presencePair
-                }
-                if (fullName.isNotBlank()) {
-                    resultMap[fullName] = presencePair
-                    resultMap[fullName.lowercase()] = presencePair
-                }
-            }
-            Result.success(resultMap)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1846,162 +1505,91 @@ object SupabaseService {
 
     suspend fun updateCallSessionStatus(callId: String, status: String, endedAt: Long? = null, connectedAt: Long? = null): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
-            if (callId.isBlank() || status.isBlank()) return@withContext Result.success(false)
-
-            // Terminal call states must never be overwritten by a late WebRTC callback.
-            val normalizedStatus = status.uppercase()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!callId.trim().matches(uuidRegex) || status.isBlank()) return@withContext Result.success(false)
+            val normalizedStatus = status.lowercase()
             val allowedPreviousStates = when (normalizedStatus) {
-                "ACCEPTED" -> "RINGING"
-                "CONNECTED" -> "RINGING,ACCEPTED"
-                "ENDED", "DECLINED", "CANCELLED" -> "RINGING,ACCEPTED,CONNECTED"
-                else -> "RINGING,ACCEPTED,CONNECTED"
+                "accepted" -> "ringing"
+                "ended", "declined", "missed", "failed" -> "ringing,accepted"
+                else -> "ringing,accepted"
             }
-
-            val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
-                "?id=eq.$encodedCallId&status=in.($allowedPreviousStates)&select=id,status,ended_at,connected_at"
-
+            val encodedCallId = java.net.URLEncoder.encode(callId.trim(), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.($allowedPreviousStates)&select=id,status,ended_at,answered_at"
             val bodyObj = JSONObject().apply {
                 put("status", normalizedStatus)
-                if (connectedAt != null) put("connected_at", connectedAt)
-                if (endedAt != null) put("ended_at", endedAt)
+                if (connectedAt != null) put("answered_at", isoTimestampMillis(connectedAt))
+                if (endedAt != null) put("ended_at", isoTimestampMillis(endedAt))
             }
-
             for (attempt in 1..3) {
-                try {
-                    val request = Request.Builder()
-                        .url(url)
-                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                        .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                        .addHeader("Content-Type", "application/json")
-                        .addHeader("Prefer", "return=representation")
-                        .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                        .build()
-
-                    val response = httpClient.newCall(request).execute()
+                val request = Request.Builder().url(url)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Prefer", "return=representation")
+                    .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE)).build()
+                httpClient.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string().orEmpty()
-
-                    if (!response.isSuccessful) {
-                        Log.w(TAG, "updateCallSessionStatus($callId,$normalizedStatus) HTTP ${response.code}: $responseBody")
-                    } else {
+                    if (response.isSuccessful) {
                         val rows = try { JSONArray(responseBody).length() } catch (_: Throwable) { 0 }
-                        if (rows > 0) {
-                            Log.d(TAG, "Call session $callId transitioned to $normalizedStatus")
-                            return@withContext Result.success(true)
-                        }
-
-                        // Zero rows means the session is already terminal or not eligible for this transition.
-                        val current = getCallSession(callId).getOrNull()
-                        if (current != null && current.status.equals(normalizedStatus, ignoreCase = true)) {
-                            return@withContext Result.success(true)
-                        }
-                        if (current != null && current.status.uppercase() in setOf("ENDED", "DECLINED", "CANCELLED")) {
-                            Log.d(TAG, "Ignoring stale $normalizedStatus transition; session is already ${current.status}")
-                            return@withContext Result.success(false)
-                        }
-                    }
-                } catch (e: Throwable) {
-                    Log.w(TAG, "updateCallSessionStatus attempt $attempt failed: ${e.message}")
+                        if (rows > 0) return@withContext Result.success(true)
+                    } else Log.w(TAG, "updateCallSessionStatus($callId,$normalizedStatus) HTTP ${response.code}: $responseBody")
                 }
                 if (attempt < 3) delay(250L * attempt)
             }
-
-            Result.success(false)
+            val current = getCallSession(callId).getOrNull()
+            Result.success(current?.status.equals(status, ignoreCase = true))
         } catch (e: Exception) {
             Log.e(TAG, "Error in updateCallSessionStatus", e)
             Result.failure(e)
         }
     }
+    suspend fun getUserCallHistory(userId: String): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
+        try {
+            val uid = userId.trim()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!uid.matches(uuidRegex)) return@withContext Result.success(emptyList())
+
+            val url = SupabaseConfig.REST_BASE_URL + "/" + SupabaseConfig.TABLE_CALL_SESSIONS +
+                "?or=(caller_id.eq." + uid + ",callee_id.eq." + uid + ")&order=created_at.desc&limit=100&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer " + getAccessToken())
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(Exception("Failed to load call history: " + response.code))
+                }
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseCallSession.fromJson(arr.getJSONObject(it)) })
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Error loading call history", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun getIncomingCalls(userId: String, username: String? = null, email: String? = null): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
         try {
-            val thirtySecondsAgo = System.currentTimeMillis() - 45000
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) {
-                ids.add(email)
-            }
-            val orFilter = ids.filter { it.isNotBlank() }.distinct().joinToString(",") { 
-                val enc = java.net.URLEncoder.encode(it, "UTF-8")
-                "receiver_id.eq.$enc" 
-            }
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?or=($orFilter)&status=eq.RINGING&started_at=gt.$thirtySecondsAgo&select=*"
-
-            val request = Request.Builder()
-                .url(url)
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!userId.trim().matches(uuidRegex)) return@withContext Result.success(emptyList())
+            val since = java.net.URLEncoder.encode(isoTimestampMillis(System.currentTimeMillis() - 45_000L), "UTF-8")
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?callee_id=eq.${userId.trim()}&status=eq.ringing&created_at=gt.$since&order=created_at.desc&select=*"
+            val request = Request.Builder().url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch incoming calls"))
+                .get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.failure(Exception("Failed to fetch incoming calls: ${response.code}"))
+                val arr = JSONArray(body)
+                Result.success(List(arr.length()) { SupabaseCallSession.fromJson(arr.getJSONObject(it)) })
             }
-
-            val jsonArray = JSONArray(resStr)
-            val list = mutableListOf<SupabaseCallSession>()
-            for (i in 0 until jsonArray.length()) {
-                list.add(SupabaseCallSession.fromJson(jsonArray.getJSONObject(i)))
-            }
-            Result.success(list)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
-
-    suspend fun getUserCallHistory(
-        userId: String,
-        username: String? = null,
-        email: String? = null,
-        limit: Int = 100
-    ): Result<List<SupabaseCallSession>> = withContext(Dispatchers.IO) {
-        try {
-            val ids = mutableListOf(userId)
-            if (!username.isNullOrBlank()) {
-                ids.add(username)
-                ids.add(username.removePrefix("@"))
-                ids.add(if (username.endsWith(".link")) username else "$username.link")
-            }
-            if (!email.isNullOrBlank()) ids.add(email)
-
-            val filters = ids.filter { it.isNotBlank() }.distinct().flatMap {
-                val enc = java.net.URLEncoder.encode(it, "UTF-8")
-                listOf("caller_id.eq.$" + enc, "receiver_id.eq.$" + enc)
-            }
-            if (filters.isEmpty()) return@withContext Result.success(emptyList())
-
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}" +
-                "?or=(${filters.joinToString(",")})&order=started_at.desc&limit=${limit}&select=*"
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .get()
-                .build()
-            val response = httpClient.newCall(request).execute()
-            val body = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to fetch call history: ${response.code}"))
-            }
-
-            val arr = JSONArray(body)
-            val list = mutableListOf<SupabaseCallSession>()
-            for (i in 0 until arr.length()) {
-                list.add(SupabaseCallSession.fromJson(arr.getJSONObject(i)))
-            }
-            Result.success(list)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in getUserCallHistory", e)
-            Result.failure(e)
-        }
-    }
-
     suspend fun getCallSession(callId: String): Result<SupabaseCallSession> = withContext(Dispatchers.IO) {
         try {
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId&select=*"
@@ -2065,10 +1653,10 @@ object SupabaseService {
         try {
             val encodedCallId = java.net.URLEncoder.encode(callId, "UTF-8")
             // Do not accept an SDP answer after the call has already been declined/cancelled/ended.
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.(RINGING,ACCEPTED)"
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$encodedCallId&status=in.(ringing,accepted)"
             val bodyObj = JSONObject().apply {
                 put("sdp_answer", answerSdp)
-                put("status", "ACCEPTED")
+                put("status", "accepted")
             }
             var updated = false
             for (attempt in 1..4) {
@@ -2136,47 +1724,21 @@ object SupabaseService {
     // STORAGE API (PROFILE PHOTOS & MEDIA)
     // ==========================================
 
+    // ==========================================
+    // MEDIA API (CLOUDFLARE R2)
+    // ==========================================
+
     suspend fun uploadAvatar(
         fileName: String,
         imageBytes: ByteArray,
         mimeType: String = "image/jpeg"
     ): Result<String> = withContext(Dispatchers.IO) {
-        // Direct zero-egress Cloudflare R2 upload
-        val r2Result = com.example.data.cloudflare.CloudflareR2Service.uploadFile(
+        com.example.data.cloudflare.CloudflareR2Service.uploadFile(
             bytes = imageBytes,
             fileName = fileName,
             mimeType = mimeType,
-            folder = "avatars"
+            folder = "avatar"
         )
-        if (r2Result.isSuccess) {
-            return@withContext r2Result
-        }
-
-        try {
-            val url = "${SupabaseConfig.STORAGE_BASE_URL}/object/${SupabaseConfig.BUCKET_AVATARS}/$fileName"
-            val mediaType = mimeType.toMediaType()
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", mimeType)
-                .addHeader("x-upsert", "true")
-                .post(imageBytes.toRequestBody(mediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                val errorMsg = response.body?.string() ?: "Upload error"
-                return@withContext Result.failure(Exception("Avatar upload failed: $errorMsg"))
-            }
-
-            val publicUrl = "${SupabaseConfig.STORAGE_BASE_URL}/object/public/${SupabaseConfig.BUCKET_AVATARS}/$fileName"
-            Result.success(publicUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in uploadAvatar", e)
-            Result.failure(e)
-        }
     }
 
     suspend fun uploadAvatar(
@@ -2186,46 +1748,18 @@ object SupabaseService {
     ): Result<String> = uploadAvatar(fileName, imageBytes, mimeType)
 
     suspend fun uploadChatMedia(
+        chatId: String,
         fileName: String,
         mediaBytes: ByteArray,
         mimeType: String
     ): Result<String> = withContext(Dispatchers.IO) {
-        // Direct zero-egress Cloudflare R2 upload
-        val r2Result = com.example.data.cloudflare.CloudflareR2Service.uploadFile(
+        com.example.data.cloudflare.CloudflareR2Service.uploadFile(
             bytes = mediaBytes,
             fileName = fileName,
             mimeType = mimeType,
-            folder = "chat_media"
+            folder = "chat_media",
+            chatId = chatId
         )
-        if (r2Result.isSuccess) {
-            return@withContext r2Result
-        }
-
-        try {
-            val url = "${SupabaseConfig.STORAGE_BASE_URL}/object/${SupabaseConfig.BUCKET_CHAT_MEDIA}/$fileName"
-            val mediaType = mimeType.toMediaType()
-
-            val request = Request.Builder()
-                .url(url)
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", mimeType)
-                .addHeader("x-upsert", "true")
-                .post(mediaBytes.toRequestBody(mediaType))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) {
-                val errorMsg = response.body?.string() ?: "Upload error"
-                return@withContext Result.failure(Exception("Media upload failed: $errorMsg"))
-            }
-
-            val publicUrl = "${SupabaseConfig.STORAGE_BASE_URL}/object/public/${SupabaseConfig.BUCKET_CHAT_MEDIA}/$fileName"
-            Result.success(publicUrl)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in uploadChatMedia", e)
-            Result.failure(e)
-        }
     }
 
     // ==========================================
@@ -2288,6 +1822,31 @@ object SupabaseService {
             Result.success(list)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun isoTimestampMillis(millis: Long): String {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        return sdf.format(java.util.Date(millis))
+    }
+
+    private fun parseIsoTimestamp(value: String): Long {
+        val raw = value.trim()
+        if (raw.isBlank()) return 0L
+        return try {
+            val base = raw.take(19)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            var result = sdf.parse(base)?.time ?: 0L
+            val dot = raw.indexOf('.')
+            if (dot >= 0) {
+                val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+            }
+            result
+        } catch (_: Exception) {
+            0L
         }
     }
 

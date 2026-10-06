@@ -53,7 +53,6 @@ object SupabaseRealtimeManager {
     private var currentUserEmail: String? = null
 
     private val typingExpiryJobs = ConcurrentHashMap<String, Job>()
-    private val processedMessageIds = ConcurrentHashMap.newKeySet<String>()
 
     private var webSocket: WebSocket? = null
     private val wsClient = OkHttpClient.Builder()
@@ -71,6 +70,30 @@ object SupabaseRealtimeManager {
     }
 
     fun getCurrentUserId(): String? = currentUserId
+
+    fun broadcastMessageMutation(message: SupabaseMessage, mutation: String) {
+        val socket = webSocket ?: return
+        try {
+            val inner = message.toJson().apply {
+                put("event", "message_mutation")
+                put("mutation", mutation)
+            }
+            val payload = JSONObject().apply {
+                put("type", "broadcast")
+                put("event", "message_mutation")
+                put("payload", inner)
+            }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", payload)
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) {
+            Log.w(TAG, "message mutation broadcast failed: " + e.message)
+        }
+    }
 
     fun startRealtime(userId: String, username: String? = null, email: String? = null) {
         val identityChanged = currentUserId != userId ||
@@ -92,13 +115,6 @@ object SupabaseRealtimeManager {
             scope.launch(Dispatchers.IO) {
                 try {
                     SupabaseService.updatePresence(uid, true, force = true)
-                    if (!uname.isNullOrBlank() && uname != uid) {
-                        SupabaseService.updatePresence(uname, true, force = true)
-                    }
-                    val presenceRes = SupabaseService.getAllUserPresence()
-                    if (presenceRes.isSuccess) {
-                        _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
-                    }
                 } catch (_: Exception) {}
             }
         }
@@ -112,10 +128,7 @@ object SupabaseRealtimeManager {
         if (!uid.isNullOrBlank()) {
             scope.launch(Dispatchers.IO) {
                 try {
-                    SupabaseService.updatePresence(uid, false)
-                    if (!uname.isNullOrBlank() && uname != uid) {
-                        SupabaseService.updatePresence(uname, false)
-                    }
+                    SupabaseService.updatePresence(uid, false, force = true)
                 } catch (_: Exception) {}
             }
         }
@@ -131,29 +144,88 @@ object SupabaseRealtimeManager {
         onAppBackground()
     }
 
+    fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {
+        val socket = webSocket ?: return
+        if (chatId.isBlank() || userId.isBlank()) return
+        try {
+            val payload = JSONObject().apply {
+                put("chat_id", chatId)
+                put("user_id", userId)
+                put("user_name", userName)
+                put("is_typing", isTyping)
+                put("event", "typing")
+            }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("event", "typing")
+                    put("payload", payload)
+                })
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) { Log.w(TAG, "typing broadcast failed: " + e.message) }
+    }
+
+    fun broadcastNewMessage(message: SupabaseMessage) {
+        val socket = webSocket ?: return
+        try {
+            val inner = message.toJson().apply { put("event", "new_message") }
+            val envelope = JSONObject().apply {
+                put("topic", "realtime:public")
+                put("event", "broadcast")
+                put("payload", JSONObject().apply {
+                    put("event", "new_message")
+                    put("payload", inner)
+                })
+                put("ref", JSONObject.NULL)
+            }
+            socket.send(envelope.toString())
+        } catch (e: Throwable) { Log.w(TAG, "new message broadcast failed: " + e.message) }
+    }
+
+    private fun clearTypingForChat(chatId: String) {
+        if (chatId.isBlank()) return
+        val map = _typingUsersByChat.value.toMutableMap()
+        map.remove(chatId)
+        _typingUsersByChat.value = map
+        typingExpiryJobs.remove(chatId)?.cancel()
+    }
+
+    private fun handleTypingUpdate(chatId: String, userId: String, userName: String, isTyping: Boolean) {
+        if (chatId.isBlank() || userId.isBlank() || isFromMe(userId, userName)) return
+        val map = _typingUsersByChat.value.toMutableMap()
+        val users = map[chatId].orEmpty().toMutableList()
+        if (isTyping) {
+            if (!users.any { it.equals(userId, ignoreCase = true) }) users += userId
+            map[chatId] = users
+            _typingUsersByChat.value = map
+            typingExpiryJobs.remove(chatId)?.cancel()
+            typingExpiryJobs[chatId] = scope.launch {
+                delay(5000L)
+                clearTypingForChat(chatId)
+            }
+        } else {
+            users.removeAll { it.equals(userId, ignoreCase = true) }
+            if (users.isEmpty()) map.remove(chatId) else map[chatId] = users
+            _typingUsersByChat.value = map
+        }
+    }
+
     fun setCurrentActiveChat(chatId: String?) {
         currentChatId = chatId
     }
 
     private fun isFromMe(userId: String?, userName: String?): Boolean {
         val myUid = currentUserId?.trim()?.lowercase()
-        val myUname = currentUsername?.trim()?.lowercase()
-        val myClean = myUname?.removePrefix("@")?.removeSuffix(".link")
-
         val uId = userId?.trim()?.lowercase()
-        val uName = userName?.trim()?.lowercase()
-        val uClean = uName?.removePrefix("@")?.removeSuffix(".link")
-
-        if (!myUid.isNullOrBlank() && myUid != "user_me" && myUid != "null") {
-            if (uId == myUid) return true
-        }
-        if (!myUname.isNullOrBlank() && myUname != "me" && myUname != "someone" && myUname != "user" && myUname != "null") {
-            if (uId == myUname || uName == myUname) return true
-        }
-        if (!myClean.isNullOrBlank() && myClean != "me" && myClean != "someone" && myClean != "user" && myClean != "null") {
-            if (uClean == myClean || uId == myClean || uName == myClean) return true
-        }
-        return false
+        // Internal message ownership is UUID-only. Username/email/name are display/search
+        // identifiers and must never be accepted as message sender identity.
+        return !myUid.isNullOrBlank() &&
+            myUid != "user_me" &&
+            myUid != "null" &&
+            uId == myUid
     }
 
     private fun connectWebSocket() {
@@ -178,16 +250,36 @@ object SupabaseRealtimeManager {
                                 put("ack", false)
                             })
                             val changes = JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("event", "*")
-                                    put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_MESSAGES)
-                                })
-                                put(JSONObject().apply {
-                                    put("event", "*")
-                                    put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
-                                })
+                                val realtimeUid = currentUserId
+                                if (!realtimeUid.isNullOrBlank()) {
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_MESSAGES)
+                                        put("filter", "recipient_id=eq.$realtimeUid")
+                                    })
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_MESSAGES)
+                                        put("filter", "sender_id=eq.$realtimeUid")
+                                    })
+                                }
+                                val callUid = currentUserId
+                                if (!callUid.isNullOrBlank()) {
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
+                                        put("filter", "caller_id=eq.$callUid")
+                                    })
+                                    put(JSONObject().apply {
+                                        put("event", "*")
+                                        put("schema", "public")
+                                        put("table", SupabaseConfig.TABLE_CALL_SESSIONS)
+                                        put("filter", "callee_id=eq.$callUid")
+                                    })
+                                }
                                 put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
@@ -196,12 +288,16 @@ object SupabaseRealtimeManager {
                                 put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
-                                    put("table", SupabaseConfig.TABLE_PROFILES)
+                                    put("table", SupabaseConfig.TABLE_PRESENCE)
                                 })
                             }
                             put("postgres_changes", changes)
                         }
                         put("config", config)
+                        val realtimeToken = SupabaseService.getAccessToken()
+                        if (realtimeToken.isNotBlank() && realtimeToken != SupabaseConfig.ANON_KEY) {
+                            put("access_token", realtimeToken)
+                        }
                     }
 
                     val joinMsg = JSONObject().apply {
@@ -243,7 +339,7 @@ object SupabaseRealtimeManager {
                                 if (!isFromMe && isForMe && msg.id.isNotBlank()) {
                                     scope.launch {
                                         _incomingMessages.emit(msg)
-                                        if (msg.status.equals("READ", ignoreCase = true) || msg.isRead) {
+                                        if (msg.status.equals("DELIVERED", ignoreCase = true) || msg.status.equals("READ", ignoreCase = true) || msg.isRead || msg.isEdited) {
                                             _messageStatusUpdates.emit(msg)
                                         }
                                     }
@@ -254,13 +350,11 @@ object SupabaseRealtimeManager {
                                 val myName = currentUsername
                                 val myClean = myName?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
 
-                                val isFromMe = (myUid != null && msg.senderId == myUid) ||
-                                    (myName != null && msg.senderId.equals(myName, ignoreCase = true)) ||
-                                    (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+                                val isFromMe = isFromMe(msg.senderId, msg.senderName)
 
                                 val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
 
-                                if (!isFromMe && isForMe && !isDuplicateAndTrack(msg)) {
+                                if (!isFromMe && isForMe) {
                                     clearTypingForChat(msg.chatId)
                                     if (msg.senderId.isNotBlank()) {
                                         clearTypingForChat(msg.senderId)
@@ -298,9 +392,7 @@ object SupabaseRealtimeManager {
                                         val myName = currentUsername
                                         val myClean = myName?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
 
-                                        val isFromMe = (myUid != null && msg.senderId == myUid) ||
-                                            (myName != null && msg.senderId.equals(myName, ignoreCase = true)) ||
-                                            (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+                                        val isFromMe = isFromMe(msg.senderId, msg.senderName)
 
                                         val isForMe = isMessageForUser(msg, myUid, myName, currentUserEmail)
                                         val changeType = data.optString("type", "INSERT")
@@ -309,7 +401,7 @@ object SupabaseRealtimeManager {
                                         val shouldEmit = if (isUpdateOrDelete) {
                                             isForMe || isFromMe
                                         } else {
-                                            !isFromMe && isForMe && !isDuplicateAndTrack(msg)
+                                            !isFromMe && isForMe
                                         }
 
                                         if (shouldEmit) {
@@ -326,7 +418,7 @@ object SupabaseRealtimeManager {
                                     }
                                     SupabaseConfig.TABLE_CALL_SESSIONS -> {
                                         val call = SupabaseCallSession.fromJson(record)
-                                        if (call.receiverId == currentUserId || (currentUsername?.isNotBlank() == true && call.receiverId == currentUsername)) {
+                                        if (call.receiverId.equals(currentUserId, ignoreCase = true)) {
                                             scope.launch { _incomingCalls.emit(call) }
                                         }
                                         scope.launch { _callSessionUpdates.emit(call) }
@@ -337,8 +429,8 @@ object SupabaseRealtimeManager {
                                             handleTypingUpdate(typing.chatId, typing.userId, typing.userName, typing.isTyping)
                                         }
                                     }
-                                    SupabaseConfig.TABLE_PROFILES, "profiles" -> {
-                                        handleProfilePresenceUpdate(record)
+                                    SupabaseConfig.TABLE_PRESENCE -> {
+                                        handlePresenceUpdate(record)
                                     }
                                 }
                             }
@@ -349,6 +441,7 @@ object SupabaseRealtimeManager {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (this@SupabaseRealtimeManager.webSocket === webSocket) this@SupabaseRealtimeManager.webSocket = null
                     Log.w(TAG, "WebSocket connection failed: ${t.message}. Reconnecting in 5s...")
                     scope.launch {
                         delay(5000)
@@ -359,6 +452,7 @@ object SupabaseRealtimeManager {
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (this@SupabaseRealtimeManager.webSocket === webSocket) this@SupabaseRealtimeManager.webSocket = null
                     Log.d(TAG, "WebSocket closed: $reason")
                 }
             })
@@ -400,66 +494,34 @@ object SupabaseRealtimeManager {
                     if (!uid.isNullOrBlank()) {
                         SupabaseService.updatePresence(uid, true)
 
-                        if (_userPresenceMap.value.isEmpty() || loopCounter % 1L == 0L) {
-                            val presenceRes = SupabaseService.getAllUserPresence()
-                            if (presenceRes.isSuccess) {
-                                _userPresenceMap.value = presenceRes.getOrNull() ?: emptyMap()
-                            }
-                        }
-
+                        // REST is only a degraded fallback while Realtime is unavailable.
                         if (webSocket == null) {
+                            // Do not poll the entire message set every 30 seconds. That was
+                            // an avoidable egress source. Missed messages are recovered by
+                            // authenticated bootstrap/active-chat sync and the FCM wake path.
                             SupabaseService.getIncomingCalls(uid).getOrNull()?.forEach { _incomingCalls.emit(it) }
-                            SupabaseService.fetchUserMessages(
-                                userId = uid,
-                                username = uname,
-                                email = currentUserEmail,
-                                limit = 15
-                            ).getOrNull()?.forEach { msg ->
-                                handlePolledMessage(msg, uid, uname)
-                            }
                         }
                     }
-                    loopCounter++
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error in sync loop: " + e.message)
+                    Log.e(TAG, "Error in sync loop: ${e.message}")
                 }
-                // Keep presence fresh enough for chat-list indicators without
-                // hammering the backend; realtime remains the primary fast path.
-                delay(8_000L)
+                delay(30_000L)
             }
         }
     }
-    private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean {
-        val cleanText = msg.text.trim().take(40)
-        val timeBucket = msg.timestamp / 10000L // 10-second window
-        val contentBucketKey = "${msg.chatId}_${msg.senderId}_${cleanText}_$timeBucket"
-        val idKey = if (msg.id.isNotBlank() && !msg.id.startsWith("msg_")) "id_${msg.id}" else contentBucketKey
-        val clientKey = if (!msg.clientMsgId.isNullOrBlank()) "client_${msg.clientMsgId}" else null
 
-        val isAlreadyProcessed = processedMessageIds.contains(contentBucketKey) ||
-            processedMessageIds.contains(idKey) ||
-            (clientKey != null && processedMessageIds.contains(clientKey))
+    // Realtime transport intentionally does not deduplicate messages. Room is the
+    // durable idempotency boundary, so a reconnect/duplicate event can never cause
+    // a message to be dropped before it is persisted or acknowledged.
 
-        if (isAlreadyProcessed) {
-            return true
-        }
-        processedMessageIds.add(contentBucketKey)
-        if (idKey != contentBucketKey) {
-            processedMessageIds.add(idKey)
-        }
-        if (clientKey != null) {
-            processedMessageIds.add(clientKey)
-        }
-        return false
-    }
+    // Legacy polling helper retained for compatibility. Message identity is now
+    // reconciled in Room, never by an in-memory transport cache.
+    private fun isDuplicateAndTrack(msg: SupabaseMessage): Boolean = false
 
     private val lastSeenMessageTexts = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private suspend fun handlePolledMessage(msg: SupabaseMessage, uid: String, uname: String?) {
-        val myClean = uname?.trim()?.removePrefix("@")?.lowercase()?.removeSuffix(".link")
-        val isFromMe = msg.senderId == uid ||
-            (!uname.isNullOrBlank() && msg.senderId.equals(uname, ignoreCase = true)) ||
-            (myClean != null && myClean.isNotBlank() && msg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myClean)
+        val isFromMe = msg.senderId.equals(uid, ignoreCase = true)
 
         val previousText = lastSeenMessageTexts[msg.id]
         val isTextChanged = previousText != null && previousText != msg.text
@@ -483,302 +545,61 @@ object SupabaseRealtimeManager {
         }
     }
 
-    fun isMessageForUser(msg: SupabaseMessage, uid: String?, uname: String?, email: String? = null, knownChatIds: Set<String> = emptySet()): Boolean {
-        // If the message was sent BY ME, it's not an incoming message for me
-        if (isFromMe(msg.senderId, msg.senderName)) return false
+    fun isMessageForUser(
+        msg: SupabaseMessage,
+        uid: String?,
+        uname: String?,
+        email: String? = null,
+        knownChatIds: Set<String> = emptySet()
+    ): Boolean {
+        val myUid = uid?.trim().orEmpty()
+        if (myUid.isBlank()) return false
+        if (msg.senderId.equals(myUid, ignoreCase = true)) return false
 
-        val myUid = (uid ?: currentUserId)?.trim() ?: ""
-        val myUname = (uname ?: currentUsername)?.trim() ?: ""
-        val myEmail = (email ?: currentUserEmail)?.trim() ?: ""
-        val myClean = myUname.removePrefix("@").lowercase().removeSuffix(".link")
+        val recipient = msg.receiverId.trim()
+        if (recipient.equals(myUid, ignoreCase = true)) return true
 
-        val recUid = msg.receiverId.trim()
-        val recClean = recUid.removePrefix("@").lowercase().removeSuffix(".link")
-
-        val chat = msg.chatId.trim()
-
-        // 1. Direct 1-on-1 exact recipient check (STRICT equality, NO substring matches) - CHECK THIS FIRST!
-        val isDirectRecipient = (
-            (myUid.isNotBlank() && recUid.equals(myUid, ignoreCase = true)) ||
-            (myUname.isNotBlank() && recUid.equals(myUname, ignoreCase = true)) ||
-            (myEmail.isNotBlank() && recUid.equals(myEmail, ignoreCase = true)) ||
-            (myClean.isNotBlank() && myClean != "user" && myClean != "me" && recClean.equals(myClean, ignoreCase = true))
-        )
-        if (isDirectRecipient) return true
-
-        // 2. Group or Broadcast messages
-        val isGroupOrBroadcast = recUid.equals("all", ignoreCase = true) || 
-            recUid.equals("group", ignoreCase = true) || 
-            chat == "global" || 
-            chat.startsWith("group_") ||
-            msg.messageType == "SYSTEM_EVENT"
-
-        if (isGroupOrBroadcast) {
-            if (chat == "global") return true
-            if (knownChatIds.contains(chat)) return true
-            // If it's a group/system message and receiver is specifically 'all' or 'group', allow if user is in group
-            return recUid.equals("all", ignoreCase = true)
+        // Group/system compatibility: direct messages remain UUID-only.
+        val chatId = msg.chatId.trim()
+        if (msg.messageType.equals("SYSTEM", ignoreCase = true) ||
+            msg.messageType.equals("SYSTEM_EVENT", ignoreCase = true)) {
+            return knownChatIds.contains(chatId)
         }
-
-        // 3. Unaddressed messages (blank receiver and not group) MUST NOT leak to 3rd party users
-        if (recUid.isBlank()) {
-            return knownChatIds.contains(chat)
-        }
-
-        // 4. Known local chat match check
-        if (chat.isNotBlank() && knownChatIds.contains(chat)) {
-            return true
-        }
-
-        // 5. Otherwise, reject 3rd party message
         return false
     }
 
-    fun broadcastNewMessage(msg: SupabaseMessage) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) {
-                    connectWebSocket()
-                }
-
-                val msgRef = "bc_msg_${System.currentTimeMillis()}"
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "new_message")
-                    put("payload", JSONObject().apply {
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("message_type", msg.messageType)
-                        put("reply_to_id", msg.replyToId ?: "")
-                        put("is_forwarded", msg.isForwarded)
-                        put("status", msg.status)
-                    })
-                }
-                val broadcastMsg = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", msgRef)
-                }
-                webSocket?.send(broadcastMsg.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending new_message broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun broadcastMessageMutation(msg: SupabaseMessage, mutation: String) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) connectWebSocket()
-
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "message_mutation")
-                    put("payload", JSONObject().apply {
-                        put("mutation", mutation)
-                        put("id", msg.id)
-                        put("chat_id", msg.chatId)
-                        put("sender_id", msg.senderId)
-                        put("sender_name", msg.senderName)
-                        put("recipient_id", msg.receiverId)
-                        put("text", msg.text)
-                        put("created_at", msg.timestamp)
-                        put("status", msg.status)
-                        put("message_type", msg.messageType)
-                        put("is_edited", msg.isEdited)
-                        put("is_deleted_for_everyone", msg.isDeletedForEveryone)
-                        put("is_pinned", msg.isPinned)
-                        put("client_msg_id", msg.clientMsgId ?: "")
-                    })
-                }
-                val packet = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", "mutation_${System.currentTimeMillis()}")
-                }
-                webSocket?.send(packet.toString())
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending message mutation broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun sendTypingBroadcast(chatId: String, userId: String, userName: String, isTyping: Boolean) {
-        scope.launch(Dispatchers.IO) {
-            try {
-                if (webSocket == null) {
-                    connectWebSocket()
-                }
-
-                val msgRef = "typing_${System.currentTimeMillis()}"
-
-                // 1. Send WebSocket Realtime broadcast packet
-                val payload = JSONObject().apply {
-                    put("type", "broadcast")
-                    put("event", "typing")
-                    put("payload", JSONObject().apply {
-                        put("chat_id", chatId)
-                        put("user_id", userId)
-                        put("user_name", userName)
-                        put("is_typing", isTyping)
-                        put("timestamp", System.currentTimeMillis())
-                    })
-                }
-                val broadcastMsg = JSONObject().apply {
-                    put("topic", "realtime:public")
-                    put("event", "broadcast")
-                    put("payload", payload)
-                    put("ref", msgRef)
-                }
-                webSocket?.send(broadcastMsg.toString())
-
-                // Also send for sanitized/unprefixed chatId if applicable
-                if (chatId.startsWith("chat_")) {
-                    val rawChatId = chatId.removePrefix("chat_")
-                    val rawPayload = JSONObject().apply {
-                        put("type", "broadcast")
-                        put("event", "typing")
-                        put("payload", JSONObject().apply {
-                            put("chat_id", rawChatId)
-                            put("user_id", userId)
-                            put("user_name", userName)
-                            put("is_typing", isTyping)
-                            put("timestamp", System.currentTimeMillis())
-                        })
-                    }
-                    val rawMsg = JSONObject().apply {
-                        put("topic", "realtime:public")
-                        put("event", "broadcast")
-                        put("payload", rawPayload)
-                        put("ref", "${msgRef}_raw")
-                    }
-                    webSocket?.send(rawMsg.toString())
-                }
-
-                // Typing is Realtime broadcast-only; do not persist keystrokes in Postgres.
-            } catch (e: Exception) {
-                Log.w(TAG, "Error sending typing broadcast: ${e.message}")
-            }
-        }
-    }
-
-    fun handleTypingUpdate(chatId: String, userId: String, userName: String, isTyping: Boolean) {
-        val key = "$chatId:$userId"
-        val altKey = if (chatId.startsWith("chat_")) "${chatId.removePrefix("chat_")}:$userId" else "chat_$chatId:$userId"
-        val name = userName.ifBlank { "Someone" }
-        val cleanName = name.trim().lowercase().removePrefix("@").removeSuffix(".link")
-
-        val keysToUpdate = mutableSetOf<String>()
-        if (chatId.isNotBlank()) {
-            keysToUpdate.add(chatId)
-            if (chatId.startsWith("chat_")) {
-                keysToUpdate.add(chatId.removePrefix("chat_"))
-            } else {
-                keysToUpdate.add("chat_$chatId")
-            }
-        }
-
-        val map = _typingUsersByChat.value.toMutableMap()
-
-        if (isTyping) {
-            var mapChanged = false
-            keysToUpdate.forEach { k ->
-                val list = (map[k] ?: emptyList()).toMutableList()
-                if (!list.contains(name)) {
-                    list.add(name)
-                    map[k] = list
-                    mapChanged = true
-                }
-            }
-            if (mapChanged) {
-                _typingUsersByChat.value = map
-            }
-
-            // Cancel any previous expiry timer for this user and reschedule timer without re-triggering StateFlow
-            typingExpiryJobs[key]?.cancel()
-            typingExpiryJobs[altKey]?.cancel()
-
-            // Auto-clear typing status after 3.5s if no new typing event is received
-            val job = scope.launch {
-                delay(3500)
-                handleTypingUpdate(chatId, userId, userName, false)
-            }
-            typingExpiryJobs[key] = job
-        } else {
-            typingExpiryJobs.remove(key)?.cancel()
-            typingExpiryJobs.remove(altKey)?.cancel()
-
-            keysToUpdate.forEach { k ->
-                val list = (map[k] ?: emptyList()).toMutableList()
-                list.remove(name)
-                if (list.isEmpty()) {
-                    map.remove(k)
-                } else {
-                    map[k] = list
-                }
-            }
-            _typingUsersByChat.value = map
-        }
-    }
-
-    fun clearTypingForChat(chatId: String) {
-        val map = _typingUsersByChat.value.toMutableMap()
-        map.remove(chatId)
-        if (chatId.startsWith("chat_")) {
-            map.remove(chatId.removePrefix("chat_"))
-        } else {
-            map.remove("chat_$chatId")
-        }
-        _typingUsersByChat.value = map
-    }
-
-    private fun handleProfilePresenceUpdate(record: JSONObject) {
+    private fun handlePresenceUpdate(record: JSONObject) {
         try {
-            val id = record.optString("id", "").trim()
-            val username = record.optString("username", "").trim()
-            val email = record.optString("email", "").trim()
-            val fullName = record.optString("full_name", "").trim()
+            val userId = record.optString("user_id", "").trim()
+            if (userId.isBlank()) return
             val isOnline = record.optBoolean("is_online", false)
-            val lastSeen = record.optLong("last_seen", 0L)
-            val now = System.currentTimeMillis()
-            val diff = if (lastSeen > 0L) Math.abs(now - lastSeen) else Long.MAX_VALUE
-            val isRecentlyActive = isOnline && lastSeen > 0L && diff <= 30000L
-            val presencePair = Pair(isRecentlyActive, lastSeen)
-
-            val currentMap = _userPresenceMap.value.toMutableMap()
-            if (id.isNotBlank()) {
-                currentMap[id] = presencePair
-                currentMap[id.lowercase()] = presencePair
-            }
-            if (username.isNotBlank()) {
-                currentMap[username] = presencePair
-                currentMap[username.lowercase()] = presencePair
-                val clean = username.lowercase().removePrefix("@").removeSuffix(".link")
-                currentMap[clean] = presencePair
-                currentMap["$clean.link"] = presencePair
-                currentMap["@$clean"] = presencePair
-                currentMap["@$clean.link"] = presencePair
-            }
-            if (email.isNotBlank()) {
-                currentMap[email] = presencePair
-                currentMap[email.lowercase()] = presencePair
-                val prefix = email.substringBefore("@").lowercase()
-                currentMap[prefix] = presencePair
-            }
-            if (fullName.isNotBlank()) {
-                currentMap[fullName] = presencePair
-                currentMap[fullName.lowercase()] = presencePair
-            }
-            _userPresenceMap.value = currentMap
+            val lastSeen = parseIsoTimestamp(record.optString("last_seen_at", ""))
+            val recent = isOnline && lastSeen > 0L && System.currentTimeMillis() - lastSeen <= 30_000L
+            val map = _userPresenceMap.value.toMutableMap()
+            map[userId] = Pair(recent, lastSeen)
+            _userPresenceMap.value = map
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating presence from WS record: ${e.message}")
+            Log.e(TAG, "Error updating presence from Realtime: ${e.message}")
         }
     }
+
+    private fun parseIsoTimestamp(value: String): Long {
+        val raw = value.trim()
+        if (raw.isBlank()) return 0L
+        return try {
+            val base = raw.take(19)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            var result = sdf.parse(base)?.time ?: 0L
+            val dot = raw.indexOf('.')
+            if (dot >= 0) {
+                val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+            }
+            result
+        } catch (_: Exception) {
+            0L
+        }
+    }
+
 }

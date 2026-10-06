@@ -38,9 +38,9 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     val db = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
                     val iden = db.bitChatDao().getUserIdentitySync()
                     if (iden != null) {
-                        if (iden.supabaseUid.isNotBlank()) SupabaseService.updateFcmToken(iden.supabaseUid, token)
-                        if (iden.username.isNotBlank()) SupabaseService.updateFcmToken(iden.username, token)
-                        if (iden.email.isNotBlank()) SupabaseService.updateFcmToken(iden.email, token)
+                        if (iden.supabaseUid.isNotBlank()) {
+                            SupabaseService.updateFcmToken(iden.supabaseUid, token)
+                        }
                     }
                 } catch (e: Throwable) {
                     Log.w("KnotLinkFCM", "Error updating token to Supabase: ${e.message}")
@@ -202,7 +202,9 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             } else {
                 Log.i("KnotLinkFCM", "Triggering Message Notification from $callerName")
 
-                val msgId = data["server_message_id"]?.ifBlank { null } ?: ("msg_" + java.util.UUID.randomUUID().toString().take(8))
+                val msgId = data["server_message_id"]?.trim().orEmpty()
+                val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+                val hasCanonicalMessageId = msgId.matches(uuidRegex)
 
                 // 1. Render the message notification immediately. Never block the
                 // first notification on a profile/avatar HTTP request.
@@ -240,7 +242,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                 val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
                 val timeStr = sdf.format(java.util.Date(ts))
 
-                if (chatId.isNotBlank() && body.isNotBlank()) {
+                if (hasCanonicalMessageId && chatId.isNotBlank() && body.isNotBlank() && senderId.matches(uuidRegex)) {
                     scope.launch {
                         try {
                             val db = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
@@ -279,16 +281,36 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                     timestamp = ts,
                                     messageType = "TEXT"
                                 )
-                                dao.insertMessage(newMsg)
+                                dao.insertMessageIfAbsent(newMsg)
+                                try {
+                                    SupabaseService.markMessageDelivered(msgId)
+                                } catch (_: Throwable) {}
+                            } else {
+                                // FCM carries only a compact preview for media. Never
+                                // persist that preview as the real message body. Recover
+                                // the authoritative row from Supabase, then acknowledge
+                                // delivery only after Room reconciliation.
+                                try {
+                                    val db2 = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
+                                    val repository = com.example.data.repository.BitChatRepository(db2.bitChatDao())
+                                    repository.syncMessagesForChat(chatId)
+                                    SupabaseService.markMessageDelivered(msgId)
+                                } catch (e: Throwable) {
+                                    Log.w("KnotLinkFCM", "Media message recovery failed: ${e.message}")
+                                }
                             }
 
                             val allLocal = dao.getAllChatsList()
-                            val existingChat = dao.getChatById(chatId) 
+                            // Direct-chat identity is UUID-only. Never map a push to
+                            // an existing chat by display name; names are mutable/display data.
+                            val existingChat = dao.getChatById(chatId)
                                 ?: allLocal.find { chat ->
-                                    chat.chatType != "GROUP" && chat.category != "Group" && (
-                                        (senderId.isNotBlank() && chat.participantUids.split(",").map { it.trim().lowercase() }.contains(senderId.lowercase())) ||
-                                        (callerName.isNotBlank() && callerName != "User" && callerName != "Contact" && chat.name.equals(callerName, ignoreCase = true))
-                                    )
+                                    chat.chatType != "GROUP" &&
+                                        chat.category != "Group" &&
+                                        senderId.isNotBlank() &&
+                                        chat.participantUids.split(",")
+                                            .map { it.trim().lowercase() }
+                                            .contains(senderId.lowercase())
                                 }
 
                             if (existingChat != null) {

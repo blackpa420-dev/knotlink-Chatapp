@@ -175,7 +175,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val publicId = user?.publicId ?: "user_001"
     val cachedQrBitmap = remember(publicId, context) {
-        QRCodeGenerator.generateProfileQRCode(publicId = publicId, context = context, size = 512)
+        QRCodeGenerator.generateProfileQRCode(userId = publicId, context = context, size = 512)
     }
 
     LaunchedEffect(isQrVisible, qrCountdownSeconds) {

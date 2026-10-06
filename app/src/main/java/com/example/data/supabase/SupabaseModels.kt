@@ -146,7 +146,8 @@ data class SupabaseMessage(
     val isEdited: Boolean = false,
     val isDeletedForEveryone: Boolean = false,
     val isPinned: Boolean = false,
-    val clientMsgId: String? = null
+    val clientMsgId: String? = null,
+    val updatedAt: Long = timestamp
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
@@ -162,6 +163,7 @@ data class SupabaseMessage(
             put("status", if (isRead) "READ" else status)
             put("message_type", messageType)
             put("created_at", timestamp)
+            put("is_pinned", isPinned)
             if (!clientMsgId.isNullOrBlank()) {
                 put("client_msg_id", clientMsgId)
             }
@@ -182,7 +184,7 @@ data class SupabaseMessage(
 
     companion object {
         fun fromJson(json: JSONObject): SupabaseMessage {
-            val status = json.optString("status", "SENT")
+            val status = json.optString("status", "sent").uppercase()
             val replyId = when {
                 json.has("reply_to_id") && !json.isNull("reply_to_id") -> json.optString("reply_to_id")
                 json.has("reply_to_message_id") && !json.isNull("reply_to_message_id") -> json.optString("reply_to_message_id")
@@ -200,12 +202,16 @@ data class SupabaseMessage(
                     val raw = json.opt("created_at")
                     when (raw) {
                         is Number -> raw.toLong()
-                        is String -> raw.toLongOrNull() ?: System.currentTimeMillis()
+                        is String -> parseIsoTimestamp(raw)
                         else -> System.currentTimeMillis()
                     }
                 }
                 json.has("timestamp") -> json.optLong("timestamp", System.currentTimeMillis())
                 else -> System.currentTimeMillis()
+            }
+            val updatedAt = when {
+                json.has("updated_at") -> parseIsoTimestamp(json.optString("updated_at", ""))
+                else -> ts
             }
             val msgId = json.opt("id")?.toString() ?: ""
             return SupabaseMessage(
@@ -214,11 +220,12 @@ data class SupabaseMessage(
                 senderId = json.optString("sender_id", ""),
                 senderName = json.optString("sender_name", "User"),
                 receiverId = recId,
-                text = json.optString("text", json.optString("content", "")),
+                text = json.optString("body", json.optString("text", json.optString("content", ""))),
                 timestamp = ts,
                 timestampString = json.optString("timestamp_string", ""),
                 status = status,
                 isRead = (status == "READ" || json.optBoolean("is_read", false)),
+                updatedAt = if (updatedAt > 0L) updatedAt else ts,
                 mediaUrl = if (json.has("media_url") && !json.isNull("media_url")) json.optString("media_url") else null,
                 mediaType = if (json.has("media_type") && !json.isNull("media_type")) json.optString("media_type") else null,
                 messageType = mType,
@@ -231,6 +238,25 @@ data class SupabaseMessage(
                 clientMsgId = clientMsgId
             )
         }
+        private fun parseIsoTimestamp(value: String): Long {
+            val raw = value.trim()
+            raw.toLongOrNull()?.let { return it }
+            return try {
+                val base = raw.take(19)
+                val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                var result = sdf.parse(base)?.time ?: System.currentTimeMillis()
+                val dot = raw.indexOf('.')
+                if (dot >= 0) {
+                    val digits = raw.substring(dot + 1).takeWhile { it.isDigit() }.take(3)
+                    if (digits.isNotEmpty()) result += digits.padEnd(3, '0').toLong()
+                }
+                result
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+
     }
 }
 
@@ -270,8 +296,8 @@ data class SupabaseCallSession(
     val receiverId: String,
     val callerName: String,
     val callerAvatar: String? = null,
-    val callType: String = "audio", // audio or video
-    val status: String = "RINGING", // RINGING, ACCEPTED, DECLINED, ENDED, MISSED
+    val callType: String = "audio",
+    val status: String = "ringing",
     val sdpOffer: String = "",
     val sdpAnswer: String = "",
     val iceCandidates: String = "[]",
@@ -284,43 +310,73 @@ data class SupabaseCallSession(
         return JSONObject().apply {
             put("id", if (id.isNotBlank()) id else callId)
             put("caller_id", callerId)
-            put("receiver_id", receiverId)
+            put("callee_id", receiverId)
             put("caller_name", callerName)
             put("caller_avatar", callerAvatar ?: "")
-            put("call_type", callType)
-            put("status", status)
-            put("sdp_offer", sdpOffer)
-            put("sdp_answer", sdpAnswer)
-            put("ice_candidates", iceCandidates)
-            put("started_at", startedAt)
-            if (connectedAt != null && connectedAt > 0) {
-                put("connected_at", connectedAt)
-            }
-            if (endedAt != null && endedAt > 0) {
-                put("ended_at", endedAt)
-            }
+            put("call_type", callType.lowercase())
+            put("status", status.lowercase())
+            if (sdpOffer.isNotBlank()) put("sdp_offer", sdpOffer)
+            if (sdpAnswer.isNotBlank()) put("sdp_answer", sdpAnswer)
+            put("ice_candidates", iceCandidates.ifBlank { "[]" })
+            put("created_at", formatIsoTimestamp(startedAt))
+            if (connectedAt != null && connectedAt > 0) put("answered_at", formatIsoTimestamp(connectedAt))
+            if (endedAt != null && endedAt > 0) put("ended_at", formatIsoTimestamp(endedAt))
         }
     }
 
     companion object {
         fun fromJson(json: JSONObject): SupabaseCallSession {
-            val cid = if (json.has("id") && !json.isNull("id")) json.optString("id") else json.optString("call_id", "")
+            val cid = json.optString("id", json.optString("call_id", ""))
+            val started = parseTimestamp(
+                json.optString("created_at", json.optString("started_at", ""))
+            )
+            val connected = parseNullableTimestamp(
+                json.optString("answered_at", json.optString("connected_at", ""))
+            )
+            val ended = parseNullableTimestamp(json.optString("ended_at", ""))
             return SupabaseCallSession(
                 callId = cid,
                 callerId = json.optString("caller_id", ""),
-                receiverId = json.optString("receiver_id", ""),
+                receiverId = json.optString("callee_id", json.optString("receiver_id", "")),
                 callerName = json.optString("caller_name", "Caller"),
                 callerAvatar = if (json.has("caller_avatar") && !json.isNull("caller_avatar")) json.optString("caller_avatar") else null,
                 callType = json.optString("call_type", "audio"),
-                status = json.optString("status", "RINGING"),
+                status = json.optString("status", "ringing").uppercase(),
                 sdpOffer = json.optString("sdp_offer", ""),
                 sdpAnswer = json.optString("sdp_answer", ""),
                 iceCandidates = json.optString("ice_candidates", "[]"),
-                startedAt = json.optLong("started_at", System.currentTimeMillis()),
-                connectedAt = if (json.has("connected_at") && !json.isNull("connected_at")) json.optLong("connected_at") else null,
-                endedAt = if (json.has("ended_at") && !json.isNull("ended_at")) json.optLong("ended_at") else null,
+                startedAt = started,
+                connectedAt = connected,
+                endedAt = ended,
                 id = cid
             )
+        }
+
+        private fun formatIsoTimestamp(value: Long): String {
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            return sdf.format(java.util.Date(value))
+        }
+
+        private fun parseTimestamp(value: String): Long {
+            if (value.isBlank()) return System.currentTimeMillis()
+            value.toLongOrNull()?.let { return it }
+            return try {
+                val normalized = value.take(23)
+                val sdf = if (normalized.length >= 23)
+                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", java.util.Locale.US)
+                else
+                    java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+                sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                sdf.parse(normalized.replace("Z", ""))?.time ?: System.currentTimeMillis()
+            } catch (_: Exception) {
+                System.currentTimeMillis()
+            }
+        }
+
+        private fun parseNullableTimestamp(value: String): Long? {
+            if (value.isBlank()) return null
+            return parseTimestamp(value)
         }
     }
 }

@@ -100,6 +100,12 @@ interface BitChatDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity): Long
 
+    // FCM is a recovery/notification transport. If Realtime/history already
+    // persisted the authoritative server UUID, never overwrite that richer row
+    // with the notification preview payload.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMessageIfAbsent(message: MessageEntity): Long
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<MessageEntity>)
 

@@ -289,12 +289,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 SupabaseRealtimeManager.incomingMessages.collect { supaMsg ->
                     val currentIdentity = repository.userIdentity.firstOrNull()
                     val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email }?.ifBlank { currentIdentity.username } ?: ""
-                    val currentUsername = currentIdentity?.username ?: ""
-                    val currentCleanName = currentUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
-
-                    val isFromMe = supaMsg.senderId == currentUid ||
-                        (currentUsername.isNotBlank() && supaMsg.senderId.equals(currentUsername, ignoreCase = true)) ||
-                        (currentCleanName.isNotBlank() && currentCleanName != "user" && currentCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == currentCleanName)
+                    // Message ownership is UUID-only. Username/email/display name are never
+                    // accepted as sender identity because they can collide or be stale.
+                    val isFromMe = currentUid.isNotBlank() &&
+                        supaMsg.senderId.trim().equals(currentUid.trim(), ignoreCase = true)
 
                     val activeChat = _activeChatId.value
                     val handledEntity = repository.handleIncomingMessage(supaMsg, activeChat)
@@ -392,7 +390,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val isReceiverMe = (currentUid.isNotBlank() && call.receiverId == currentUid) || (currentUsername.isNotBlank() && call.receiverId == currentUsername)
                     val isForMe = isReceiverMe && !isCallerMe
 
-                    if (isForMe && !_activeCall.value.isActive && call.status == "RINGING") {
+                    if (isForMe && !_activeCall.value.isActive && call.status.equals("ringing", ignoreCase = true)) {
                         if (_incomingCallSession.value?.id != call.id) {
                             _incomingCallSession.value = call
                             viewModelScope.launch(Dispatchers.IO) {
@@ -3069,87 +3067,44 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             .replace("\u200B", "")
         if (cleanPayload.isBlank()) return ScannedUserResult.InvalidQr
 
-        // Extract publicId / username / raw identifier
-        val publicId = when {
-            cleanPayload.startsWith("KNOTLINK:USER:", ignoreCase = true) -> {
+        val userId = when {
+            cleanPayload.startsWith("KNOTLINK:USER:", ignoreCase = true) ->
                 cleanPayload.substringAfter("KNOTLINK:USER:", "").trim()
-            }
-            cleanPayload.startsWith("BITCHAT:USER:", ignoreCase = true) -> {
-                cleanPayload.substringAfter("BITCHAT:USER:", "").trim()
-            }
-            cleanPayload.startsWith("https://knotlink.app/u/", ignoreCase = true) -> {
-                cleanPayload.substringAfter("https://knotlink.app/u/", "").trim()
-            }
-            cleanPayload.startsWith("https://bitchat.app/u/", ignoreCase = true) -> {
-                cleanPayload.substringAfter("https://bitchat.app/u/", "").trim()
-            }
-            cleanPayload.startsWith("knotlink://user/", ignoreCase = true) -> {
-                cleanPayload.substringAfter("knotlink://user/", "").trim()
-            }
-            cleanPayload.startsWith("bitchat://user/", ignoreCase = true) -> {
-                cleanPayload.substringAfter("bitchat://user/", "").trim()
-            }
-            cleanPayload.startsWith("BC-", ignoreCase = true) || cleanPayload.startsWith("usr_", ignoreCase = true) || cleanPayload.startsWith("@") -> {
-                cleanPayload.removePrefix("@")
-            }
-            cleanPayload.length in 3..64 && !cleanPayload.contains(" ") -> {
-                cleanPayload
-            }
             else -> return ScannedUserResult.InvalidQr
         }
 
-        if (publicId.isBlank()) return ScannedUserResult.InvalidQr
-
-        // A QR scanner can preserve an outer wrapper or invisible character.
-        // If a canonical UUID appears anywhere in the payload, use that UUID
-        // directly instead of depending on the textual prefix parser.
-        val embeddedUuid = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
-            .find(cleanPayload)
-            ?.value
-        val canonicalPublicId = embeddedUuid ?: publicId
-
-        // UUID QR payloads are resolved directly against the canonical profile primary key.
-        // This avoids the text-search parser entirely for the one identifier that must be
-        // deterministic: Supabase Auth UUID.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        val profile: PublicUserProfile? = if (canonicalPublicId.matches(uuidRegex)) {
-            val supa = com.example.data.supabase.SupabaseService.getProfile(canonicalPublicId).getOrNull()
-            if (supa != null) {
-                PublicUserProfile(
-                    uid = supa.id,
-                    publicId = supa.publicId.ifBlank { supa.username.ifBlank { supa.id } },
-                    username = supa.username,
-                    displayName = supa.fullName.ifBlank { supa.username },
-                    avatarUrl = supa.avatarUrl,
-                    bio = supa.bio.ifBlank { "Verified KnotLink User" },
-                    profession = supa.profession.ifBlank { "✨ KnotLink Member" },
-                    mutualGroups = listOf("KnotLink Network"),
-                    avatarType = supa.avatarUrl?.ifBlank { "default" } ?: "default"
-                )
-            } else {
-                repository.searchUsers(canonicalPublicId, exactMatch = true).firstOrNull()
-            }
-        } else {
-            repository.searchUsers(publicId, exactMatch = true).firstOrNull()
-        }
-        if (profile != null) {
-            return ScannedUserResult.Success(
-                ScannedUser(
-                    publicId = profile.publicId.ifBlank { profile.uid },
-                    name = profile.displayName.ifBlank { profile.username },
-                    username = if (profile.username.startsWith("@")) profile.username else "@" + profile.username,
-                    bio = profile.bio,
-                    profession = profile.profession,
-                    mutualGroups = profile.mutualGroups.ifEmpty { listOf("KnotLink Network") },
-                    avatarType = profile.avatarType,
-                    avatarUrl = profile.avatarUrl,
-                    uid = profile.uid
-                )
-            )
-        }
-        return ScannedUserResult.UserNotFound
-    }
+        if (!uuidRegex.matches(userId)) return ScannedUserResult.InvalidQr
 
+        val supa = com.example.data.supabase.SupabaseService.getProfile(userId).getOrNull()
+            ?: return ScannedUserResult.UserNotFound
+
+        val profile = PublicUserProfile(
+            uid = supa.id,
+            publicId = supa.id,
+            username = supa.username,
+            displayName = supa.fullName.ifBlank { supa.username },
+            avatarUrl = supa.avatarUrl,
+            bio = supa.bio.ifBlank { "Verified KnotLink User" },
+            profession = supa.profession.ifBlank { "✨ KnotLink Member" },
+            mutualGroups = emptyList(),
+            avatarType = supa.avatarUrl?.ifBlank { "default" } ?: "default"
+        )
+
+        return ScannedUserResult.Success(
+            ScannedUser(
+                publicId = profile.uid,
+                name = profile.displayName.ifBlank { profile.username },
+                username = profile.username.trim().let { if (it.startsWith("@")) it else "@$it" },
+                bio = profile.bio,
+                profession = profile.profession,
+                mutualGroups = profile.mutualGroups,
+                avatarType = profile.avatarType,
+                avatarUrl = profile.avatarUrl,
+                uid = profile.uid
+            )
+        )
+    }
     suspend fun getOrCreateChatForScannedUser(scannedUser: ScannedUser): ChatEntity {
         val targetUid = scannedUser.uid.ifBlank { scannedUser.publicId }
         val targetName = scannedUser.name.ifBlank { "User" }

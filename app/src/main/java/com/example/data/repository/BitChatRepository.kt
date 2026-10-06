@@ -470,89 +470,32 @@ class BitChatRepository(val dao: BitChatDao) {
         myUsername: String,
         myEmail: String
     ): String? {
+        // Direct messaging is UUID-only. Display/search identifiers are never
+        // promoted to a message recipient because doing so can route to the
+        // wrong account when stale/local data is present.
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-        // 1. Direct check: if candidate is already a valid UUID and not self
-        val cleanCandidate = candidate.trim()
-        if (cleanCandidate.isNotBlank() && cleanCandidate.matches(uuidRegex) && !cleanCandidate.equals(currentUid, ignoreCase = true)) {
-            return cleanCandidate
+        val matchingContact = dao.getAllContactsList().firstOrNull { contact ->
+            contact.id.equals(candidate, ignoreCase = true) ||
+                contact.id.equals(chatId, ignoreCase = true)
         }
-
-        // 2. Build list of potential candidate identifiers
-        val candidateList = mutableListOf<String>()
-        if (candidate.isNotBlank()) {
-            candidateList.add(candidate.trim())
-            val stripped = candidate.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            if (stripped.isNotBlank()) candidateList.add(stripped)
+        val candidates = mutableListOf<String>()
+        fun addUuid(value: String?) {
+            val v = value?.trim().orEmpty()
+            if (v.matches(uuidRegex) && !v.equals(currentUid.trim(), ignoreCase = true)) candidates.add(v)
         }
+        addUuid(candidate)
+        addUuid(chatId)
+        existingChat?.participantUids
+            ?.split(",")
+            ?.forEach { addUuid(it) }
+        matchingContact?.let { addUuid(it.id) }
 
-        if (existingChat != null) {
-            val uids = existingChat.participantUids.split(",").map { it.trim() }.filter { 
-                it.isNotBlank() && 
-                !it.equals(currentUid, ignoreCase = true) && 
-                !it.equals(myUsername, ignoreCase = true) && 
-                !it.equals(myEmail, ignoreCase = true) 
-            }
-            candidateList.addAll(uids)
-            if (existingChat.name.isNotBlank() && !existingChat.name.startsWith("[Group]")) {
-                candidateList.add(existingChat.name.trim())
-            }
-        }
-
-        if (chatId.isNotBlank()) {
-            val cleanChat = chatId.removePrefix("chat_").removePrefix("user_").removePrefix("@").trim()
-            if (cleanChat.isNotBlank() && cleanChat != "global" && cleanChat != "bitassistant") {
-                candidateList.add(cleanChat)
-            }
-        }
-
-        // Try Room Contacts lookup
-        val matchingContact = dao.getAllContactsList().find { c ->
-            c.id.equals(candidate, ignoreCase = true) || 
-            c.id.equals(chatId, ignoreCase = true) || 
-            (existingChat != null && c.name.equals(existingChat.name, ignoreCase = true))
-        }
-        if (matchingContact != null) {
-            if (matchingContact.id.isNotBlank()) candidateList.add(matchingContact.id.trim())
-            if (matchingContact.name.isNotBlank()) candidateList.add(matchingContact.name.trim())
-        }
-
-        val distinctCandidates = candidateList.distinct().filter {
-            it.isNotBlank() &&
-            it != "global" &&
-            it != "bitassistant" &&
-            !it.equals(currentUid, ignoreCase = true) &&
-            !it.equals(myUsername, ignoreCase = true) &&
-            !it.equals(myEmail, ignoreCase = true)
-        }
-
-        // 3. Prefer local profile cache; hit Supabase only when cache misses
-        for (cand in distinctCandidates) {
-            if (cand.matches(uuidRegex)) {
-                val cached = getLocalProfile(cand)
-                if (cached?.id?.matches(uuidRegex) == true) return cached.id
-                return cand
-            }
-            val cached = getLocalProfile(cand)
+        // Prefer a locally cached UUID, but the UUID itself remains authoritative.
+        for (uid in candidates) {
+            val cached = getLocalProfile(uid)
             if (cached?.id?.matches(uuidRegex) == true) return cached.id
-
-            // Always try the canonical profile resolver first. A KnotLink username
-            // such as @drdoom.link contains both "@" and ".", so treating every
-            // dotted identifier as an email can silently lose the real UUID.
-            val prof = SupabaseService.getProfile(cand).getOrNull()
-                ?: SupabaseService.getProfileByUsername(cand).getOrNull()
-                ?: if (cand.contains("@")) {
-                    SupabaseService.getProfileByEmail(cand).getOrNull()
-                } else {
-                    null
-                }
-            if (prof != null && prof.id.isNotBlank() && prof.id.matches(uuidRegex)) {
-                cacheProfileLocally(prof)
-                return prof.id
-            }
+            return uid
         }
-
-        // No table-wide profile scan. Specific UID/email/username lookups above are sufficient.
         return null
     }
 
@@ -576,9 +519,33 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentTime = sdf.format(Date())
         val clientMsgId = existingClientMessageId ?: UUID.randomUUID().toString()
         val currentIdentity = dao.getUserIdentity().firstOrNull()
-        val currentUid = currentIdentity?.supabaseUid?.trim()
-            ?.ifBlank { currentIdentity.email?.trim().orEmpty() }
-            .orEmpty()
+        val currentUid = currentIdentity?.supabaseUid?.trim().orEmpty()
+        if (!isValidUuid(currentUid)) {
+            val failed = MessageEntity(
+                chatId = chatId,
+                senderName = senderName,
+                text = text,
+                timestampString = currentTime,
+                isFromUser = isFromUser,
+                isRead = false,
+                senderUid = "",
+                receiverUid = "",
+                clientMessageId = clientMsgId,
+                syncStatus = "FAILED",
+                deliveryState = "FAILED",
+                timestamp = System.currentTimeMillis(),
+                replyToMessageId = replyToMessageId,
+                replySnippet = replySnippet,
+                replySenderName = replySenderName,
+                isForwarded = isForwarded,
+                forwardedFromMessageId = forwardedFromMessageId,
+                messageType = messageType,
+                systemEventType = systemEventType,
+                mentionedUids = mentionedUids
+            )
+            dao.insertMessage(failed)
+            return failed
+        }
         // Do not throw here. A stale local identity can exist after an account/database reset;
         // the remote write will be rejected safely and the message will be marked FAILED.
         val mySenderName = if (isFromUser) {
@@ -649,7 +616,16 @@ class BitChatRepository(val dao: BitChatDao) {
             }
         }
 
-        val targetChatId = existingChat?.id ?: chatId
+        // For direct chats, the server-generated UUID chat is authoritative.
+        // Never write a new message against an old hash/username-derived chat id.
+        val canonicalDirectChatId = if (
+            isFromUser &&
+            !chatId.startsWith("group_") &&
+            otherParticipant.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+        ) {
+            SupabaseService.getOrCreateDirectChat(otherParticipant).getOrNull()
+        } else null
+        val targetChatId = canonicalDirectChatId ?: existingChat?.id ?: chatId
 
         val message = MessageEntity(
             chatId = targetChatId,
@@ -673,7 +649,22 @@ class BitChatRepository(val dao: BitChatDao) {
             systemEventType = systemEventType,
             mentionedUids = mentionedUids
         )
-        val localRowId = dao.insertMessage(message)
+        // Idempotency boundary: a retry with the same clientMessageId must reuse the
+        // existing optimistic Room row instead of creating a second local message.
+        val existingByClientId = dao.getMessageByServerOrClientId(null, clientMsgId)
+        val localRowId = if (existingByClientId != null) {
+            val merged = message.copy(
+                id = existingByClientId.id,
+                serverMessageId = existingByClientId.serverMessageId,
+                serverTimestamp = existingByClientId.serverTimestamp,
+                syncStatus = existingByClientId.syncStatus,
+                deliveryState = existingByClientId.deliveryState
+            )
+            dao.insertMessage(merged)
+            existingByClientId.id
+        } else {
+            dao.insertMessage(message)
+        }
 
         val previewText = if (messageType == "SYSTEM_EVENT") text else if (isForwarded) "↪️ Forwarded: $text" else text
         if (existingChat != null) {
@@ -716,19 +707,21 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         try {
-            val serverMsgId = "msg_" + UUID.randomUUID().toString().take(8)
             val serverTs = System.currentTimeMillis()
 
-            val syncedMessage = message.copy(
+            // Keep the optimistic row PENDING until the authoritative server write succeeds.
+            // A network/RLS failure must never appear as a successfully sent message.
+            val pendingMessage = message.copy(
                 id = localRowId,
-                serverMessageId = serverMsgId,
-                serverTimestamp = serverTs,
-                syncStatus = "SYNCED",
-                deliveryState = "SENT"
+                serverMessageId = "",
+                serverTimestamp = 0L,
+                syncStatus = "PENDING",
+                deliveryState = "SENDING"
             )
-            dao.insertMessage(syncedMessage)
+            dao.insertMessage(pendingMessage)
 
-            // Send to Supabase REST
+            // Send to Supabase RPC; the server creates the authoritative UUID message id.
+
             val remoteText = if (!replySnippet.isNullOrBlank() || !replySenderName.isNullOrBlank()) {
                 val encSender = java.net.URLEncoder.encode(replySenderName ?: "User", "UTF-8")
                 val encSnippet = java.net.URLEncoder.encode(replySnippet ?: "", "UTF-8")
@@ -738,7 +731,7 @@ class BitChatRepository(val dao: BitChatDao) {
             }
 
             val supaMsg = SupabaseMessage(
-                id = serverMsgId,
+                id = "",
                 chatId = targetChatId,
                 senderId = currentUid,
                 senderName = mySenderName,
@@ -749,7 +742,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 replyToId = replyToMessageId,
                 messageType = messageType,
                 isForwarded = isForwarded,
-                mediaUrl = if (messageType != "TEXT") text else currentIdentity?.avatarPath,
+                mediaUrl = if (messageType != "TEXT") text else null,
                 clientMsgId = clientMsgId
             )
 
@@ -767,13 +760,29 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.insertMessage(failedMessage)
                 return failedMessage
             }
-            val finalServerId = sendResult.id.ifBlank { serverMsgId }
+            val finalServerId = sendResult.id.trim()
+            if (finalServerId.isBlank()) {
+                val failedMessage = message.copy(
+                    id = localRowId,
+                    syncStatus = "FAILED",
+                    deliveryState = "FAILED"
+                )
+                dao.insertMessage(failedMessage)
+                return failedMessage
+            }
 
-            // Now that the authoritative write succeeded, notify the peer immediately.
-            SupabaseRealtimeManager.broadcastNewMessage(
-                sendResult.copy(id = finalServerId)
+            val syncedMessage = message.copy(
+                id = localRowId,
+                serverMessageId = finalServerId,
+                serverTimestamp = sendResult.timestamp,
+                syncStatus = "SYNCED",
+                deliveryState = "SENT"
             )
+            dao.insertMessage(syncedMessage)
 
+            // The database write is the authoritative event.
+            // Supabase Realtime postgres_changes delivers it to the recipient.
+            // Do not send a second custom broadcast: that would create duplicate messages.
             if (finalServerId.isNotBlank()) {
                 dao.updateMessageServerId(localRowId, clientMsgId, finalServerId)
             }
@@ -871,7 +880,7 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.markMessagesAsReadByServerIds(messageIds)
         val result = SupabaseService.markMessagesAsRead(chatId, messageIds)
         val reader = dao.getUserIdentity().firstOrNull()
-        val readerUid = reader?.supabaseUid?.ifBlank { reader.email }?.ifBlank { reader.username }.orEmpty()
+        val readerUid = reader?.supabaseUid?.trim().orEmpty()
         if (result.isSuccess && readerUid.isNotBlank()) {
             messageIds.forEach { serverId ->
                 val local = dao.findMessageByServerId(serverId)
@@ -917,16 +926,10 @@ class BitChatRepository(val dao: BitChatDao) {
         if (myUid.isBlank()) return
         try {
             val identity = dao.getUserIdentity().firstOrNull()
-            val calls = SupabaseService.getUserCallHistory(
-                userId = myUid,
-                username = myUsername.takeIf { it.isNotBlank() && it != myUid },
-                email = identity?.email?.takeIf { !it.isNullOrBlank() && it != myUid && it != myUsername },
-                limit = 100
-            ).getOrNull().orEmpty()
+            val calls = SupabaseService.getUserCallHistory(myUid).getOrNull().orEmpty()
 
             for (call in calls) {
-                val incoming = call.receiverId.equals(myUid, ignoreCase = true) ||
-                    call.receiverId.equals(myUsername, ignoreCase = true)
+                val incoming = call.receiverId.equals(myUid, ignoreCase = true)
 
                 val otherId = if (incoming) call.callerId else call.receiverId
                 val existingChat = dao.getAllChatsList().firstOrNull { chat ->
@@ -1095,8 +1098,18 @@ class BitChatRepository(val dao: BitChatDao) {
         val cleanOpponentUid = opponentUid.trim()
         val cleanOpponentName = opponentName.trim()
 
+        // V2 direct chats are server-generated UUIDs. Resolve the canonical chat once
+        // when opening the conversation; never derive chat identity from username/hash.
+        val resolvedCanonicalChatId = if (
+            cleanOpponentUid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+        ) {
+            SupabaseService.getOrCreateDirectChat(cleanOpponentUid).getOrNull() ?: chatId
+        } else {
+            chatId
+        }
+
         // 1. Direct ID match
-        val byId = allChats.find { it.id == chatId }
+        val byId = allChats.find { it.id == resolvedCanonicalChatId }
         if (byId != null) {
             val isCurrentNameUgly = byId.name.isBlank() || 
                 byId.name == "Contact" || 
@@ -1150,7 +1163,7 @@ class BitChatRepository(val dao: BitChatDao) {
         // 3. Create new canonical ChatEntity
         val sortedUids = listOf(myUid, cleanOpponentUid).filter { it.isNotBlank() }.distinct().sorted()
         val newChat = ChatEntity(
-            id = chatId,
+            id = resolvedCanonicalChatId,
             name = opponentName.ifBlank { "Contact" },
             lastMessage = "",
             timeString = "Just now",
@@ -1263,18 +1276,15 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         // 1. Check if message was sent BY ME
-        val isFromMe = supaMsg.senderId == myUid ||
-            (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
-            (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
-            (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true))
+        // Sender identity is canonical Auth UUID only.
+        val isFromMe = supaMsg.senderId.equals(myUid, ignoreCase = true)
 
         if (isFromMe) {
             val clientKey = supaMsg.clientMsgId ?: ""
+            // Realtime/history reconciliation is strictly ID-based. Never match a
+            // message by text/time: two legitimate identical messages are allowed.
             val existingLocal = dao.findMessageByServerId(supaMsg.id)
-                ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
-                ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-                ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
+                ?: if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null
 
             val updatedEntity = if (existingLocal != null) {
                 existingLocal.copy(
@@ -1294,19 +1304,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingLocal.pinnedAt
                 )
             } else {
-                val pendingRecent = dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-                if (pendingRecent != null) {
-                    pendingRecent.copy(
-                        serverMessageId = supaMsg.id,
-                        syncStatus = "SYNCED",
-                        deliveryState = when {
-                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
-                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
-                        else -> "SENT"
-                    }
-                    )
-                } else {
-                    MessageEntity(
+                MessageEntity(
                         chatId = supaMsg.chatId,
                         senderName = "You",
                         text = msgText,
@@ -1326,7 +1324,6 @@ class BitChatRepository(val dao: BitChatDao) {
                         replySenderName = replySenderName
                     )
                 }
-            }
             dao.insertMessage(updatedEntity)
 
             var resolvedOpponentName = ""
@@ -1372,20 +1369,12 @@ class BitChatRepository(val dao: BitChatDao) {
 
         val myFullName = currentIdentity?.fullName?.trim()?.lowercase() ?: ""
 
-        val isDirectRecipient = (
-            supaMsg.receiverId.isBlank() ||
-            supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
-            (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
-            (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-            (myFullName.isNotBlank() && supaMsg.receiverId.equals(myFullName, ignoreCase = true)) ||
-            (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
-        )
+        // Direct message routing is UUID-only. Blank/username/email/name recipients are
+        // legacy data and must never be treated as a valid recipient.
+        val isDirectRecipient = supaMsg.receiverId.isNotBlank() &&
+            supaMsg.receiverId.equals(myUid, ignoreCase = true)
 
-        val existingChatById = dao.getChatById(supaMsg.chatId)
-        val isChatParticipant = existingChatById != null ||
-            (supaMsg.senderId.isNotBlank() && dao.getAllContactsList().any { it.id == supaMsg.senderId || it.name.equals(supaMsg.senderName, ignoreCase = true) })
-
-        if (!isGroupOrBroadcast && !isDirectRecipient && !isChatParticipant) {
+        if (!isGroupOrBroadcast && !isDirectRecipient) {
             Log.d("BitChatRepo", "Ignoring 3rd party message not addressed to me: receiver=${supaMsg.receiverId}, sender=${supaMsg.senderId}")
             return MessageEntity(
                 id = 0L,
@@ -1399,18 +1388,29 @@ class BitChatRepository(val dao: BitChatDao) {
 
         // Existing message check (to prevent duplicate insertions)
         val clientKey = supaMsg.clientMsgId ?: ""
+        // Strict server/client ID idempotency. Content/time matching can collapse
+        // two different messages with identical text and is therefore forbidden.
         val existingIncoming = dao.findMessageByServerId(supaMsg.id)
-            ?: (if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null)
-            ?: dao.findExistingMessage(supaMsg.chatId, msgText, timeStr)
-            ?: dao.findRecentMessage(supaMsg.chatId, msgText, supaMsg.timestamp)
-            ?: dao.findRecentMessage(supaMsg.chatId, supaMsg.text, supaMsg.timestamp)
+            ?: if (clientKey.isNotBlank()) dao.getMessageByServerOrClientId(supaMsg.id, clientKey) else null
 
         if (existingIncoming != null) {
+            val remoteState = when {
+                supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                else -> "SENT"
+            }
+            val localState = existingIncoming.deliveryState.ifBlank { "SENT" }
+            val monotonicState = when {
+                localState == "READ" || remoteState == "READ" -> "READ"
+                localState == "DELIVERED" || remoteState == "DELIVERED" -> "DELIVERED"
+                else -> "SENT"
+            }
             val updated = existingIncoming.copy(
                 serverMessageId = supaMsg.id,
                 syncStatus = "SYNCED",
                 text = msgText,
-                isRead = existingIncoming.isRead || supaMsg.isRead,
+                isRead = existingIncoming.isRead || supaMsg.isRead || monotonicState == "READ",
+                deliveryState = monotonicState,
                 isEdited = supaMsg.isEdited,
                 isDeletedForEveryone = supaMsg.isDeletedForEveryone,
                 isPinned = supaMsg.isPinned,
@@ -1418,6 +1418,13 @@ class BitChatRepository(val dao: BitChatDao) {
                 pinnedAt = if (supaMsg.isPinned) supaMsg.timestamp else existingIncoming.pinnedAt
             )
             dao.insertMessage(updated)
+
+            // Even duplicate delivery events must be acknowledged server-side.
+            // This makes delivery idempotent and allows recovery if the first
+            // acknowledgement was lost during reconnect.
+            if (supaMsg.id.isNotBlank() && !supaMsg.isRead) {
+                try { SupabaseService.markMessageDelivered(supaMsg.id) } catch (_: Exception) {}
+            }
 
             // Update local pinned_messages table
             if (supaMsg.isPinned) {
@@ -1561,53 +1568,48 @@ class BitChatRepository(val dao: BitChatDao) {
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
             val historyEmail = myEmail.takeIf { it.isNotBlank() && it != myUid && it != myUsername }
 
-            // Always fetch a recent server window when the app returns from a long
-            // background/closed period. This is the recovery path when an FCM data
-            // message was delayed, dropped, or the service process was killed.
-            // Import the complete account history in pages. Never use a fixed
-            // "latest 500" window as the user's permanent history.
-            val historyPageSize = 500
-            var historyOffset = 0
-            while (true) {
-                val pageRes = SupabaseService.fetchUserMessages(
-                    userId = myUid,
-                    username = historyUsername,
-                    email = historyEmail,
-                    limit = historyPageSize,
-                    offset = historyOffset
-                )
-                if (pageRes.isFailure) {
-                    Log.w("BitChatRepo", "History page failed at offset $historyOffset")
-                    return@withLock false
-                }
-                val page = pageRes.getOrNull().orEmpty()
-                fetchedMessages.addAll(page)
-                if (page.size < historyPageSize) break
-                historyOffset += historyPageSize
-            }
-
-            // Also fetch the incremental window with a small overlap so timestamp
-            // boundaries and delayed delivery cannot leave a permanent hole.
-            if (previousSync > 0L) {
-                val sincePageSize = 500
-                var sinceOffset = 0
+            // Bootstrap once, then recover only the incremental window.
+            // Re-fetching the complete account history on every 30-second sync
+            // defeats Room caching and unnecessarily consumes Supabase egress.
+            val pageSize = 500
+            if (previousSync <= 0L) {
+                var offset = 0
                 while (true) {
-                    val sinceRes = SupabaseService.fetchUserMessagesSince(
+                    val pageRes = SupabaseService.fetchUserMessages(
+                        userId = myUid,
+                        username = historyUsername,
+                        email = historyEmail,
+                        limit = pageSize,
+                        offset = offset
+                    )
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Initial history page failed at offset $offset")
+                        return@withLock false
+                    }
+                    val page = pageRes.getOrNull().orEmpty()
+                    fetchedMessages.addAll(page)
+                    if (page.size < pageSize) break
+                    offset += pageSize
+                }
+            } else {
+                var offset = 0
+                while (true) {
+                    val pageRes = SupabaseService.fetchUserMessagesSince(
                         userId = myUid,
                         username = historyUsername,
                         email = historyEmail,
                         sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
-                        limit = sincePageSize,
-                        offset = sinceOffset
+                        limit = pageSize,
+                        offset = offset
                     )
-                    if (sinceRes.isFailure) {
-                        Log.w("BitChatRepo", "Incremental history page failed at offset $sinceOffset")
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Incremental history page failed at offset $offset")
                         return@withLock false
                     }
-                    val page = sinceRes.getOrNull().orEmpty()
+                    val page = pageRes.getOrNull().orEmpty()
                     fetchedMessages.addAll(page)
-                    if (page.size < sincePageSize) break
-                    sinceOffset += sincePageSize
+                    if (page.size < pageSize) break
+                    offset += pageSize
                 }
             }
 
@@ -1642,16 +1644,10 @@ class BitChatRepository(val dao: BitChatDao) {
             val existingChatMap = existingChats.associateBy { it.id }.toMutableMap()
 
             for (supaMsg in uniqueMessages) {
-                val isSentByMe = supaMsg.senderId == myUid ||
-                        (myUsername.isNotBlank() && supaMsg.senderId.equals(myUsername, ignoreCase = true)) ||
-                        (myEmail.isNotBlank() && supaMsg.senderId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.senderId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName)
-
-                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true) ||
-                        (myUsername.isNotBlank() && supaMsg.receiverId.equals(myUsername, ignoreCase = true)) ||
-                        (myEmail.isNotBlank() && supaMsg.receiverId.equals(myEmail, ignoreCase = true)) ||
-                        (myCleanName.isNotBlank() && myCleanName != "user" && myCleanName != "me" && supaMsg.receiverId.trim().removePrefix("@").lowercase().removeSuffix(".link") == myCleanName) ||
-                        existingChatMap.containsKey(supaMsg.chatId)
+                // Direct message ownership is UUID-only. Username/email/name and
+                // an existing local chat are never valid routing fallbacks.
+                val isSentByMe = supaMsg.senderId.equals(myUid, ignoreCase = true)
+                val isReceivedByMe = supaMsg.receiverId.equals(myUid, ignoreCase = true)
 
                 if (!isSentByMe && !isReceivedByMe) continue
 
@@ -1733,6 +1729,17 @@ class BitChatRepository(val dao: BitChatDao) {
                         )
                     }
                 } else {
+                    // Reconcile server delivery/read state without ever regressing a
+                    // stronger local state (READ > DELIVERED > SENT).
+                    val remoteState = when {
+                        supaMsg.isRead || supaMsg.status.equals("READ", ignoreCase = true) -> "READ"
+                        supaMsg.status.equals("DELIVERED", ignoreCase = true) -> "DELIVERED"
+                        else -> "SENT"
+                    }
+                    if (supaMsg.id.isNotBlank()) {
+                        dao.updateMessageDeliveryStateByServerId(supaMsg.id, remoteState)
+                    }
+
                     // Real-time update for edits
                     if (supaMsg.text != existing.text || supaMsg.isEdited != existing.isEdited) {
                         dao.updateMessageTextWithRowId(existing.id, supaMsg.id, msgText, System.currentTimeMillis())
@@ -1870,7 +1877,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 dao.insertChats(chatsToUpdate.values.toList())
             }
 
-            val latestRemoteTimestamp = uniqueMessages.maxOfOrNull { it.timestamp } ?: previousSync
+            val latestRemoteTimestamp = uniqueMessages.maxOfOrNull { it.updatedAt } ?: previousSync
             if (latestRemoteTimestamp > previousSync) {
                 dao.upsertSyncState(SyncStateEntity(syncKey, latestRemoteTimestamp))
             }
@@ -1901,7 +1908,7 @@ class BitChatRepository(val dao: BitChatDao) {
             if (res.isSuccess) {
                 val messages = res.getOrNull().orEmpty()
                 for (supaMsg in messages) handleIncomingMessage(supaMsg, chatId)
-                val newest = messages.maxOfOrNull { it.timestamp } ?: latestLocal
+                val newest = messages.maxOfOrNull { it.updatedAt } ?: latestLocal
                 if (newest > latestLocal) {
                     dao.upsertSyncState(SyncStateEntity("chat:$chatId", newest))
                 }
@@ -2075,9 +2082,20 @@ class BitChatRepository(val dao: BitChatDao) {
     ): String {
         val bytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("Cannot read file")
-        val ext = if (mimeType.contains("png")) "png" else "jpg"
-        val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.$ext"
-        return SupabaseService.uploadChatMedia(fileName, bytes, mimeType).getOrThrow()
+        val ext = when {
+            mimeType.contains("png", ignoreCase = true) -> "png"
+            mimeType.contains("webp", ignoreCase = true) -> "webp"
+            mimeType.contains("gif", ignoreCase = true) -> "gif"
+            mimeType.contains("mp4", ignoreCase = true) -> "mp4"
+            mimeType.contains("webm", ignoreCase = true) -> "webm"
+            mimeType.contains("mpeg", ignoreCase = true) || mimeType.contains("mp3", ignoreCase = true) -> "mp3"
+            mimeType.contains("ogg", ignoreCase = true) -> "ogg"
+            mimeType.contains("wav", ignoreCase = true) -> "wav"
+            mimeType.contains("pdf", ignoreCase = true) -> "pdf"
+            else -> "bin"
+        }
+        val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.${ext}"
+        return SupabaseService.uploadChatMedia(chatId, fileName, bytes, mimeType).getOrThrow()
     }
 
     suspend fun createGroupChat(

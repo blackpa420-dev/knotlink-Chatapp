@@ -1,0 +1,1 @@
+{"imports":{"@supabase/server":"npm:@supabase/server@1","@aws-sdk/client-s3":"npm:@aws-sdk/client-s3","@aws-sdk/s3-request-presigner":"npm:@aws-sdk/s3-request-presigner"}}

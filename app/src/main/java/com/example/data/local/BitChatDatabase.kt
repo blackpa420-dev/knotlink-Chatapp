@@ -21,13 +21,23 @@ import androidx.room.RoomDatabase
         CachedProfileEntity::class,
         SyncStateEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 abstract class BitChatDatabase : RoomDatabase() {
     abstract fun bitChatDao(): BitChatDao
 
     companion object {
+    private val MIGRATION_14_15 = object : androidx.room.migration.Migration(14, 15) {
+        override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            // Durable local idempotency boundary: one authoritative server UUID
+            // can exist only once in Room. NULL remains allowed for optimistic rows.
+            db.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_messages_serverMessageId_unique ON messages(serverMessageId) WHERE serverMessageId IS NOT NULL AND serverMessageId != ''"
+            )
+        }
+    }
+
     private val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
         override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
             db.execSQL(
@@ -52,7 +62,7 @@ abstract class BitChatDatabase : RoomDatabase() {
                         BitChatDatabase::class.java,
                         "bitchat_database"
                     )
-                    .addMigrations(MIGRATION_13_14)
+                     .addMigrations(MIGRATION_13_14, MIGRATION_14_15)
                     // Older builds existed without a complete migration chain.
                     // Rebuild only from legacy starting versions instead of crashing.
                     .fallbackToDestructiveMigrationFrom(false, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
