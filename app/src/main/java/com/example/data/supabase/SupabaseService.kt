@@ -54,6 +54,21 @@ object SupabaseService {
         }
     }
 
+    private suspend fun hydrateProfileMedia(profile: SupabaseProfile): SupabaseProfile {
+        val raw = profile.avatarUrl?.trim().orEmpty()
+        if (raw.isBlank() || raw.startsWith("http://") || raw.startsWith("https://") || raw.startsWith("/")) {
+            return profile
+        }
+        return try {
+            val signed = com.example.data.cloudflare.CloudflareR2Service
+                .getDownloadUrl(raw, "image/*")
+                .getOrNull()
+            if (signed.isNullOrBlank()) profile else profile.copy(avatarUrl = signed)
+        } catch (_: Throwable) {
+            profile
+        }
+    }
+
     private var currentSession: SupabaseAuthSession? = null
     private var prefs: android.content.SharedPreferences? = null
     private val sessionRefreshLock = Any()
@@ -631,7 +646,7 @@ object SupabaseService {
                 }
                 val arr = JSONArray(responseBody)
                 if (arr.length() == 0) return@withContext Result.success(null)
-                val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
                 cacheProfile(profile)
                 Result.success(profile)
             }
@@ -712,7 +727,7 @@ object SupabaseService {
                 }
                 val arr = JSONArray(responseBody)
                 if (arr.length() == 0) return@withContext Result.success(null)
-                val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
                 cacheProfile(profile)
                 Result.success(profile)
             }
@@ -752,7 +767,7 @@ object SupabaseService {
                 val list = mutableListOf<SupabaseProfile>()
                 val seen = mutableSetOf<String>()
                 for (i in 0 until arr.length()) {
-                    val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
+                    val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(i)))
                     if (profile.id.isNotBlank() && seen.add(profile.id)) {
                         cacheProfile(profile)
                         list.add(profile)
