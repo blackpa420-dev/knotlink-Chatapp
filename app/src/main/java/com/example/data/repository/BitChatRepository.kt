@@ -742,7 +742,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 replyToId = replyToMessageId,
                 messageType = messageType,
                 isForwarded = isForwarded,
-                mediaUrl = if (messageType != "TEXT") text else currentIdentity?.avatarPath,
+                mediaUrl = if (messageType != "TEXT") text else null,
                 clientMsgId = clientMsgId
             )
 
@@ -2082,8 +2082,19 @@ class BitChatRepository(val dao: BitChatDao) {
     ): String {
         val bytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("Cannot read file")
-        val ext = if (mimeType.contains("png")) "png" else "jpg"
-        val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.$ext"
+        val ext = when {
+            mimeType.contains("png", ignoreCase = true) -> "png"
+            mimeType.contains("webp", ignoreCase = true) -> "webp"
+            mimeType.contains("gif", ignoreCase = true) -> "gif"
+            mimeType.contains("mp4", ignoreCase = true) -> "mp4"
+            mimeType.contains("webm", ignoreCase = true) -> "webm"
+            mimeType.contains("mpeg", ignoreCase = true) || mimeType.contains("mp3", ignoreCase = true) -> "mp3"
+            mimeType.contains("ogg", ignoreCase = true) -> "ogg"
+            mimeType.contains("wav", ignoreCase = true) -> "wav"
+            mimeType.contains("pdf", ignoreCase = true) -> "pdf"
+            else -> "bin"
+        }
+        val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.${ext}"
         return SupabaseService.uploadChatMedia(chatId, fileName, bytes, mimeType).getOrThrow()
     }
 
