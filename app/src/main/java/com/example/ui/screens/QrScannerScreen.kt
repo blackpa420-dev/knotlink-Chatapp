@@ -322,26 +322,39 @@ fun QrScannerScreen(
                                     if (analyzedFrameCount == 1 || analyzedFrameCount % 30 == 0) {
                                         Log.d("KnotLinkQR", "Analyzer frame=$analyzedFrameCount format=${imageProxy.format} size=${imageProxy.width}x${imageProxy.height} rotation=${imageProxy.imageInfo.rotationDegrees}")
                                     }
-                                    val qrResult = processImageProxy(imageProxy, reader)
-                                    if (qrResult != null && isScanningActive) {
-                                        Log.i("KnotLinkQR", "QR decoded payloadLength=${qrResult.length} payload=${qrResult.take(120)}")
-                                        isScanningActive = false
-                                        scope.launch(Dispatchers.Main) {
-                                            handleQrCodeText(
-                                                rawPayload = qrResult,
-                                                viewModel = viewModel,
-                                                onSuccess = { userResult ->
-                                                    scannedUser = userResult
-                                                },
-                                                onError = { errorMsg ->
-                                                    Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
-                                                    scope.launch {
-                                                        kotlinx.coroutines.delay(2000)
-                                                        isScanningActive = true
-                                                    }
+                                    try {
+                                        val qrResult = processImageProxy(imageProxy, reader)
+                                        if (qrResult != null) {
+                                            Log.i("KnotLinkQR", "QR decoded payloadLength=${qrResult.length} payload=${qrResult.take(120)}")
+                                            scope.launch(Dispatchers.Main) {
+                                                if (!isScanningActive) return@launch
+                                                isScanningActive = false
+                                                try {
+                                                    handleQrCodeText(
+                                                        rawPayload = qrResult,
+                                                        viewModel = viewModel,
+                                                        onSuccess = { userResult ->
+                                                            Log.i("KnotLinkQR", "Profile resolved successfully uid=${userResult.uid} username=${userResult.username}")
+                                                            scannedUser = userResult
+                                                        },
+                                                        onError = { errorMsg ->
+                                                            Log.w("KnotLinkQR", "QR resolution failed: $errorMsg")
+                                                            Toast.makeText(context, errorMsg, Toast.LENGTH_SHORT).show()
+                                                            scope.launch {
+                                                                kotlinx.coroutines.delay(1200)
+                                                                isScanningActive = true
+                                                            }
+                                                        }
+                                                    )
+                                                } catch (e: Throwable) {
+                                                    Log.e("KnotLinkQR", "QR resolution crashed", e)
+                                                    Toast.makeText(context, "Could not read this KnotLink QR. Please try again.", Toast.LENGTH_SHORT).show()
+                                                    isScanningActive = true
                                                 }
-                                            )
+                                            }
                                         }
+                                    } catch (e: Throwable) {
+                                        Log.e("KnotLinkQR", "QR frame processing crashed", e)
                                     }
                                     imageProxy.close()
                                 }
