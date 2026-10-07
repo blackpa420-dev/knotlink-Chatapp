@@ -769,36 +769,44 @@ object SupabaseService {
         }
     }
 
-    /** Dedicated QR profile lookup: UUID -> profiles.id. */
+    /** Dedicated QR profile lookup through the narrow public UUID RPC. */
     suspend fun lookupQrProfileByUuid(userId: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
         try {
             val raw = userId.trim()
             val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
             if (!uuidRegex.matches(raw)) return@withContext Result.failure(Exception("Invalid QR UUID"))
-            val session = ensureAuthenticatedSession().getOrElse { error ->
-                Log.e(TAG, "lookupQrProfileByUuid($raw): no authenticated session", error)
-                return@withContext Result.failure(error)
-            }
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=id,username,full_name,avatar_url,bio,profession&limit=1"
-            val request = Request.Builder().url(url)
+
+            val body = JSONObject().apply { put("p_user_id", raw) }
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/lookup_qr_profile")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${session.accessToken}")
-                .get().build()
+                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+
             httpClient.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    Log.e(TAG, "lookupQrProfileByUuid($raw): HTTP ${response.code} body=$body")
+                    Log.e(TAG, "lookupQrProfileByUuid($raw): RPC HTTP ${response.code} body=$responseBody")
                     return@withContext Result.failure(Exception("QR profile lookup failed: HTTP ${response.code}"))
                 }
-                val rows = JSONArray(body)
-                if (rows.length() == 0) return@withContext Result.success(null)
-                val profile = SupabaseProfile.fromJson(rows.getJSONObject(0))
+
+                val rows = JSONArray(responseBody)
+                if (rows.length() == 0) {
+                    Log.w(TAG, "lookupQrProfileByUuid($raw): RPC returned no profile")
+                    return@withContext Result.success(null)
+                }
+
+                val profile = SupabaseProfile.fromJson(rows.getJSONObject(0)).copy(
+                    bio = "KnotLink User"
+                )
                 cacheProfile(profile)
-                Log.i(TAG, "lookupQrProfileByUuid($raw): FOUND id=${profile.id} username=${profile.username} avatar=${!profile.avatarUrl.isNullOrBlank()}")
+                Log.i(TAG, "lookupQrProfileByUuid($raw): RPC FOUND id=${profile.id} username=${profile.username} avatar=${!profile.avatarUrl.isNullOrBlank()}")
                 Result.success(profile)
             }
         } catch (e: Throwable) {
-            Log.e(TAG, "lookupQrProfileByUuid($userId): exception", e)
+            Log.e(TAG, "lookupQrProfileByUuid($userId): RPC exception", e)
             Result.failure(e)
         }
     }
