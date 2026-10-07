@@ -3191,63 +3191,37 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         return repository.uploadMedia(chatId, fileUri, mimeType, context = context, onProgress = onProgress)
     }
 
+    /** Canonical QR lookup: UUID -> profiles.id -> public profile. */
     suspend fun resolveScannedUser(rawQrPayload: String): ScannedUserResult {
-        val cleanPayload = rawQrPayload.trim()
-            .replace("\uFEFF", "")
-            .replace("\u200B", "")
-        if (cleanPayload.isBlank()) return ScannedUserResult.InvalidQr
-
-        // Accept the current canonical payload plus safe legacy/link forms.
-        // UUID remains the only internal identity key; username is never used
-        // as the routing identifier.
+        val userId = rawQrPayload.trim().replace("\uFEFF", "").replace("\u200B", "")
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        val userId = when {
-            cleanPayload.startsWith("KNOTLINK:USER:", ignoreCase = true) ->
-                cleanPayload.substringAfter("KNOTLINK:USER:", "").trim()
-            cleanPayload.startsWith("knotlink://user/", ignoreCase = true) ->
-                cleanPayload.substringAfter("knotlink://user/", "").trim()
-            uuidRegex.matches(cleanPayload) -> cleanPayload
-            else -> return ScannedUserResult.InvalidQr
+        if (!uuidRegex.matches(userId)) {
+            Log.w("KnotLinkQR", "QR rejected: payload is not a canonical UUID: $userId")
+            return ScannedUserResult.InvalidQr
         }
-
-        if (!uuidRegex.matches(userId)) return ScannedUserResult.InvalidQr
-
-        // Profile metadata is Room-first. Supabase is contacted only when
-        // this UUID is not already cached locally.
-        val supa = repository.getProfileCachedFirst(userId)
-            ?: SupabaseService.getProfileFresh(userId).getOrNull()?.also {
-                android.util.Log.i("KnotLinkQR", "Fresh profile fallback resolved UUID=\$userId username=\${it.username}")
-            }
-            ?: run {
-                android.util.Log.w("KnotLinkQR", "Decoded UUID has no cached/remote profile row: \$userId")
+        return try {
+            Log.i("KnotLinkQR", "QR lookup START uuid=$userId")
+            val profile = SupabaseService.lookupQrProfileByUuid(userId).getOrElse { error ->
+                Log.e("KnotLinkQR", "QR lookup FAILED uuid=$userId error=${error.message}", error)
                 return ScannedUserResult.UserNotFound
             }
-
-        val profile = PublicUserProfile(
-            uid = supa.id,
-            publicId = supa.id,
-            username = supa.username,
-            displayName = supa.fullName.ifBlank { supa.username },
-            avatarUrl = supa.avatarUrl,
-            bio = supa.bio.ifBlank { "Verified KnotLink User" },
-            profession = supa.profession.ifBlank { "✨ KnotLink Member" },
-            mutualGroups = emptyList(),
-            avatarType = supa.avatarUrl?.ifBlank { "default" } ?: "default"
-        )
-
-        return ScannedUserResult.Success(
-            ScannedUser(
-                publicId = profile.uid,
-                name = profile.displayName.ifBlank { profile.username },
-                username = profile.username.trim().let { if (it.startsWith("@")) it else "@$it" },
-                bio = profile.bio,
-                profession = profile.profession,
-                mutualGroups = profile.mutualGroups,
-                avatarType = profile.avatarType,
-                avatarUrl = profile.avatarUrl,
-                uid = profile.uid
-            )
-        )
+            if (profile == null) {
+                Log.w("KnotLinkQR", "QR lookup NOT_FOUND uuid=$userId")
+                return ScannedUserResult.UserNotFound
+            }
+            val username = profile.username.trim().let { if (it.startsWith("@")) it else "@$it" }.takeIf { it != "@" } ?: "@user"
+            val displayName = profile.fullName.trim().ifBlank { username }
+            Log.i("KnotLinkQR", "QR lookup SUCCESS uuid=${profile.id} name=$displayName username=$username avatar=${profile.avatarUrl?.isNotBlank() == true}")
+            ScannedUserResult.Success(ScannedUser(
+                publicId = profile.id, name = displayName, username = username,
+                bio = profile.bio.ifBlank { "KnotLink User" }, profession = profile.profession,
+                mutualGroups = emptyList(), avatarType = profile.avatarUrl?.ifBlank { "default" } ?: "default",
+                avatarUrl = profile.avatarUrl, uid = profile.id
+            ))
+        } catch (e: Throwable) {
+            Log.e("KnotLinkQR", "QR lookup CRASHED uuid=$userId", e)
+            ScannedUserResult.UserNotFound
+        }
     }
     suspend fun getOrCreateChatForScannedUser(scannedUser: ScannedUser): ChatEntity {
         val targetUid = scannedUser.uid.ifBlank { scannedUser.publicId }
