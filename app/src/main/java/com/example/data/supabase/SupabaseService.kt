@@ -769,6 +769,54 @@ object SupabaseService {
         }
     }
 
+    /**
+     * Authoritative profile read for authentication/account-state decisions.
+     * This intentionally bypasses the short-lived in-memory profile cache so a
+     * stale pre-completion profile can never make a completed account look incomplete.
+     */
+    suspend fun getProfileFresh(userId: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
+        try {
+            val raw = userId.trim()
+            if (raw.isBlank()) return@withContext Result.success(null)
+
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!raw.matches(uuidRegex)) return@withContext Result.success(null)
+
+            val session = ensureAuthenticatedSession().getOrElse {
+                Log.w(TAG, "getProfileFresh($raw): authenticated session unavailable: ${it.message}")
+                return@withContext Result.failure(it)
+            }
+
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${session.accessToken}")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "getProfileFresh($raw): HTTP ${response.code}")
+                    return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
+                }
+                val arr = JSONArray(responseBody)
+                if (arr.length() == 0) {
+                    Log.w(TAG, "getProfileFresh($raw): profile row not found")
+                    return@withContext Result.success(null)
+                }
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                cacheProfile(profile)
+                Log.d(TAG, "getProfileFresh($raw): resolved username=${profile.username}")
+                Result.success(profile)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getProfileFresh($userId)", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun getProfile(userId: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
         try {
             val raw = userId.trim()
