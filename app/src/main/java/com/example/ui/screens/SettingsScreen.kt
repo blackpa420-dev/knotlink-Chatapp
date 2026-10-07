@@ -179,9 +179,29 @@ fun SettingsScreen(
         resolvedAvatarPath = viewModel.resolveAvatarDisplayUrl(user?.avatarPath)
     }
 
-    val publicId = user?.publicId ?: "user_001"
+    // QR identity is always the authenticated Supabase UUID. Never fall back to a
+    // legacy/public id because QRCodeGenerator intentionally rejects non-UUID identities.
+    val publicId = user?.supabaseUid?.trim().orEmpty()
+    val displayUsername = user?.username
+        ?.trim()
+        ?.let { raw ->
+            val normalized = raw.removePrefix("@")
+            if (normalized.isBlank()) "" else "@$normalized"
+        }
+        .orEmpty()
+
     val cachedQrBitmap = remember(publicId, context) {
-        QRCodeGenerator.generateProfileQRCode(userId = publicId, context = context, size = 512)
+        if (publicId.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"))) {
+            runCatching {
+                QRCodeGenerator.generateProfileQRCode(
+                    userId = publicId,
+                    context = context,
+                    size = 512
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
     }
 
     LaunchedEffect(isQrVisible, qrCountdownSeconds) {
@@ -746,7 +766,7 @@ fun SettingsScreen(
     }
 
     // Zoomed-in QR Code Modal Dialog
-    if (isQrVisible) {
+    if (isQrVisible && cachedQrBitmap != null) {
         Dialog(onDismissRequest = { isQrVisible = false }) {
             Surface(
                 shape = RoundedCornerShape(28.dp),
@@ -826,7 +846,7 @@ fun SettingsScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "KNOTLINK:USER:$publicId",
+                        text = displayUsername.ifBlank { "KnotLink" },
                         color = Color(0xFF2563EB),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
