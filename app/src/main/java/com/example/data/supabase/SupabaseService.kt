@@ -111,6 +111,7 @@ object SupabaseService {
         }
         .build()
 
+    @Synchronized
     fun init(context: android.content.Context) {
         applicationContext = context.applicationContext
         if (prefs == null) {
@@ -119,9 +120,24 @@ object SupabaseService {
                 android.content.Context.MODE_PRIVATE
             )
         }
+
+        // Auth persistence is process-wide. Every auth consumer (login, QR,
+        // messaging, calls, R2) must initialize the same durable store before
+        // reading or writing a session.
         if (currentSession == null) {
             restoreSession()
         }
+
+        val hasAccessToken = !prefs?.getString("access_token", null).isNullOrBlank()
+        val hasRefreshToken = !prefs?.getString("refresh_token", null).isNullOrBlank()
+        val persistedUid = prefs?.getString("user_id", null).orEmpty()
+        Log.d(
+            TAG,
+            "Auth store initialized: persistedUid=" + persistedUid.ifBlank { "<none>" } +
+                ", hasAccessToken=" + hasAccessToken +
+                ", hasRefreshToken=" + hasRefreshToken +
+                ", memorySession=" + (currentSession != null)
+        )
     }
 
     private fun ensureInitialized() {
@@ -242,7 +258,11 @@ object SupabaseService {
     }
 
     private fun persistSession(session: SupabaseAuthSession?) {
-        val editor = prefs?.edit() ?: return
+        if (prefs == null) {
+            Log.e(TAG, "Auth session persistence skipped: SupabaseService.init(context) was not called")
+            return
+        }
+        val editor = prefs.edit()
         if (session != null &&
             session.accessToken.isNotBlank() &&
             session.accessToken != SupabaseConfig.ANON_KEY &&
@@ -252,11 +272,17 @@ object SupabaseService {
             editor.putString("refresh_token", session.refreshToken)
             editor.putString("user_id", session.user?.id)
             editor.putString("user_email", session.user?.email)
+            Log.d(
+                TAG,
+                "Persisted authenticated session: uid=" + session.user?.id +
+                    ", hasRefreshToken=" + !session.refreshToken.isNullOrBlank()
+            )
         } else if (session == null) {
             editor.remove("access_token")
             editor.remove("refresh_token")
             editor.remove("user_id")
             editor.remove("user_email")
+            Log.d(TAG, "Cleared persisted authenticated session")
         }
         // Authentication persistence must not race an immediate activity/process transition.
         editor.commit()
