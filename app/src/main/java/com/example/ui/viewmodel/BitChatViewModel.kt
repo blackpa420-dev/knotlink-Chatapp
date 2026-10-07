@@ -212,6 +212,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private val appLaunchTime = System.currentTimeMillis()
 
     init {
+        // Initialize the durable Supabase auth store synchronously before any
+        // asynchronous migration, identity, QR, or login work can run.
+        // Without this, signIn/OTP could succeed only in memory and the next
+        // screen/process would see an empty session.
+        SupabaseService.init(application.applicationContext)
         Log.d("BitChat_Debug", "BitChatViewModel initialized successfully")
         try {
             biometricSecurityManager.validateEnrollmentOrDisable()
