@@ -1541,19 +1541,25 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun syncAllChatHistory(requestedUid: String, myUsername: String = ""): Boolean = withContext(Dispatchers.IO) {
-        val myUid = SupabaseService.getAuthenticatedUserId() ?: return@withContext false
-        if (!requestedUid.isBlank() && !requestedUid.equals(myUid, ignoreCase = true)) {
+        var myUid: String? = null
+        repeat(5) { attempt ->
+            myUid = SupabaseService.getAuthenticatedUserId()
+            if (!myUid.isNullOrBlank()) return@repeat
+            if (attempt < 4) kotlinx.coroutines.delay(500L * (attempt + 1))
+        }
+        val authenticatedUid = myUid ?: return@withContext false
+        if (!requestedUid.isBlank() && !requestedUid.equals(authenticatedUid, ignoreCase = true)) {
             Log.w("BitChatRepo", "Ignoring non-canonical history UID; using authenticated UID")
         }
 
         val now = System.currentTimeMillis()
-        val last = lastHistorySyncAt[myUid] ?: 0L
+        val last = lastHistorySyncAt[authenticatedUid] ?: 0L
         if (now - last < HISTORY_SYNC_TTL_MS) return@withContext true
         historySyncMutex.withLock {
             val lockedNow = System.currentTimeMillis()
-            val lockedLast = lastHistorySyncAt[myUid] ?: 0L
+            val lockedLast = lastHistorySyncAt[authenticatedUid] ?: 0L
             if (lockedNow - lockedLast < HISTORY_SYNC_TTL_MS) return@withLock true
-            lastHistorySyncAt[myUid] = lockedNow
+            lastHistorySyncAt[authenticatedUid] = lockedNow
             try {
             // First run deduplication on existing copy chats
             deduplicateCopyChats()
@@ -1562,7 +1568,7 @@ class BitChatRepository(val dao: BitChatDao) {
             val myEmail = currentIdentity?.email?.trim()?.lowercase() ?: ""
             val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
             val fetchedMessages = mutableListOf<SupabaseMessage>()
-            val syncKey = "user_history:$myUid"
+            val syncKey = "user_history:$authenticatedUid"
             val previousSync = dao.getSyncState(syncKey)?.lastSyncedAt ?: 0L
 
             val historyUsername = myUsername.takeIf { it.isNotBlank() && it != myUid }
@@ -1575,15 +1581,25 @@ class BitChatRepository(val dao: BitChatDao) {
             if (previousSync <= 0L) {
                 var offset = 0
                 while (true) {
-                    val pageRes = SupabaseService.fetchUserMessages(
-                        userId = myUid,
+                    var pageRes = SupabaseService.fetchUserMessages(
+                        userId = authenticatedUid,
                         username = historyUsername,
                         email = historyEmail,
                         limit = pageSize,
                         offset = offset
                     )
                     if (pageRes.isFailure) {
-                        Log.w("BitChatRepo", "Initial history page failed at offset $offset")
+                        kotlinx.coroutines.delay(700L)
+                        pageRes = SupabaseService.fetchUserMessages(
+                            userId = authenticatedUid,
+                            username = historyUsername,
+                            email = historyEmail,
+                            limit = pageSize,
+                            offset = offset
+                        )
+                    }
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Initial history page failed at offset $offset after retry: ${pageRes.exceptionOrNull()?.message}")
                         return@withLock false
                     }
                     val page = pageRes.getOrNull().orEmpty()
@@ -1594,8 +1610,8 @@ class BitChatRepository(val dao: BitChatDao) {
             } else {
                 var offset = 0
                 while (true) {
-                    val pageRes = SupabaseService.fetchUserMessagesSince(
-                        userId = myUid,
+                    var pageRes = SupabaseService.fetchUserMessagesSince(
+                        userId = authenticatedUid,
                         username = historyUsername,
                         email = historyEmail,
                         sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
@@ -1603,7 +1619,18 @@ class BitChatRepository(val dao: BitChatDao) {
                         offset = offset
                     )
                     if (pageRes.isFailure) {
-                        Log.w("BitChatRepo", "Incremental history page failed at offset $offset")
+                        kotlinx.coroutines.delay(700L)
+                        pageRes = SupabaseService.fetchUserMessagesSince(
+                            userId = authenticatedUid,
+                            username = historyUsername,
+                            email = historyEmail,
+                            sinceTimestamp = (previousSync - 120_000L).coerceAtLeast(0L),
+                            limit = pageSize,
+                            offset = offset
+                        )
+                    }
+                    if (pageRes.isFailure) {
+                        Log.w("BitChatRepo", "Incremental history page failed at offset $offset after retry: ${pageRes.exceptionOrNull()?.message}")
                         return@withLock false
                     }
                     val page = pageRes.getOrNull().orEmpty()
