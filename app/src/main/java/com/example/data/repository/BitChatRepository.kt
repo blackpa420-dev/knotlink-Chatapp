@@ -421,44 +421,38 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun updateUserProfile(
-        fullName: String,
-        avatarPath: String?,
-        profession: String = "🎓 Student",
-        email: String = "",
-        secondaryEmail: String = "",
-        isEmailVerified: Boolean = false,
+        fullName: String, avatarPath: String?, profession: String = "🎓 Student",
+        email: String = "", secondaryEmail: String = "", isEmailVerified: Boolean = false,
         birthDate: String = ""
-    ) {
-        val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
-        val uid = SupabaseService.getAuthenticatedUserId()
-            ?: throw IllegalStateException("Cannot update profile without an authenticated Supabase session")
-        val updated = current.copy(
-            supabaseUid = uid,
-            fullName = fullName,
-            avatarPath = avatarPath,
-            profession = profession,
-            email = if (email.isNotBlank()) email else current.email,
-            secondaryEmail = if (secondaryEmail.isNotBlank()) secondaryEmail else current.secondaryEmail,
-            isEmailVerified = isEmailVerified || current.isEmailVerified,
-            birthDate = birthDate
-        )
-        dao.saveUserIdentity(updated)
-
-        val prof = SupabaseProfile(
-            id = uid,
-            email = updated.email,
-            secondaryEmail = updated.secondaryEmail,
-            username = updated.username,
-            fullName = fullName,
-            avatarUrl = avatarPath ?: "",
-            profession = profession,
-            birthDate = birthDate,
-            isVerified = updated.isVerified
-        )
-        val res = SupabaseService.upsertProfile(prof)
-        if (res.isSuccess) cacheProfileLocally(res.getOrNull() ?: prof)
-        if (res.isFailure) {
-            Log.e("BitChatRepository", "updateUserProfile upsertProfile failed: ${res.exceptionOrNull()?.message}")
+    ): Result<Unit> {
+        return try {
+            val current = dao.getUserIdentity().firstOrNull() ?: UserIdentityEntity()
+            val uid = SupabaseService.getAuthenticatedUserId()
+                ?: return Result.failure(IllegalStateException("Cannot update profile without an authenticated Supabase session"))
+            val updated = current.copy(
+                supabaseUid = uid, fullName = fullName, avatarPath = avatarPath, profession = profession,
+                email = if (email.isNotBlank()) email else current.email,
+                secondaryEmail = if (secondaryEmail.isNotBlank()) secondaryEmail else current.secondaryEmail,
+                isEmailVerified = isEmailVerified || current.isEmailVerified, birthDate = birthDate
+            )
+            val prof = SupabaseProfile(
+                id = uid, email = updated.email, secondaryEmail = updated.secondaryEmail,
+                username = updated.username, fullName = fullName, avatarUrl = avatarPath ?: "",
+                profession = profession, birthDate = birthDate, isVerified = updated.isVerified
+            )
+            val res = SupabaseService.upsertProfile(prof)
+            if (res.isFailure) {
+                val error = res.exceptionOrNull() ?: Exception("Failed to save profile")
+                Log.e("BitChatRepository", "updateUserProfile upsertProfile failed: " + error.message, error)
+                return Result.failure(error)
+            }
+            val savedProfile = res.getOrNull() ?: prof
+            dao.saveUserIdentity(updated.copy(avatarPath = savedProfile.avatarUrl ?: avatarPath))
+            cacheProfileLocally(savedProfile)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("BitChatRepository", "updateUserProfile failed", e)
+            Result.failure(e)
         }
     }
 
