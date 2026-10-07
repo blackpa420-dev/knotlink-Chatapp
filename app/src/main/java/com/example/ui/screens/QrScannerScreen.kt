@@ -19,10 +19,6 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -178,31 +174,35 @@ fun QrScannerScreen(
     var scannedUser by remember { mutableStateOf<ScannedUser?>(null) }
     var resolvedQrUuid by remember { mutableStateOf("") }
 
-    // Resolve R2 avatar object keys before Coil renders the My QR profile.
+    // Resolve the avatar into the stable local R2 cache. The QR page must
+    // never depend on a short-lived signed URL staying alive in Coil.
     var resolvedAvatarPath by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(user?.avatarPath, user?.supabaseUid) {
         resolvedAvatarPath = withContext(Dispatchers.IO) {
-            val value = user?.avatarPath?.trim().orEmpty()
+            var value = user?.avatarPath?.trim().orEmpty()
+            if (value.isBlank()) {
+                val uid = user?.supabaseUid?.trim().orEmpty()
+                if (uid.isNotBlank()) {
+                    value = com.example.data.supabase.SupabaseService
+                        .getProfileFresh(uid)
+                        .getOrNull()
+                        ?.avatarUrl
+                        ?.trim()
+                        .orEmpty()
+                }
+            }
             when {
                 value.isBlank() -> null
-                value.startsWith("http://", ignoreCase = true) ||
-                    value.startsWith("https://", ignoreCase = true) ||
-                    value.startsWith("content://", ignoreCase = true) ||
+                value.startsWith("content://", ignoreCase = true) ||
                     value.startsWith("file://", ignoreCase = true) ||
-                    value.startsWith("/") -> value
-                value.startsWith("users/") -> {
-                    // Retry once after auth/session readiness; this is common on
-                    // a freshly opened QR screen.
-                    var url = com.example.data.cloudflare.CloudflareR2Service
-                        .getDownloadUrl(value, "image/jpeg").getOrNull()
-                    if (url.isNullOrBlank()) {
-                        kotlinx.coroutines.delay(350L)
-                        url = com.example.data.cloudflare.CloudflareR2Service
-                            .getDownloadUrl(value, "image/jpeg").getOrNull()
-                    }
-                    url
-                }
-                else -> value
+                    value.startsWith("/") ||
+                    value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) -> value
+                value.startsWith("users/") ->
+                    com.example.data.cloudflare.CloudflareR2Service
+                        .getCachedDownloadPath(context, value, "image/jpeg")
+                        .getOrNull()
+                else -> null
             }
         }
     }
@@ -217,14 +217,8 @@ fun QrScannerScreen(
         ?: "@username"
 
     LaunchedEffect(user?.supabaseUid) {
-        val localUuid = user?.supabaseUid?.trim().orEmpty()
-        if (localUuid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
-            resolvedQrUuid = localUuid
-        } else {
-            resolvedQrUuid = com.example.data.supabase.SupabaseService
-                .getAuthenticatedUserId()
-                .orEmpty()
-        }
+        // Repair/confirm the Room-backed immutable UUID before rendering.
+        resolvedQrUuid = viewModel.ensureStableQrUuid().orEmpty()
     }
 
     // Never fall back to the legacy qrIdentifier here. A non-UUID fallback
@@ -553,31 +547,7 @@ fun QrScannerScreen(
                                             modifier = Modifier.fillMaxSize()
                                         )
 
-                                        // Animated KnotLink mark is part of the QR composition,
-                                        // not a large circular ring floating over it.
-                                        Box(
-                                            modifier = Modifier
-                                                .size(52.dp)
-                                                .graphicsLayer {
-                                                    scaleX = qrLogoScale
-                                                    scaleY = qrLogoScale
-                                                }
-                                                .clip(RoundedCornerShape(15.dp))
-                                                .background(Color.White)
-                                                .border(
-                                                    width = 1.dp,
-                                                    color = Color(0xFFE2E8F0),
-                                                    shape = RoundedCornerShape(15.dp)
-                                                )
-                                                .padding(6.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Image(
-                                                painter = androidx.compose.ui.res.painterResource(com.example.R.drawable.appicon),
-                                                contentDescription = "KnotLink",
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        }
+                                        // No logo is embedded in the QR.
                                     }
                                 } else {
                                     Text(
