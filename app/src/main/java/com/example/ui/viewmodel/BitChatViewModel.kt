@@ -3191,6 +3191,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         return repository.uploadMedia(chatId, fileUri, mimeType, context = context, onProgress = onProgress)
     }
 
+    /**
+     * Ensures the immutable account UUID is present in Room before a QR is
+     * rendered. No random/local username ID is ever generated here.
+     */
+    suspend fun ensureStableQrUuid(): String? {
+        return repository.ensureStableQrUuid()
+    }
+
     /** Canonical QR lookup: UUID -> profiles.id -> public profile. */
     suspend fun resolveScannedUser(rawQrPayload: String): ScannedUserResult {
         val userId = rawQrPayload.trim().replace("\uFEFF", "").replace("\u200B", "")
