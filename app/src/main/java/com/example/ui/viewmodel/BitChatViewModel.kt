@@ -3200,8 +3200,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         if (!uuidRegex.matches(userId)) return ScannedUserResult.InvalidQr
 
-        val supa = com.example.data.supabase.SupabaseService.getProfile(userId).getOrNull()
-            ?: return ScannedUserResult.UserNotFound
+        val profileResult = com.example.data.supabase.SupabaseService.getProfile(userId)
+        val supa = profileResult.getOrElse {
+            android.util.Log.e(
+                "KnotLinkQR",
+                "Profile lookup failed for decoded UUID=$userId: ${it.message}",
+                it
+            )
+            return ScannedUserResult.UserNotFound
+        } ?: run {
+            android.util.Log.w("KnotLinkQR", "Decoded UUID has no profile row: $userId")
+            return ScannedUserResult.UserNotFound
+        }
 
         val profile = PublicUserProfile(
             uid = supa.id,
