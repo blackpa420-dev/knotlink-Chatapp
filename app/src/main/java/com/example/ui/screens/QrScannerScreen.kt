@@ -1102,13 +1102,13 @@ private suspend fun handleQrCodeText(
     onSuccess: (ScannedUser) -> Unit,
     onError: (String) -> Unit
 ) {
-    val result = withContext(Dispatchers.IO) {
-        viewModel.resolveScannedUser(rawPayload)
-    }
-
-    when (result) {
-        is ScannedUserResult.Success -> onSuccess(result.user)
-        is ScannedUserResult.InvalidQr -> onError("Invalid KnotLink QR Code")
-        is ScannedUserResult.UserNotFound -> onError("KnotLink user not found")
+    Log.i("KnotLinkQR", "QR UI received decoded payload=${rawPayload.trim()}")
+    when (val result = withContext(Dispatchers.IO) { viewModel.resolveScannedUser(rawPayload) }) {
+        is ScannedUserResult.Success -> {
+            Log.i("KnotLinkQR", "QR UI opening profile uid=${result.user.uid} username=${result.user.username} avatar=${!result.user.avatarUrl.isNullOrBlank()}")
+            withContext(Dispatchers.Main) { onSuccess(result.user) }
+        }
+        ScannedUserResult.InvalidQr -> withContext(Dispatchers.Main) { onError("Invalid KnotLink QR Code") }
+        ScannedUserResult.UserNotFound -> withContext(Dispatchers.Main) { onError("KnotLink user not found") }
     }
 }
