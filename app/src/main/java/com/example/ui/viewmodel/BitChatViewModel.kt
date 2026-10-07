@@ -3131,13 +3131,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
             .replace("\u200B", "")
         if (cleanPayload.isBlank()) return ScannedUserResult.InvalidQr
 
+        // Accept the current canonical payload plus safe legacy/link forms.
+        // UUID remains the only internal identity key; username is never used
+        // as the routing identifier.
+        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         val userId = when {
             cleanPayload.startsWith("KNOTLINK:USER:", ignoreCase = true) ->
                 cleanPayload.substringAfter("KNOTLINK:USER:", "").trim()
+            cleanPayload.startsWith("knotlink://user/", ignoreCase = true) ->
+                cleanPayload.substringAfter("knotlink://user/", "").trim()
+            uuidRegex.matches(cleanPayload) -> cleanPayload
             else -> return ScannedUserResult.InvalidQr
         }
 
-        val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
         if (!uuidRegex.matches(userId)) return ScannedUserResult.InvalidQr
 
         val supa = com.example.data.supabase.SupabaseService.getProfile(userId).getOrNull()
