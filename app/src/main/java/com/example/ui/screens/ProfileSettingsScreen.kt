@@ -1300,11 +1300,12 @@ fun ProfileSettingsScreen(
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
-                        text = "BITCHAT:USER:$publicId",
+                        text = rawUsername.trim().let {
+                            if (it.isBlank()) "@user" else if (it.startsWith("@")) it else "@$it"
+                        },
                         color = Color(0xFF2563EB),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFamily = FontFamily.Monospace
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
                     )
 
                     Spacer(modifier = Modifier.height(20.dp))
