@@ -263,24 +263,32 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                 _initialHistorySyncing.value = true
                                 _initialHistorySyncError.value = null
                                 launch(Dispatchers.IO) {
-                                    var success = false
-                                    var backoffMs = 800L
-                                    for (attempt in 0 until 5) {
-                                        success = runCatching {
-                                            repository.syncAllChatHistory(currentUid, currentUsername)
-                                        }.getOrDefault(false)
-                                        if (success) break
-                                        if (attempt < 4) {
-                                            delay(backoffMs)
-                                            backoffMs = (backoffMs * 2).coerceAtMost(5000L)
-                                        }
-                                    }
-                                    runCatching {
-                                        repository.syncCallHistory(currentUid, currentUsername)
-                                    }
+                                    // One fast foreground restore attempt. Do not keep the
+                                    // chat list skeleton on-screen while waiting for long retries.
+                                    val firstAttemptSuccess = runCatching {
+                                        repository.syncAllChatHistory(currentUid, currentUsername)
+                                    }.getOrDefault(false)
+
                                     withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                                         _initialHistorySyncing.value = false
                                         _initialHistorySyncError.value = null
+                                    }
+
+                                    // If the network/session was briefly unavailable, recover
+                                    // silently in the background without blocking the UI.
+                                    if (!firstAttemptSuccess) {
+                                        delay(500L)
+                                        runCatching {
+                                            repository.syncAllChatHistory(currentUid, currentUsername)
+                                        }
+                                        delay(1000L)
+                                        runCatching {
+                                            repository.syncAllChatHistory(currentUid, currentUsername)
+                                        }
+                                    }
+
+                                    runCatching {
+                                        repository.syncCallHistory(currentUid, currentUsername)
                                     }
                                 }
                             }
