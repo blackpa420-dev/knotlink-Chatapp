@@ -26,7 +26,7 @@ object CloudflareR2Config {
 
 object CloudflareR2Service {
     private const val TAG = "CloudflareR2"
-    private val httpClient = OkHttpClient()
+    private val httpClient = OkHttpClient.Builder()\n        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)\n        .readTimeout(45, java.util.concurrent.TimeUnit.SECONDS)\n        .writeTimeout(45, java.util.concurrent.TimeUnit.SECONDS)\n        .callTimeout(60, java.util.concurrent.TimeUnit.SECONDS)\n        .retryOnConnectionFailure(true)\n        .build()
 
     private fun safeFileName(fileName: String): String {
         val cleaned = fileName.trim()
