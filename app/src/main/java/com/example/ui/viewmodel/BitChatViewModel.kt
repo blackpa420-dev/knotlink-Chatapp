@@ -1080,15 +1080,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     }
 
                     repository.recordLoginSession()
-                    SupabaseRealtimeManager.startRealtime(uid, profile!!.username)
 
-                    // History import is keyed internally to the authenticated UID.
-                    repository.syncAllChatHistory(uid, profile.username)
-
+                    // Authentication/profile validation is complete at this point.
+                    // Do not block the login transition on history bootstrap. Room is
+                    // the local UI source; Realtime + server history can hydrate it in
+                    // the background after the user reaches Chats.
                     _isSendingOtp.value = false
                     showToast("Welcome back, ${profile.fullName}!")
                     withContext(Dispatchers.Main) {
                         onSuccess()
+                    }
+
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            SupabaseRealtimeManager.startRealtime(uid, profile!!.username)
+                            repository.syncAllChatHistory(uid, profile.username)
+                        } catch (e: Throwable) {
+                            Log.w("BitChatViewModel", "Background post-login history sync failed: ${e.message}")
+                        }
                     }
                 } else {
                     _isSendingOtp.value = false
