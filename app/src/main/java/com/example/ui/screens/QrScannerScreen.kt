@@ -520,11 +520,52 @@ fun QrScannerScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (qrBitmap != null) {
-                                    Image(
-                                        bitmap = qrBitmap.asImageBitmap(),
-                                        contentDescription = "My KnotLink QR Code",
-                                        modifier = Modifier.fillMaxSize()
+                                    val qrLogoTransition = rememberInfiniteTransition(label = "qr_logo")
+                                    val qrLogoScale by qrLogoTransition.animateFloat(
+                                        initialValue = 0.94f,
+                                        targetValue = 1.0f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(900, easing = FastOutSlowInEasing),
+                                            repeatMode = RepeatMode.Reverse
+                                        ),
+                                        label = "qr_logo_scale"
                                     )
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Image(
+                                            bitmap = qrBitmap.asImageBitmap(),
+                                            contentDescription = "My KnotLink QR Code",
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+
+                                        // Animated KnotLink mark is part of the QR composition,
+                                        // not a large circular ring floating over it.
+                                        Box(
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .graphicsLayer {
+                                                    scaleX = qrLogoScale
+                                                    scaleY = qrLogoScale
+                                                }
+                                                .clip(RoundedCornerShape(15.dp))
+                                                .background(Color.White)
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = Color(0xFFE2E8F0),
+                                                    shape = RoundedCornerShape(15.dp)
+                                                )
+                                                .padding(6.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Image(
+                                                painter = androidx.compose.ui.res.painterResource(com.example.R.drawable.appicon),
+                                                contentDescription = "KnotLink",
+                                                modifier = Modifier.fillMaxSize()
+                                            )
+                                        }
+                                    }
                                 } else {
                                     Text(
                                         text = "Generating QR Code...",
