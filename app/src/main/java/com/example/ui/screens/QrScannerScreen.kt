@@ -527,16 +527,6 @@ fun QrScannerScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (qrBitmap != null) {
-                                    val qrLogoTransition = rememberInfiniteTransition(label = "qr_logo")
-                                    val qrLogoScale by qrLogoTransition.animateFloat(
-                                        initialValue = 0.94f,
-                                        targetValue = 1.0f,
-                                        animationSpec = infiniteRepeatable(
-                                            animation = tween(900, easing = FastOutSlowInEasing),
-                                            repeatMode = RepeatMode.Reverse
-                                        ),
-                                        label = "qr_logo_scale"
-                                    )
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
