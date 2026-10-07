@@ -1052,59 +1052,62 @@ class BitChatRepository(val dao: BitChatDao) {
         val currentUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: ""
         val blockedUids = (allBlockedUsers.firstOrNull() ?: emptyList()).map { it.targetUid }.toSet()
 
-        // ONE canonical remote profile-search system for both manual search and QR.
-        // There is intentionally no local-contact resolver here.
+        fun toPublicProfile(p: SupabaseProfile): PublicUserProfile = PublicUserProfile(
+            uid = p.id, publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
+            username = p.username, displayName = p.fullName.ifBlank { p.username },
+            avatarUrl = p.avatarUrl, bio = p.bio.ifBlank { "Verified KnotLink User" },
+            profession = p.profession.ifBlank { "✨ KnotLink Member" },
+            mutualGroups = listOf("KnotLink Network"),
+            avatarType = p.avatarUrl?.ifBlank { "default" } ?: "default"
+        )
+
+        // Room-first: previously seen profiles are resolved locally.
+        val localProfiles = dao.getAllCachedProfiles().asSequence()
+            .filter { p -> p.uid.isNotBlank() && (
+                p.uid.lowercase().contains(cleanQuery) ||
+                p.username.lowercase().removePrefix("@").contains(cleanQuery) ||
+                p.fullName.lowercase().contains(cleanQuery) ||
+                p.email.lowercase().contains(cleanQuery)
+            ) }
+            .map { it -> SupabaseProfile(id=it.uid, username=it.username, fullName=it.fullName, avatarUrl=it.avatarUrl, bio=it.bio, profession=it.profession, email=it.email, lastSeen=it.lastSeen, isOnline=it.isOnline) }
+            .filterNot { it.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(it.id) }
+            .map(::toPublicProfile).distinctBy { it.uid }.toList()
+
+        if (localProfiles.isNotEmpty()) {
+            return if (!exactMatch) localProfiles else localProfiles.filter { profile ->
+                val normalized = cleanQuery.removePrefix("@").lowercase()
+                val base = normalized.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+                val username = profile.username.trim().lowercase().removePrefix("@")
+                val usernameBase = username.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+                val publicId = profile.publicId.trim().lowercase().removePrefix("@")
+                val publicIdBase = publicId.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
+                profile.uid.equals(normalized, true) || publicId == normalized || publicIdBase == base || username == normalized || usernameBase == base
+            }
+        }
+
+        // Cache miss: query Supabase, then persist the returned profiles in Room.
         val supaResults = try {
             val remote = SupabaseService.searchProfiles(cleanQuery).getOrNull().orEmpty()
-            // QR payloads carry the canonical Auth UUID. Keep a direct profile
-            // lookup as a deterministic fallback so a UUID QR never depends on
-            // the broader search query parser.
-            if (remote.isEmpty() && cleanQuery.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
-                SupabaseService.getProfile(cleanQuery).getOrNull()?.let { listOf(it) } ?: emptyList()
-            } else {
-                remote
-            }
+            if (remote.isEmpty() && cleanQuery.matches(Regex("^[0-9a-fA-F-]{36}$"))) SupabaseService.getProfile(cleanQuery).getOrNull()?.let { listOf(it) } ?: emptyList() else remote
         } catch (e: Exception) {
             Log.d("BitChatRepo", "Canonical user search error: ${e.message}")
             emptyList()
         }
+        supaResults.forEach { cacheProfileLocally(it) }
 
-        val results = supaResults
-            .asSequence()
-            .filter { it.id.isNotBlank() }
+        val results = supaResults.asSequence().filter { it.id.isNotBlank() }
             .filterNot { it.id.equals(currentUid, ignoreCase = true) || blockedUids.contains(it.id) }
-            .map { p ->
-                PublicUserProfile(
-                    uid = p.id,
-                    publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
-                    username = p.username,
-                    displayName = p.fullName.ifBlank { p.username },
-                    avatarUrl = p.avatarUrl,
-                    bio = p.bio.ifBlank { "Verified KnotLink User" },
-                    profession = p.profession.ifBlank { "✨ KnotLink Member" },
-                    mutualGroups = listOf("KnotLink Network"),
-                    avatarType = p.avatarUrl?.ifBlank { "default" } ?: "default"
-                )
-            }
-            .distinctBy { it.uid }
-            .toList()
-
+            .map(::toPublicProfile).distinctBy { it.uid }.toList()
         if (!exactMatch) return results
 
         val normalized = cleanQuery.removePrefix("@").lowercase()
-        val normalizedBase = normalized.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-
+        val base = normalized.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
         return results.filter { profile ->
             val username = profile.username.trim().lowercase().removePrefix("@")
             val usernameBase = username.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
             val publicId = profile.publicId.trim().lowercase().removePrefix("@")
             val publicIdBase = publicId.removeSuffix(".link").removeSuffix(".bit").removeSuffix(".chat")
-
-            profile.uid.equals(normalized, ignoreCase = true) ||
-                publicId == normalized ||
-                publicIdBase == normalizedBase ||
-                username == normalized ||
-                usernameBase == normalizedBase
+            profile.uid.equals(normalized, true) || publicId == normalized || publicIdBase == base || username == normalized || usernameBase == base
         }
     }
 
