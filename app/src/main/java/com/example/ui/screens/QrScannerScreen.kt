@@ -198,7 +198,9 @@ fun QrScannerScreen(
         }
     }
 
-    val qrIdentifier = resolvedQrUuid.ifBlank { user?.qrIdentifier.orEmpty() }
+    // Never fall back to the legacy qrIdentifier here. A non-UUID fallback
+    // produces KNOTLINK:INVALID, which the scanner correctly rejects.
+    val qrIdentifier = resolvedQrUuid
     val qrBitmap = remember(qrIdentifier) {
         if (qrIdentifier.isBlank()) {
             null
