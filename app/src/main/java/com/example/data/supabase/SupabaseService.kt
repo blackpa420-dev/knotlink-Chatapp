@@ -144,18 +144,15 @@ object SupabaseService {
                 }
             }
 
-            val initial = currentSession
-            if (initial == null ||
-                initial.accessToken.isBlank() ||
-                initial.accessToken == SupabaseConfig.ANON_KEY ||
-                initial.user?.id.isNullOrBlank()
-            ) {
-                currentSession = null
+            var initial = currentSession
+            if (initial == null) {
                 return@withContext Result.failure(
                     IllegalStateException("Authenticated Supabase session required. Please log in again.")
                 )
             }
 
+            // Recover an expired/missing access token from the durable refresh token
+            // before treating the account as logged out.
             if (!isJwtValid(initial.accessToken)) {
                 if (!refreshSession()) {
                     currentSession = null
@@ -164,6 +161,19 @@ object SupabaseService {
                         IllegalStateException("Supabase session expired. Please log in again.")
                     )
                 }
+                initial = currentSession
+            }
+
+            // Only a real refreshed/valid user session may authorize API requests.
+            if (initial?.accessToken.isNullOrBlank() ||
+                initial?.accessToken == SupabaseConfig.ANON_KEY ||
+                initial?.user?.id.isNullOrBlank()
+            ) {
+                currentSession = null
+                persistSession(null)
+                return@withContext Result.failure(
+                    IllegalStateException("Authenticated Supabase session required. Please log in again.")
+                )
             }
 
             val session = currentSession
@@ -211,13 +221,23 @@ object SupabaseService {
         val refreshToken = prefs?.getString("refresh_token", null)
         val uid = prefs?.getString("user_id", null)
         val email = prefs?.getString("user_email", null)
-        if (!token.isNullOrBlank() && !uid.isNullOrBlank()) {
+
+        // Restore from refresh token too. Android process recreation can leave
+        // the access token missing/expired while the refresh token is still valid.
+        if (!refreshToken.isNullOrBlank() || (!token.isNullOrBlank() && !uid.isNullOrBlank())) {
             currentSession = SupabaseAuthSession(
-                accessToken = token,
+                accessToken = token.orEmpty(),
                 refreshToken = refreshToken,
-                user = SupabaseUser(id = uid, email = email ?: "")
+                user = uid?.takeIf { it.isNotBlank() }?.let {
+                    SupabaseUser(id = it, email = email ?: "")
+                }
             )
-            Log.d(TAG, "Restored persisted Supabase session for user: $uid")
+            Log.d(
+                TAG,
+                "Restored persisted Supabase auth state: uid=" + (uid ?: "<pending>") +
+                    ", hasAccessToken=" + (!token.isNullOrBlank()) +
+                    ", hasRefreshToken=" + (!refreshToken.isNullOrBlank())
+            )
         }
     }
 
@@ -238,7 +258,8 @@ object SupabaseService {
             editor.remove("user_id")
             editor.remove("user_email")
         }
-        editor.apply()
+        // Authentication persistence must not race an immediate activity/process transition.
+        editor.commit()
     }
 
     fun setSession(session: SupabaseAuthSession?) {
