@@ -806,7 +806,10 @@ object SupabaseService {
                     Log.w(TAG, "getProfileFresh($raw): profile row not found")
                     return@withContext Result.success(null)
                 }
-                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                val profile = SupabaseProfile.fromJson(arr.getJSONObject(0))
+                // Authentication/account-state checks only need persisted profile fields.
+                // Do not resolve an R2 signed avatar URL on the critical login path.
+                // Media is resolved lazily by the UI/cache layer after authentication.
                 cacheProfile(profile)
                 Log.d(TAG, "getProfileFresh($raw): resolved username=${profile.username}")
                 Result.success(profile)
