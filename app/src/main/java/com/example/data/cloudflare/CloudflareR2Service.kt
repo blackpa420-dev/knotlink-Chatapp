@@ -168,7 +168,7 @@ object CloudflareR2Service {
             if (!key.startsWith("users/")) return@withContext Result.failure(Exception("Invalid R2 avatar key"))
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(key.toByteArray(Charsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
                 .take(40)
             val cacheDir = File(context.cacheDir, "knotlink_avatar_cache").apply { mkdirs() }
             val cached = File(cacheDir, "$digest.jpg")
