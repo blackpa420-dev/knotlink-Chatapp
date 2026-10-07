@@ -1032,7 +1032,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                     // Resolve the profile by the authenticated UID first. An email
                     // lookup is only a metadata fallback after identity is established.
-                    val profile = SupabaseService.getProfile(uid).getOrNull()
+                    val profile = SupabaseService.getProfileFresh(uid).getOrNull()
 
                     if (!repository.prepareForAuthenticatedUser(uid)) {
                         SupabaseService.setSession(null)
@@ -1043,7 +1043,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     // Never synthesize a username/full name from the email and never
                     // enter Chats when the public profile is missing/incomplete.
                     val profileComplete = profile != null &&
-                        profile.isVerified &&
+                        profile.id.equals(uid, ignoreCase = true) &&
                         profile.username.isNotBlank() &&
                         profile.fullName.isNotBlank() &&
                         !profile.avatarUrl.isNullOrBlank()
@@ -1254,9 +1254,9 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         throw IllegalStateException("Authentication succeeded without a user ID")
                     }
 
-                    val existingProfile = SupabaseService.getProfile(uid).getOrNull()
+                    val existingProfile = SupabaseService.getProfileFresh(uid).getOrNull()
                     val profileComplete = existingProfile != null &&
-                        existingProfile.isVerified &&
+                        existingProfile.id.equals(uid, ignoreCase = true) &&
                         existingProfile.username.isNotBlank() &&
                         existingProfile.fullName.isNotBlank() &&
                         !existingProfile.avatarUrl.isNullOrBlank()
@@ -1306,7 +1306,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 // confirmation/magic-link URL.
                 val existingProfile = SupabaseService.getProfileByEmail(email).getOrNull()
                 val existingProfileCompleted = existingProfile != null &&
-                    existingProfile.isVerified &&
+                    existingProfile.id.isNotBlank() &&
                     existingProfile.username.isNotBlank() &&
                     existingProfile.fullName.isNotBlank() &&
                     !existingProfile.avatarUrl.isNullOrBlank()
