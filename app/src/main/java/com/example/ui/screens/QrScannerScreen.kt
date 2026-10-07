@@ -321,11 +321,11 @@ fun QrScannerScreen(
 
                                     analyzedFrameCount++
                                     if (analyzedFrameCount == 1 || analyzedFrameCount % 30 == 0) {
-                                        Log.d("KnotLinkQR", "Analyzer frame=$"+"analyzedFrameCount format=$"+"{imageProxy.format} size=$"+"{imageProxy.width}x$"+"{imageProxy.height} rotation=$"+"{imageProxy.imageInfo.rotationDegrees}")
+                                        Log.d("KnotLinkQR", "Analyzer frame=$analyzedFrameCount format=${imageProxy.format} size=${imageProxy.width}x${imageProxy.height} rotation=${imageProxy.imageInfo.rotationDegrees}")
                                     }
                                     val qrResult = processImageProxy(imageProxy, reader)
                                     if (qrResult != null && isScanningActive) {
-                                        Log.i("KnotLinkQR", "QR decoded payloadLength=$"+"{qrResult.length} payload=$"+"{qrResult.take(120)}")
+                                        Log.i("KnotLinkQR", "QR decoded payloadLength=${qrResult.length} payload=${qrResult.take(120)}")
                                         isScanningActive = false
                                         scope.launch(Dispatchers.Main) {
                                             handleQrCodeText(
