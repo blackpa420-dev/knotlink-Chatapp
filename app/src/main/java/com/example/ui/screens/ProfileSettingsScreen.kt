@@ -165,11 +165,36 @@ fun ProfileSettingsScreen(
 
     var fullName by remember { mutableStateOf(user?.fullName ?: "") }
     var currentAvatarPath by remember { mutableStateOf(user?.avatarPath) }
+    var resolvedAvatarPath by remember { mutableStateOf<String?>(null) }
+    val displayAvatarPath = if (currentAvatarPath != user?.avatarPath) {
+        currentAvatarPath
+    } else {
+        resolvedAvatarPath ?: currentAvatarPath
+    }
+
     var profession by remember { mutableStateOf(user?.profession ?: "🎓 Student") }
     var secondaryEmail by remember { mutableStateOf("") }
     var isSecondaryEmailVerified by remember { mutableStateOf(false) }
     var secondaryEmailVerificationSent by remember { mutableStateOf(false) }
     var birthDate by remember { mutableStateOf(user?.birthDate ?: "") }
+
+    LaunchedEffect(user?.avatarPath) {
+        resolvedAvatarPath = withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val value = user?.avatarPath?.trim().orEmpty()
+            when {
+                value.isBlank() -> null
+                value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) ||
+                    value.startsWith("content://", ignoreCase = true) ||
+                    value.startsWith("file://", ignoreCase = true) ||
+                    value.startsWith("/") -> value
+                value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
+                    .getDownloadUrl(value, "image/jpeg")
+                    .getOrNull()
+                else -> value
+            }
+        }
+    }
 
     LaunchedEffect(user) {
         if (user != null) {
@@ -419,14 +444,14 @@ fun ProfileSettingsScreen(
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            val hasAvatar = !currentAvatarPath.isNullOrBlank()
+                            val hasAvatar = !displayAvatarPath.isNullOrBlank()
                             if (hasAvatar) {
-                                val model: Any = if (currentAvatarPath!!.startsWith("http://") || currentAvatarPath!!.startsWith("https://") || currentAvatarPath!!.startsWith("content://")) {
-                                    currentAvatarPath!!
+                                val model: Any = if (displayAvatarPath!!.startsWith("http://") || displayAvatarPath!!.startsWith("https://") || displayAvatarPath!!.startsWith("content://")) {
+                                    displayAvatarPath!!
                                 } else {
-                                    val clean = currentAvatarPath!!.removePrefix("file://")
+                                    val clean = displayAvatarPath!!.removePrefix("file://")
                                     val f = File(clean)
-                                    if (f.exists()) f else currentAvatarPath!!
+                                    if (f.exists()) f else displayAvatarPath!!
                                 }
                                 AsyncImage(
                                     model = model,
