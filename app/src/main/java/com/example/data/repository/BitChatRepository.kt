@@ -98,6 +98,29 @@ data class PublicUserProfile(
 )
 
 class BitChatRepository(val dao: BitChatDao) {
+    /**
+     * Returns the account's immutable canonical UUID and repairs the local
+     * Room identity cache if an older local row is missing/stale.
+     *
+     * This UUID is the same auth.users.id / profiles.id used everywhere else.
+     * It is the ONLY payload allowed in a profile QR.
+     */
+    suspend fun ensureStableQrUuid(): String? = withContext(Dispatchers.IO) {
+        val remoteUuid = SupabaseService.getAuthenticatedUserId()?.trim().orEmpty()
+        val uuidRegex = Regex(
+            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        )
+        if (!uuidRegex.matches(remoteUuid)) return@withContext null
+
+        val local = dao.getUserIdentitySync()
+        if (local == null || !local.supabaseUid.equals(remoteUuid, ignoreCase = true)) {
+            if (local != null) {
+                dao.saveUserIdentity(local.copy(supabaseUid = remoteUuid))
+            }
+        }
+        remoteUuid
+    }
+
     private val messagePushScope = CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
 
 
