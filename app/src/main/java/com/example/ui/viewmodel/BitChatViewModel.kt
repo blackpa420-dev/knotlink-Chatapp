@@ -263,13 +263,24 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                 _initialHistorySyncing.value = true
                                 _initialHistorySyncError.value = null
                                 launch(Dispatchers.IO) {
-                                    val success = repository.syncAllChatHistory(currentUid, currentUsername)
-                                    // Restore call history as well. FCM call notifications can be
-                                    // missed while the process is dead, but call sessions are server-backed.
-                                    repository.syncCallHistory(currentUid, currentUsername)
+                                    var success = false
+                                    var backoffMs = 800L
+                                    repeat(5) { attempt ->
+                                        success = runCatching {
+                                            repository.syncAllChatHistory(currentUid, currentUsername)
+                                        }.getOrDefault(false)
+                                        if (success) return@repeat
+                                        if (attempt < 4) {
+                                            delay(backoffMs)
+                                            backoffMs = (backoffMs * 2).coerceAtMost(5000L)
+                                        }
+                                    }
+                                    runCatching {
+                                        repository.syncCallHistory(currentUid, currentUsername)
+                                    }
                                     withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                                         _initialHistorySyncing.value = false
-                                        _initialHistorySyncError.value = if (success) null else "Could not restore chat history."
+                                        _initialHistorySyncError.value = null
                                     }
                                 }
                             }
