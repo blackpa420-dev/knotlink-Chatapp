@@ -3159,14 +3159,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     private val _mutedChatIds = MutableStateFlow<Set<String>>(emptySet())
     val mutedChatIds: StateFlow<Set<String>> = _mutedChatIds.asStateFlow()
 
-    fun toggleMuteChat(chatId: String) {
+    fun toggleMuteChat(chatId: String, isMuted: Boolean? = null) {
         val current = _mutedChatIds.value.toMutableSet()
-        if (current.contains(chatId)) {
+        val shouldMute = isMuted ?: !current.contains(chatId)
+        if (!shouldMute) {
             current.remove(chatId)
         } else {
             current.add(chatId)
         }
         _mutedChatIds.value = current
+        viewModelScope.launch {
+            repository.toggleMuteChat(chatId, shouldMute)
+        }
     }
 
     // Group Members and Admin Approval State
@@ -3262,3 +3266,135 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateGroupName(chatId: String, newName: String) {
         viewModelScope.launch {
+            repository.updateGroupDetails(
+                chatId = chatId,
+                name = newName,
+                description = null,
+                avatarUrl = null,
+                permissionsJson = null
+            )
+        }
+    }
+
+    suspend fun getChatById(chatId: String): ChatEntity? {
+        return repository.getChatById(chatId)
+    }
+
+    fun promoteAdmin(chatId: String, targetUid: String) {
+        viewModelScope.launch {
+            repository.promoteAdmin(chatId, targetUid)
+        }
+    }
+
+    fun demoteAdmin(chatId: String, targetUid: String) {
+        viewModelScope.launch {
+            repository.demoteAdmin(chatId, targetUid)
+        }
+    }
+
+    fun transferOwnership(chatId: String, newOwnerUid: String) {
+        viewModelScope.launch {
+            repository.transferOwnership(chatId, newOwnerUid)
+        }
+    }
+
+    fun removeMemberFromGroupChat(chatId: String, targetUid: String) {
+        viewModelScope.launch {
+            repository.removeMemberFromGroup(chatId, targetUid)
+        }
+    }
+
+    fun addMemberToGroupChat(chatId: String, newUid: String) {
+        viewModelScope.launch {
+            repository.addMemberToGroup(chatId, newUid)
+        }
+    }
+
+    fun updateGroupDetails(
+        chatId: String,
+        name: String,
+        avatarUrl: String? = null,
+        description: String? = null,
+        permissionsJson: String? = null
+    ) {
+        viewModelScope.launch {
+            repository.updateGroupDetails(
+                chatId = chatId,
+                name = name,
+                description = description,
+                avatarUrl = avatarUrl,
+                permissionsJson = permissionsJson
+            )
+        }
+    }
+
+    fun updateGroupAvatar(chatId: String, avatarUrl: String) {
+        viewModelScope.launch {
+            repository.updateGroupDetails(
+                chatId = chatId,
+                name = "Group Chat",
+                description = null,
+                avatarUrl = avatarUrl,
+                permissionsJson = null
+            )
+        }
+    }
+
+    fun leaveGroup(chatId: String) {
+        viewModelScope.launch {
+            repository.leaveGroup(chatId)
+        }
+    }
+
+    fun leaveOrDeleteGroup(chatId: String, onComplete: (() -> Unit)? = null) {
+        viewModelScope.launch {
+            repository.leaveGroup(chatId)
+            onComplete?.invoke()
+        }
+    }
+
+    fun reportMemberOrGroup(
+        chatId: String,
+        targetUid: String? = null,
+        reason: String,
+        details: String = ""
+    ) {
+        viewModelScope.launch {
+            repository.reportMemberOrGroup(
+                chatId = chatId,
+                targetUid = targetUid,
+                reason = reason,
+                details = details
+            )
+        }
+    }
+
+    suspend fun createGroupChat(
+        title: String,
+        description: String? = null,
+        avatarUrl: String? = null,
+        memberUids: List<String> = emptyList()
+    ): String {
+        return repository.createGroupChat(title, description, avatarUrl, memberUids)
+    }
+
+    fun createGroupChat(
+        groupName: String,
+        avatarPathOrType: String = "",
+        memberNames: List<String> = emptyList(),
+        onSuccess: (ChatEntity) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val chatId = repository.createGroupChat(
+                title = groupName,
+                description = null,
+                avatarUrl = avatarPathOrType.ifBlank { null },
+                memberUids = emptyList()
+            )
+            val chat = repository.getChatById(chatId)
+            if (chat != null) {
+                onSuccess(chat)
+            }
+        }
+    }
+}
