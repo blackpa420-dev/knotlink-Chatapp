@@ -613,9 +613,11 @@ object SupabaseService {
                 httpClient.newCall(request).execute()
             }
             currentSession = null
+            persistSession(null)
             Result.success(true)
         } catch (e: Exception) {
             currentSession = null
+            persistSession(null)
             Result.success(true)
         }
     }
