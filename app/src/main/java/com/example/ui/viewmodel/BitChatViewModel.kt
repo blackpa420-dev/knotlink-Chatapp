@@ -1778,6 +1778,30 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         _enteredAvatarPath.value = path
     }
 
+    /**
+     * Resolve a private Cloudflare R2 object key to a short-lived download URL.
+     * Local file/content/http URLs are returned unchanged.
+     */
+    suspend fun resolveAvatarDisplayUrl(avatarPath: String?): String? = withContext(Dispatchers.IO) {
+        val value = avatarPath?.trim().orEmpty()
+        if (value.isBlank()) return@withContext null
+        if (
+            value.startsWith("http://", ignoreCase = true) ||
+            value.startsWith("https://", ignoreCase = true) ||
+            value.startsWith("content://", ignoreCase = true) ||
+            value.startsWith("file://", ignoreCase = true) ||
+            value.startsWith("/") 
+        ) {
+            return@withContext value
+        }
+        if (value.startsWith("users/")) {
+            return@withContext com.example.data.cloudflare.CloudflareR2Service
+                .getDownloadUrl(value, "image/jpeg")
+                .getOrNull()
+        }
+        value
+    }
+
     fun updateUsername(input: String) {
         // Alphanumeric only (letters and digits, no special characters or signs)
         val clean = input.lowercase().filter { it in 'a'..'z' || it.isDigit() || it == '_' }
