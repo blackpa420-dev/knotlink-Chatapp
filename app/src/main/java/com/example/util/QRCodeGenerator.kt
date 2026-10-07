@@ -61,7 +61,10 @@ object QRCodeGenerator {
         val canvas = Canvas(qrBitmap)
         val centerX = width / 2f
         val centerY = height / 2f
+        // Keep a generous circular quiet zone around the logo so the QR remains
+        // reliably scannable while the KnotLink mark sits neatly inside the ring.
         val bgRadius = width * 0.125f
+        val logoRadius = bgRadius * 0.72f
 
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -81,14 +84,18 @@ object QRCodeGenerator {
         }
 
         if (centerLogo != null) {
-            val targetLogoSize = (width * 0.19f).toInt()
+            val targetLogoSize = (logoRadius * 2f).toInt().coerceAtLeast(1)
             val scaledLogo = Bitmap.createScaledBitmap(centerLogo, targetLogoSize, targetLogoSize, true)
             val left = centerX - targetLogoSize / 2f
             val top = centerY - targetLogoSize / 2f
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+            // Render the app icon as a true rounded/circular mark inside the
+            // existing white circular quiet zone instead of letting a square
+            // icon touch the surrounding QR modules.
             canvas.save()
             val clipPath = Path().apply {
-                addCircle(centerX, centerY, bgRadius * 0.92f, Path.Direction.CW)
+                addCircle(centerX, centerY, logoRadius, Path.Direction.CW)
             }
             canvas.clipPath(clipPath)
             canvas.drawBitmap(scaledLogo, left, top, paint)
