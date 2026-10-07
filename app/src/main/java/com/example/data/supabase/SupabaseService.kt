@@ -769,6 +769,40 @@ object SupabaseService {
         }
     }
 
+    /** Dedicated QR profile lookup: UUID -> profiles.id. */
+    suspend fun lookupQrProfileByUuid(userId: String): Result<SupabaseProfile?> = withContext(Dispatchers.IO) {
+        try {
+            val raw = userId.trim()
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!uuidRegex.matches(raw)) return@withContext Result.failure(Exception("Invalid QR UUID"))
+            val session = ensureAuthenticatedSession().getOrElse { error ->
+                Log.e(TAG, "lookupQrProfileByUuid($raw): no authenticated session", error)
+                return@withContext Result.failure(error)
+            }
+            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=id,username,full_name,avatar_url,bio,profession&limit=1"
+            val request = Request.Builder().url(url)
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${session.accessToken}")
+                .get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "lookupQrProfileByUuid($raw): HTTP ${response.code} body=$body")
+                    return@withContext Result.failure(Exception("QR profile lookup failed: HTTP ${response.code}"))
+                }
+                val rows = JSONArray(body)
+                if (rows.length() == 0) return@withContext Result.success(null)
+                val profile = SupabaseProfile.fromJson(rows.getJSONObject(0))
+                cacheProfile(profile)
+                Log.i(TAG, "lookupQrProfileByUuid($raw): FOUND id=${profile.id} username=${profile.username} avatar=${!profile.avatarUrl.isNullOrBlank()}")
+                Result.success(profile)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "lookupQrProfileByUuid($userId): exception", e)
+            Result.failure(e)
+        }
+    }
+
     /**
      * Authoritative profile read for authentication/account-state decisions.
      * This intentionally bypasses the short-lived in-memory profile cache so a
