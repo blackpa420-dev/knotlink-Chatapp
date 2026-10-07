@@ -3214,10 +3214,14 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         // Profile metadata is Room-first. Supabase is contacted only when
         // this UUID is not already cached locally.
-        val supa = repository.getProfileCachedFirst(userId) ?: run {
-            android.util.Log.w("KnotLinkQR", "Decoded UUID has no cached/remote profile row: $userId")
-            return ScannedUserResult.UserNotFound
-        }
+        val supa = repository.getProfileCachedFirst(userId)
+            ?: SupabaseService.getProfileFresh(userId).getOrNull()?.also {
+                android.util.Log.i("KnotLinkQR", "Fresh profile fallback resolved UUID=\$userId username=\${it.username}")
+            }
+            ?: run {
+                android.util.Log.w("KnotLinkQR", "Decoded UUID has no cached/remote profile row: \$userId")
+                return ScannedUserResult.UserNotFound
+            }
 
         val profile = PublicUserProfile(
             uid = supa.id,
