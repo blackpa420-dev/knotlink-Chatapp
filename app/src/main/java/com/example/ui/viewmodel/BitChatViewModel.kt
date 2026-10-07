@@ -1804,21 +1804,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     suspend fun resolveAvatarDisplayUrl(avatarPath: String?): String? = withContext(Dispatchers.IO) {
         val value = avatarPath?.trim().orEmpty()
         if (value.isBlank()) return@withContext null
-        if (
-            value.startsWith("http://", ignoreCase = true) ||
-            value.startsWith("https://", ignoreCase = true) ||
-            value.startsWith("content://", ignoreCase = true) ||
-            value.startsWith("file://", ignoreCase = true) ||
-            value.startsWith("/") 
-        ) {
+        if (value.startsWith("http://", true) || value.startsWith("https://", true) ||
+            value.startsWith("content://", true) || value.startsWith("file://", true) || value.startsWith("/"))
             return@withContext value
-        }
         if (value.startsWith("users/")) {
             return@withContext com.example.data.cloudflare.CloudflareR2Service
-                .getDownloadUrl(value, "image/jpeg")
+                .getCachedDownloadPath(getApplication<Application>(), value, "image/jpeg")
                 .getOrNull()
         }
-        value
+        null
     }
 
     fun updateUsername(input: String) {
@@ -2080,27 +2074,39 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         showToast("Username cannot be changed once assigned.", isError = true)
     }
 
-    fun updateUserProfile(
-        fullName: String,
-        avatarPath: String?,
-        profession: String = "🎓 Student",
-        email: String = "",
-        secondaryEmail: String = "",
-        isEmailVerified: Boolean = false,
-        birthDate: String = "",
-        onSuccess: () -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            repository.updateUserProfile(
-                fullName = fullName,
-                avatarPath = avatarPath,
-                profession = profession,
-                email = email,
-                secondaryEmail = secondaryEmail,
-                isEmailVerified = isEmailVerified,
-                birthDate = birthDate
+    suspend fun updateUserProfile(
+        fullName: String, avatarPath: String?, profession: String = "🎓 Student",
+        email: String = "", secondaryEmail: String = "", isEmailVerified: Boolean = false,
+        birthDate: String = ""
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val current = repository.userIdentity.firstOrNull() ?: UserIdentityEntity()
+            var remoteAvatarPath = avatarPath?.trim().orEmpty().ifBlank { current.avatarPath }
+            val isR2Key = remoteAvatarPath.startsWith("users/")
+            val isRemoteUrl = remoteAvatarPath.startsWith("http://", true) || remoteAvatarPath.startsWith("https://", true)
+            if (remoteAvatarPath.isNotBlank() && !isR2Key && !isRemoteUrl) {
+                val bytes = if (remoteAvatarPath.startsWith("content://")) {
+                    getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(remoteAvatarPath))?.use { it.readBytes() }
+                } else {
+                    val file = java.io.File(remoteAvatarPath.removePrefix("file://"))
+                    if (file.exists()) file.readBytes() else null
+                }
+                if (bytes.isNullOrEmpty()) return@withContext Result.failure(Exception("Selected profile photo could not be read. Please select it again."))
+                val upload = SupabaseService.uploadAvatar("avatar_" + System.currentTimeMillis() + ".jpg", bytes, "image/jpeg")
+                remoteAvatarPath = upload.getOrElse { error ->
+                    Log.e("BitChatViewModel", "Profile avatar upload failed", error)
+                    return@withContext Result.failure(Exception("Profile photo upload failed: " + (error.message ?: "R2 upload error"), error))
+                }
+            }
+            val result = repository.updateUserProfile(
+                fullName = fullName.trim(), avatarPath = remoteAvatarPath.ifBlank { null },
+                profession = profession, email = email, secondaryEmail = secondaryEmail,
+                isEmailVerified = isEmailVerified, birthDate = birthDate
             )
-            onSuccess()
+            result
+        } catch (e: Exception) {
+            Log.e("BitChatViewModel", "updateUserProfile failed", e)
+            Result.failure(e)
         }
     }
 
