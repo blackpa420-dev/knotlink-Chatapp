@@ -518,7 +518,7 @@ fun QrScannerScreen(
                                 Text(
                                     text = displayUsername,
                                     color = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF2563EB),
-                                    fontSize = 13.sp,
+                                    fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
@@ -569,7 +569,7 @@ fun QrScannerScreen(
                                     type = "text/plain"
                                     putExtra(
                                         Intent.EXTRA_TEXT,
-                                        "Connect with me on KnotLink!\nMy ID: $publicId\nLink: knotlink://user/$publicId"
+                                        "Connect with me on KnotLink!\n$displayUsername\nLink: knotlink://user/$qrIdentifier"
                                     )
                                 }
                                 context.startActivity(Intent.createChooser(shareIntent, "Share KnotLink QR"))
