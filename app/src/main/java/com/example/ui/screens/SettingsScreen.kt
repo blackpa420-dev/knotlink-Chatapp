@@ -173,6 +173,12 @@ fun SettingsScreen(
     var qrCountdownSeconds by remember { mutableIntStateOf(10) }
 
     val context = LocalContext.current
+    var resolvedAvatarPath by remember(user?.avatarPath) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(user?.avatarPath) {
+        resolvedAvatarPath = viewModel.resolveAvatarDisplayUrl(user?.avatarPath)
+    }
+
     val publicId = user?.publicId ?: "user_001"
     val cachedQrBitmap = remember(publicId, context) {
         QRCodeGenerator.generateProfileQRCode(userId = publicId, context = context, size = 512)
@@ -358,7 +364,7 @@ fun SettingsScreen(
                         .padding(horizontal = 20.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val avatarPath = user?.avatarPath
+                    val avatarPath = resolvedAvatarPath ?: user?.avatarPath
                     val outlineGradient = Brush.horizontalGradient(
                         listOf(
                             Color(0xFF2563EB),
