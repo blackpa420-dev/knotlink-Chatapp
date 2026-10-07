@@ -264,11 +264,11 @@ object SupabaseService {
     }
 
     private fun persistSession(session: SupabaseAuthSession?) {
-        if (prefs == null) {
+        val sharedPrefs = prefs ?: run {
             Log.e(TAG, "Auth session persistence skipped: SupabaseService.init(context) was not called")
             return
         }
-        val editor = prefs.edit()
+        val editor = sharedPrefs.edit()
         if (session != null &&
             session.accessToken.isNotBlank() &&
             session.accessToken != SupabaseConfig.ANON_KEY &&
