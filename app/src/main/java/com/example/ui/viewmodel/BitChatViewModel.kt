@@ -1575,10 +1575,31 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                         throw IllegalStateException("OTP verification succeeded without a user ID")
                     }
 
-                    // If user had entered a password, persist it to Supabase Auth
+                    // If this flow also establishes/changes a password, Supabase Auth
+                    // may invalidate the current refresh-token chain as a security-sensitive
+                    // operation. Re-authenticate immediately so the session we keep in memory
+                    // and persist to disk is a fresh, valid session.
                     val enteredPass = _enteredPassword.value
                     if (enteredPass.isNotBlank() && token.isNotBlank()) {
-                        SupabaseService.updateUserPassword(token, enteredPass)
+                        val passwordUpdate = SupabaseService.updateUserPassword(token, enteredPass)
+                        if (passwordUpdate.isFailure) {
+                            SupabaseService.setSession(null)
+                            throw passwordUpdate.exceptionOrNull()
+                                ?: IllegalStateException("Failed to set account password")
+                        }
+
+                        val freshSession = SupabaseService.signInWithEmail(email, enteredPass).getOrElse {
+                            SupabaseService.setSession(null)
+                            throw IllegalStateException(
+                                "Password was updated, but the authenticated session could not be renewed.",
+                                it
+                            )
+                        }
+                        val freshUid = freshSession.user?.id?.trim().orEmpty()
+                        if (freshUid.isBlank() || !SupabaseService.isJwtValid(freshSession.accessToken)) {
+                            SupabaseService.setSession(null)
+                            throw IllegalStateException("Authenticated session could not be renewed after password update")
+                        }
                     }
 
                     // Identity is established by Auth first. Profile lookup is metadata only.
