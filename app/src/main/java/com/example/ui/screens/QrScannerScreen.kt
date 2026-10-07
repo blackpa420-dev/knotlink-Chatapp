@@ -501,7 +501,8 @@ fun QrScannerScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Public ID Badge with Copy Option
+                            // Username shown below the QR. The UUID remains
+                            // the internal/copyable identity, but is not exposed here.
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
