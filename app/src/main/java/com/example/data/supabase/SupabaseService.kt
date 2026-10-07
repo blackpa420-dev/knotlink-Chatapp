@@ -727,27 +727,41 @@ object SupabaseService {
                 return@withContext getProfileByUsername(raw)
             }
 
+            // QR/profile lookups are authenticated profile reads. Restore/refresh
+            // the Supabase session first so a process-recreated app never sends
+            // a stale/empty token and incorrectly turns a real profile into
+            // "user not found".
+            val session = ensureAuthenticatedSession().getOrElse {
+                Log.w(TAG, "getProfile($raw): authenticated session unavailable: ${it.message}")
+                return@withContext Result.failure(it)
+            }
+
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Authorization", "Bearer ${session.accessToken}")
                 .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    Log.w(TAG, "getProfile($raw): HTTP ${response.code}")
                     return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
                 }
                 val arr = JSONArray(responseBody)
-                if (arr.length() == 0) return@withContext Result.success(null)
+                if (arr.length() == 0) {
+                    Log.w(TAG, "getProfile($raw): profile row not found")
+                    return@withContext Result.success(null)
+                }
                 val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
                 cacheProfile(profile)
+                Log.d(TAG, "getProfile($raw): resolved username=${profile.username}")
                 Result.success(profile)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error in getProfile", e)
+            Log.e(TAG, "Error in getProfile($userId)", e)
             Result.failure(e)
         }
     }
