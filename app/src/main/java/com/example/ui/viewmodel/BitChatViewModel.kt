@@ -265,11 +265,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                 launch(Dispatchers.IO) {
                                     var success = false
                                     var backoffMs = 800L
-                                    repeat(5) { attempt ->
+                                    for (attempt in 0 until 5) {
                                         success = runCatching {
                                             repository.syncAllChatHistory(currentUid, currentUsername)
                                         }.getOrDefault(false)
-                                        if (success) return@repeat
+                                        if (success) break
                                         if (attempt < 4) {
                                             delay(backoffMs)
                                             backoffMs = (backoffMs * 2).coerceAtMost(5000L)
