@@ -31,11 +31,10 @@ object QRCodeGenerator {
         size: Int = 512
     ): Bitmap {
         val canonicalUserId = userId.trim()
-        val content = if (uuidRegex.matches(canonicalUserId)) {
-            "KNOTLINK:USER:$canonicalUserId"
-        } else {
-            "KNOTLINK:INVALID"
+        require(uuidRegex.matches(canonicalUserId)) {
+            "KnotLink QR requires the authenticated Supabase UUID"
         }
+        val content = "KNOTLINK:USER:$canonicalUserId"
 
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
             put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H)
