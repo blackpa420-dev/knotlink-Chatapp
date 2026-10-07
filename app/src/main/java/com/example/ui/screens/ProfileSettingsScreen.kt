@@ -182,20 +182,17 @@ fun ProfileSettingsScreen(
     var secondaryEmailVerificationSent by remember { mutableStateOf(false) }
     var birthDate by remember { mutableStateOf(user?.birthDate ?: "") }
 
-    LaunchedEffect(user?.avatarPath) {
-        resolvedAvatarPath = withContext(kotlinx.coroutines.Dispatchers.IO) {
+    LaunchedEffect(user?.avatarPath, user?.supabaseUid) {
+        resolvedAvatarPath = withContext(Dispatchers.IO) {
             val value = user?.avatarPath?.trim().orEmpty()
             when {
                 value.isBlank() -> null
-                value.startsWith("http://", ignoreCase = true) ||
-                    value.startsWith("https://", ignoreCase = true) ||
-                    value.startsWith("content://", ignoreCase = true) ||
-                    value.startsWith("file://", ignoreCase = true) ||
-                    value.startsWith("/") -> value
+                value.startsWith("http://", true) || value.startsWith("https://", true) ||
+                    value.startsWith("content://", true) || value.startsWith("file://", true) || value.startsWith("/") -> value
                 value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
-                    .getDownloadUrl(value, "image/jpeg")
+                    .getCachedDownloadPath(context, value, "image/jpeg")
                     .getOrNull()
-                else -> value
+                else -> null
             }
         }
     }
