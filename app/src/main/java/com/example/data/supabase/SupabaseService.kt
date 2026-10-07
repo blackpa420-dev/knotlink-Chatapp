@@ -132,22 +132,53 @@ object SupabaseService {
     suspend fun ensureAuthenticatedSession(): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
         try {
             ensureInitialized()
+
+            // The UI can survive an Android process restart with a Room identity,
+            // while the in-memory Auth session is empty. Always rehydrate the
+            // persisted Supabase session before declaring the user unauthenticated.
             if (currentSession == null) {
-                return@withContext Result.failure(IllegalStateException("Authenticated Supabase session required"))
-            }
-            if (!isJwtValid(currentSession?.accessToken)) {
-                if (!refreshSession()) {
-                    currentSession = null
-                    return@withContext Result.failure(IllegalStateException("Supabase session expired. Please log in again."))
+                synchronized(sessionRefreshLock) {
+                    if (currentSession == null) {
+                        restoreSession()
+                    }
                 }
             }
+
+            val initial = currentSession
+            if (initial == null ||
+                initial.accessToken.isBlank() ||
+                initial.accessToken == SupabaseConfig.ANON_KEY ||
+                initial.user?.id.isNullOrBlank()
+            ) {
+                currentSession = null
+                return@withContext Result.failure(
+                    IllegalStateException("Authenticated Supabase session required. Please log in again.")
+                )
+            }
+
+            if (!isJwtValid(initial.accessToken)) {
+                if (!refreshSession()) {
+                    currentSession = null
+                    persistSession(null)
+                    return@withContext Result.failure(
+                        IllegalStateException("Supabase session expired. Please log in again.")
+                    )
+                }
+            }
+
             val session = currentSession
             if (session?.accessToken.isNullOrBlank() ||
                 session?.accessToken == SupabaseConfig.ANON_KEY ||
-                session?.user?.id.isNullOrBlank()
+                session?.user?.id.isNullOrBlank() ||
+                !isJwtValid(session.accessToken)
             ) {
-                return@withContext Result.failure(IllegalStateException("Authenticated Supabase session required"))
+                currentSession = null
+                persistSession(null)
+                return@withContext Result.failure(
+                    IllegalStateException("Authenticated Supabase session required. Please log in again.")
+                )
             }
+
             Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to restore authenticated Supabase session", e)
@@ -396,7 +427,15 @@ object SupabaseService {
                     user = user
                 )
             }
-            currentSession = session
+            // A signup response without an access token is not an authenticated
+            // session. Never install the ANON placeholder as current auth state.
+            if (!session.accessToken.isBlank() &&
+                session.accessToken != SupabaseConfig.ANON_KEY &&
+                !session.user?.id.isNullOrBlank()
+            ) {
+                currentSession = session
+                persistSession(session)
+            }
             Result.success(session)
         } catch (e: Exception) {
             Log.e(TAG, "Error in signUpWithEmail", e)
