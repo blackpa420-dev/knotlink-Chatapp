@@ -175,8 +175,15 @@ fun SettingsScreen(
     val context = LocalContext.current
     var resolvedAvatarPath by remember(user?.avatarPath) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(user?.avatarPath) {
-        resolvedAvatarPath = viewModel.resolveAvatarDisplayUrl(user?.avatarPath)
+    LaunchedEffect(user?.avatarPath, user?.supabaseUid) {
+        resolvedAvatarPath = withContext(Dispatchers.IO) {
+            var resolved = viewModel.resolveAvatarDisplayUrl(user?.avatarPath)
+            if (resolved.isNullOrBlank() && !user?.avatarPath.isNullOrBlank()) {
+                kotlinx.coroutines.delay(350L)
+                resolved = viewModel.resolveAvatarDisplayUrl(user?.avatarPath)
+            }
+            resolved
+        }
     }
 
     // QR identity is always the authenticated Supabase UUID. Never fall back to a
@@ -384,7 +391,9 @@ fun SettingsScreen(
                         .padding(horizontal = 20.dp, vertical = 18.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val avatarPath = resolvedAvatarPath ?: user?.avatarPath
+                    // Only render a resolved URL/path. R2 object keys are not valid
+                    // image URLs and must never be handed to Coil directly.
+                    val avatarPath = resolvedAvatarPath
                     val outlineGradient = Brush.horizontalGradient(
                         listOf(
                             Color(0xFF2563EB),
