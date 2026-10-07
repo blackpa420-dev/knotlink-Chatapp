@@ -2066,8 +2066,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 if (cleanPartner == "user" || cleanPartner == "contact" || cleanPartner == "me" || cleanPartner == "you" || cleanPartner == "chat_partner") return@launch
                 if (cleanPartner == myUid?.lowercase() || cleanPartner == myEmail || cleanPartner == myUname) return@launch
 
-                val prof = SupabaseService.getProfile(partnerUid).getOrNull()
-                    ?: SupabaseService.getProfileByUsername(partnerUid).getOrNull()
+                val prof = repository.getProfileCachedFirst(partnerUid)
                 if (prof != null && prof.id.isNotBlank()) {
                     // Do not update partner profile if the lookup returned our own profile!
                     if (myUid != null && prof.id.equals(myUid, ignoreCase = true)) return@launch
@@ -2700,8 +2699,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                             .orEmpty()
                     }
                 } else {
-                    val prof = SupabaseService.getProfile(contactId).getOrNull()
-                        ?: SupabaseService.getProfileByUsername(contactId).getOrNull()
+                    val prof = repository.getProfileCachedFirst(contactId)
                         ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
 
                     if (prof != null) {
@@ -3205,16 +3203,10 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         if (!uuidRegex.matches(userId)) return ScannedUserResult.InvalidQr
 
-        val profileResult = com.example.data.supabase.SupabaseService.getProfile(userId)
-        val supa = profileResult.getOrElse {
-            android.util.Log.e(
-                "KnotLinkQR",
-                "Profile lookup failed for decoded UUID=$userId: ${it.message}",
-                it
-            )
-            return ScannedUserResult.UserNotFound
-        } ?: run {
-            android.util.Log.w("KnotLinkQR", "Decoded UUID has no profile row: $userId")
+        // Profile metadata is Room-first. Supabase is contacted only when
+        // this UUID is not already cached locally.
+        val supa = repository.getProfileCachedFirst(userId) ?: run {
+            android.util.Log.w("KnotLinkQR", "Decoded UUID has no cached/remote profile row: $userId")
             return ScannedUserResult.UserNotFound
         }
 
