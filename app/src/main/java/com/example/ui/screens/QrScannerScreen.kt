@@ -175,12 +175,30 @@ fun QrScannerScreen(
     var manualInputText by remember { mutableStateOf("") }
 
     var scannedUser by remember { mutableStateOf<ScannedUser?>(null) }
+    var resolvedQrUuid by remember { mutableStateOf("") }
 
     // Personal QR Code Bitmap Generation
     // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.
     // The same canonical search flow can resolve this UID directly.
-    val publicId = user?.publicId ?: user?.username ?: "KNOTLINK_USER"
-    val qrIdentifier = user?.qrIdentifier.orEmpty()
+    val displayUsername = user?.username
+        ?.trim()
+        ?.let { if (it.startsWith("@")) it else "@$it" }
+        ?.takeIf { it != "@" }
+        ?: "@username"
+
+    LaunchedEffect(user?.supabaseUid) {
+        val localUuid = user?.supabaseUid?.trim().orEmpty()
+        if (localUuid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
+            resolvedQrUuid = localUuid
+        } else {
+            resolvedQrUuid = com.example.data.supabase.SupabaseService
+                .getAuthenticatedUserId()
+                .getOrNull()
+                .orEmpty()
+        }
+    }
+
+    val qrIdentifier = resolvedQrUuid.ifBlank { user?.qrIdentifier.orEmpty() }
     val qrBitmap = remember(qrIdentifier) {
         if (qrIdentifier.isBlank()) {
             null
@@ -489,15 +507,15 @@ fun QrScannerScreen(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isNightMode) Color(0xFF212536) else Color(0xFFF1F5F9))
                                     .clickable {
-                                        clipboardManager.setText(AnnotatedString(publicId))
+                                        clipboardManager.setText(AnnotatedString(displayUsername))
                                         isCopiedId = true
-                                        Toast.makeText(context, "KnotLink ID copied!", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "KnotLink username copied!", Toast.LENGTH_SHORT).show()
                                     }
                                     .padding(horizontal = 14.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = publicId,
+                                    text = displayUsername,
                                     color = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF2563EB),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
@@ -523,7 +541,7 @@ fun QrScannerScreen(
                     ) {
                         Button(
                             onClick = {
-                                clipboardManager.setText(AnnotatedString("knotlink://user/$publicId"))
+                                clipboardManager.setText(AnnotatedString("knotlink://user/$qrIdentifier"))
                                 Toast.makeText(context, "KnotLink profile link copied!", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier
