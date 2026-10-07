@@ -34,11 +34,11 @@ object QRCodeGenerator {
         require(uuidRegex.matches(canonicalUserId)) {
             "KnotLink QR requires the authenticated Supabase UUID"
         }
-        val content = "KNOTLINK:USER:$canonicalUserId"
+        val content = canonicalUserId
 
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
-            put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.H)
-            put(EncodeHintType.MARGIN, 1)
+            put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M)
+            put(EncodeHintType.MARGIN, 2)
             put(EncodeHintType.CHARACTER_SET, "UTF-8")
         }
 
@@ -62,8 +62,8 @@ object QRCodeGenerator {
         val centerY = height / 2f
         // Keep a generous circular quiet zone around the logo so the QR remains
         // reliably scannable while the KnotLink mark sits neatly inside the ring.
-        val bgRadius = width * 0.125f
-        val logoRadius = bgRadius * 0.72f
+        val bgRadius = width * 0.105f
+        val logoRadius = bgRadius * 0.68f
 
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
