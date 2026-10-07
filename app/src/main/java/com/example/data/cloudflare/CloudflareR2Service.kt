@@ -1,5 +1,6 @@
 package com.example.data.cloudflare
 
+import android.content.Context
 import android.util.Log
 import com.example.data.supabase.SupabaseConfig
 import com.example.data.supabase.SupabaseService
@@ -10,6 +11,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -150,6 +155,41 @@ object CloudflareR2Service {
         result.map { it.optString("url", "") }.mapCatching { url ->
             if (url.isBlank()) throw Exception("R2 download URL missing")
             url
+        }
+    }
+    /** Resolve a private R2 object key into a stable local cache file. */
+    suspend fun getCachedDownloadPath(
+        context: Context,
+        objectKey: String,
+        contentType: String = "image/jpeg"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val key = objectKey.trim()
+            if (!key.startsWith("users/")) return@withContext Result.failure(Exception("Invalid R2 avatar key"))
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(key.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(it) }
+                .take(40)
+            val cacheDir = File(context.cacheDir, "knotlink_avatar_cache").apply { mkdirs() }
+            val cached = File(cacheDir, "$digest.jpg")
+            if (cached.exists() && cached.length() > 0L) return@withContext Result.success(cached.absolutePath)
+            val signedUrl = getDownloadUrl(key, contentType).getOrElse { return@withContext Result.failure(it) }
+            val temp = File(cacheDir, "$digest.tmp")
+            val connection = (URL(signedUrl).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"; connectTimeout = 20_000; readTimeout = 30_000
+                instanceFollowRedirects = true; useCaches = false
+            }
+            try {
+                if (connection.responseCode !in 200..299) return@withContext Result.failure(Exception("R2 avatar download failed (" + connection.responseCode + ")"))
+                connection.inputStream.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                if (!temp.exists() || temp.length() <= 0L) { temp.delete(); return@withContext Result.failure(Exception("R2 avatar download returned empty data")) }
+                if (cached.exists()) cached.delete()
+                if (!temp.renameTo(cached)) { temp.copyTo(cached, overwrite = true); temp.delete() }
+                Result.success(cached.absolutePath)
+            } finally { connection.disconnect() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to cache R2 avatar", e)
+            Result.failure(e)
         }
     }
 }
