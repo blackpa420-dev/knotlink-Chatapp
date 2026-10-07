@@ -2081,17 +2081,18 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val current = repository.userIdentity.firstOrNull() ?: UserIdentityEntity()
-            var remoteAvatarPath = avatarPath?.trim().orEmpty().ifBlank { current.avatarPath }
+            val cleanAvatar = avatarPath?.trim().orEmpty()
+            var remoteAvatarPath = if (cleanAvatar.isNotBlank()) cleanAvatar else current.avatarPath.orEmpty()
             val isR2Key = remoteAvatarPath.startsWith("users/")
             val isRemoteUrl = remoteAvatarPath.startsWith("http://", true) || remoteAvatarPath.startsWith("https://", true)
             if (remoteAvatarPath.isNotBlank() && !isR2Key && !isRemoteUrl) {
-                val bytes = if (remoteAvatarPath.startsWith("content://")) {
+                val bytes: ByteArray? = if (remoteAvatarPath.startsWith("content://")) {
                     getApplication<Application>().contentResolver.openInputStream(android.net.Uri.parse(remoteAvatarPath))?.use { it.readBytes() }
                 } else {
                     val file = java.io.File(remoteAvatarPath.removePrefix("file://"))
                     if (file.exists()) file.readBytes() else null
                 }
-                if (bytes.isNullOrEmpty()) return@withContext Result.failure(Exception("Selected profile photo could not be read. Please select it again."))
+                if (bytes == null || bytes.isEmpty()) return@withContext Result.failure(Exception("Selected profile photo could not be read. Please select it again."))
                 val upload = SupabaseService.uploadAvatar("avatar_" + System.currentTimeMillis() + ".jpg", bytes, "image/jpeg")
                 remoteAvatarPath = upload.getOrElse { error ->
                     Log.e("BitChatViewModel", "Profile avatar upload failed", error)

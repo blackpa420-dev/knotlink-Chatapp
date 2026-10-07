@@ -116,6 +116,7 @@ import coil.compose.AsyncImage
 import com.example.data.local.UserIdentityEntity
 import com.example.util.QRCodeGenerator
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import java.io.File
