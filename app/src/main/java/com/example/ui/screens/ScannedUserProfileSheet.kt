@@ -88,7 +88,7 @@ fun ScannedUserProfileSheet(
                 value.isBlank() -> null
                 value.startsWith("users/") ->
                     CloudflareR2Service.getCachedDownloadPath(
-                        context = LocalContext.current,
+                        context = context,
                         objectKey = value,
                         contentType = "image/jpeg"
                     ).getOrNull()
