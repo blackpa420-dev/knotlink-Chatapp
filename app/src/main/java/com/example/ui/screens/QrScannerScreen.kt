@@ -193,7 +193,6 @@ fun QrScannerScreen(
         } else {
             resolvedQrUuid = com.example.data.supabase.SupabaseService
                 .getAuthenticatedUserId()
-                .getOrNull()
                 .orEmpty()
         }
     }
