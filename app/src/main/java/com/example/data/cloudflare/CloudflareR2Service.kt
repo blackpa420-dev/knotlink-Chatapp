@@ -98,8 +98,12 @@ object CloudflareR2Service {
         chatId: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val userId = SupabaseService.getAuthenticatedUserId()
-                ?: return@withContext Result.failure(Exception("Authenticated user required"))
+            val authSession = SupabaseService.ensureAuthenticatedSession().getOrElse {
+                Log.e(TAG, "R2 upload blocked: authenticated Supabase session unavailable", it)
+                return@withContext Result.failure(it)
+            }
+            val userId = authSession.user?.id
+                ?: return@withContext Result.failure(Exception("Authenticated Supabase user ID required"))
 
             val normalizedFolder = folder.trim().trim('/').ifBlank { "chat_media" }
             val objectKey = when (normalizedFolder) {
