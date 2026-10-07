@@ -182,19 +182,21 @@ fun ProfileSettingsScreen(
 
     LaunchedEffect(user?.avatarPath) {
         resolvedAvatarPath = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val value = user?.avatarPath?.trim().orEmpty()
-            when {
-                value.isBlank() -> null
-                value.startsWith("http://", ignoreCase = true) ||
-                    value.startsWith("https://", ignoreCase = true) ||
-                    value.startsWith("content://", ignoreCase = true) ||
-                    value.startsWith("file://", ignoreCase = true) ||
-                    value.startsWith("/") -> value
-                value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
-                    .getDownloadUrl(value, "image/jpeg")
-                    .getOrNull()
-                else -> value
-            }
+            runCatching {
+                val value = user?.avatarPath?.trim().orEmpty()
+                when {
+                    value.isBlank() -> null
+                    value.startsWith("http://", ignoreCase = true) ||
+                        value.startsWith("https://", ignoreCase = true) ||
+                        value.startsWith("content://", ignoreCase = true) ||
+                        value.startsWith("file://", ignoreCase = true) ||
+                        value.startsWith("/") -> value
+                    value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
+                        .getDownloadUrl(value, "image/jpeg")
+                        .getOrNull()
+                    else -> value
+                }
+            }.getOrNull()
         }
     }
 
