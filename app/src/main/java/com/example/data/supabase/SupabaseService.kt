@@ -100,6 +100,12 @@ object SupabaseService {
             response.close()
             val refreshedToken = refreshSessionBlocking()
             if (refreshedToken.isNullOrBlank()) {
+                // The refresh token is no longer usable (for example after an
+                // account/session was revoked). Do not keep a dead session in
+                // memory or disk; subsequent auth consumers must require login.
+                currentSession = null
+                persistSession(null)
+                Log.w(TAG, "Authenticated request received 401 and session refresh failed; local session cleared")
                 return@addInterceptor chain.proceed(request)
             }
 
