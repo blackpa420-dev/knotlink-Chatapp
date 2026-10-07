@@ -241,6 +241,35 @@ class BitChatRepository(val dao: BitChatDao) {
         dao.clearMessagesForChat(chatId)
     }
 
+    /**
+     * Room-first profile resolution.
+     *
+     * Profiles are relatively static metadata, so once a profile is cached locally
+     * we do not hit Supabase again for every screen/open. Network is used only on
+     * a local cache miss, then the fresh profile is written back to Room.
+     */
+    suspend fun getProfileCachedFirst(identifier: String): SupabaseProfile? {
+        val key = identifier.trim()
+        if (key.isBlank()) return null
+
+        val local = getLocalProfile(key)
+        if (local != null) return local
+
+        val remote = runCatching {
+            if (key.matches(Regex("^[0-9a-fA-F-]{36}$"))) {
+                SupabaseService.getProfile(key).getOrNull()
+            } else {
+                SupabaseService.getProfileByUsername(key).getOrNull()
+                    ?: SupabaseService.getProfile(key).getOrNull()
+            }
+        }.getOrNull()
+
+        if (remote != null) {
+            cacheProfileLocally(remote)
+        }
+        return remote
+    }
+
     private suspend fun getLocalProfile(identifier: String): SupabaseProfile? {
         val key = identifier.trim()
         if (key.isBlank()) return null
