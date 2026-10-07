@@ -227,9 +227,26 @@ fun ProfileSettingsScreen(
     var isQrVisible by remember { mutableStateOf(false) }
     var qrCountdownSeconds by remember { mutableIntStateOf(10) }
 
-    // Memory cached QR Code Bitmap (regenerates ONLY if publicId changes)
+    // Memory cached QR Code Bitmap. Do not invoke the generator until a real
+    // Supabase Auth UUID is available; the settings screen can briefly compose
+    // with a null/incomplete local identity immediately after navigation.
+    val isValidQrUuid = remember(publicId) {
+        publicId.matches(
+            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        )
+    }
     val cachedQrBitmap = remember(publicId, context) {
-        QRCodeGenerator.generateProfileQRCode(userId = publicId, context = context, size = 512)
+        if (!isValidQrUuid) {
+            null
+        } else {
+            runCatching {
+                QRCodeGenerator.generateProfileQRCode(
+                    userId = publicId,
+                    context = context,
+                    size = 512
+                )
+            }.getOrNull()
+        }
     }
 
     // Auto-hide 10-second timer
