@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
 import android.util.Log
-import android.util.Size
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -310,7 +309,7 @@ fun QrScannerScreen(
 
                                 val imageAnalysis = ImageAnalysis.Builder()
                                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                    .setTargetResolution(Size(1280, 720))
+                                    .setTargetResolution(android.util.Size(1280, 720))
                                     .build()
 
                                 imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
