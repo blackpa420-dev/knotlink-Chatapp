@@ -183,21 +183,19 @@ fun ProfileSettingsScreen(
 
     LaunchedEffect(user?.avatarPath) {
         resolvedAvatarPath = withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                val value = user?.avatarPath?.trim().orEmpty()
-                when {
-                    value.isBlank() -> null
-                    value.startsWith("http://", ignoreCase = true) ||
-                        value.startsWith("https://", ignoreCase = true) ||
-                        value.startsWith("content://", ignoreCase = true) ||
-                        value.startsWith("file://", ignoreCase = true) ||
-                        value.startsWith("/") -> value
-                    value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
-                        .getDownloadUrl(value, "image/jpeg")
-                        .getOrNull()
-                    else -> value
-                }
-            }.getOrNull()
+            val value = user?.avatarPath?.trim().orEmpty()
+            when {
+                value.isBlank() -> null
+                value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) ||
+                    value.startsWith("content://", ignoreCase = true) ||
+                    value.startsWith("file://", ignoreCase = true) ||
+                    value.startsWith("/") -> value
+                value.startsWith("users/") -> com.example.data.cloudflare.CloudflareR2Service
+                    .getDownloadUrl(value, "image/jpeg")
+                    .getOrNull()
+                else -> value
+            }
         }
     }
 
@@ -230,25 +228,24 @@ fun ProfileSettingsScreen(
     var isQrVisible by remember { mutableStateOf(false) }
     var qrCountdownSeconds by remember { mutableIntStateOf(10) }
 
-    // Memory cached QR Code Bitmap. Do not invoke the generator until a real
-    // Supabase Auth UUID is available; the settings screen can briefly compose
-    // with a null/incomplete local identity immediately after navigation.
-    val isValidQrUuid = remember(publicId) {
-        publicId.matches(
-            Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-        )
-    }
-    val cachedQrBitmap = remember(publicId, context) {
-        if (!isValidQrUuid) {
-            null
-        } else {
-            runCatching {
-                QRCodeGenerator.generateProfileQRCode(
-                    userId = publicId,
-                    context = context,
-                    size = 512
-                )
-            }.getOrNull()
+    // Generate the QR only when the user opens it. Never do QR bitmap work
+    // during Settings composition/navigation.
+    var cachedQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(isQrVisible, publicId) {
+        if (isQrVisible && cachedQrBitmap == null && publicId.matches(
+                Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            )
+        ) {
+            cachedQrBitmap = withContext(Dispatchers.Default) {
+                runCatching {
+                    QRCodeGenerator.generateProfileQRCode(
+                        userId = publicId,
+                        context = context,
+                        size = 512
+                    )
+                }.getOrNull()
+            }
         }
     }
 
