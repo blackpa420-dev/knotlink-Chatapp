@@ -300,6 +300,7 @@ fun QrScannerScreen(
                                 val reader = MultiFormatReader().apply {
                                     val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
                                         put(DecodeHintType.POSSIBLE_FORMATS, listOf(BarcodeFormat.QR_CODE))
+                                        put(DecodeHintType.TRY_HARDER, true)
                                     }
                                     setHints(hints)
                                 }
@@ -977,25 +978,79 @@ private fun ScannerOverlayFrame(isScanningActive: Boolean) {
 private fun processImageProxy(imageProxy: ImageProxy, reader: MultiFormatReader): String? {
     if (imageProxy.format != ImageFormat.YUV_420_888) return null
 
-    val buffer = imageProxy.planes[0].buffer
-    val data = ByteArray(buffer.remaining())
-    buffer.get(data)
-
+    val plane = imageProxy.planes.firstOrNull() ?: return null
     val width = imageProxy.width
     val height = imageProxy.height
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride
+    val buffer = plane.buffer.duplicate()
 
-    val source = PlanarYUVLuminanceSource(
-        data, width, height, 0, 0, width, height, false
-    )
-    val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
-
-    return try {
-        reader.decodeWithState(binaryBitmap).text
-    } catch (e: Exception) {
-        null
-    } finally {
-        reader.reset()
+    // CameraX YUV frames are not guaranteed to be tightly packed. The old
+    // implementation fed the raw plane directly to ZXing as if rowStride == width,
+    // which can make the QR decoder silently fail on physical devices.
+    val luma = ByteArray(width * height)
+    for (y in 0 until height) {
+        val rowStart = y * rowStride
+        for (x in 0 until width) {
+            val index = rowStart + x * pixelStride
+            luma[y * width + x] = buffer.get(index)
+        }
     }
+
+    fun decode(data: ByteArray, dataWidth: Int, dataHeight: Int): String? {
+        val source = PlanarYUVLuminanceSource(
+            data,
+            dataWidth,
+            dataHeight,
+            0,
+            0,
+            dataWidth,
+            dataHeight,
+            false
+        )
+        val bitmap = BinaryBitmap(HybridBinarizer(source))
+        return try {
+            reader.decodeWithState(bitmap).text
+        } catch (_: Exception) {
+            null
+        } finally {
+            reader.reset()
+        }
+    }
+
+    // Try the native camera orientation first, then all 90-degree rotations.
+    // This makes scanning independent of portrait/landscape sensor orientation.
+    decode(luma, width, height)?.let { return it }
+
+    val rotation = imageProxy.imageInfo.rotationDegrees
+    if (rotation == 90 || rotation == 270) {
+        val rotated = ByteArray(width * height)
+        if (rotation == 90) {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    rotated[x * height + (height - 1 - y)] = luma[y * width + x]
+                }
+            }
+            decode(rotated, height, width)?.let { return it }
+        } else {
+            for (y in 0 until height) {
+                for (x in 0 until width) {
+                    rotated[(width - 1 - x) * height + y] = luma[y * width + x]
+                }
+            }
+            decode(rotated, height, width)?.let { return it }
+        }
+    } else if (rotation == 180) {
+        val rotated = ByteArray(width * height)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                rotated[(height - 1 - y) * width + (width - 1 - x)] = luma[y * width + x]
+            }
+        }
+        decode(rotated, width, height)?.let { return it }
+    }
+
+    return null
 }
 
 private suspend fun handleQrCodeText(
