@@ -1297,9 +1297,10 @@ fun ProfileSettingsScreen(
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (cachedQrBitmap != null) {
+                        val qrBitmap = cachedQrBitmap
+                        if (qrBitmap != null) {
                             Image(
-                                bitmap = cachedQrBitmap.asImageBitmap(),
+                                bitmap = qrBitmap.asImageBitmap(),
                                 contentDescription = "Personal KnotLink QR Code",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Fit
