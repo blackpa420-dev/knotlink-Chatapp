@@ -402,7 +402,7 @@ fun QrScannerScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -427,11 +427,13 @@ fun QrScannerScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(24.dp),
+                                .padding(horizontal = 24.dp, vertical = 30.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             // Avatar with gradient border
-                            val avatarPath = resolvedAvatarPath ?: user?.avatarPath
+                            // Render only the resolved avatar URL/path. Never pass an R2
+                    // object key directly to Coil.
+                    val avatarPath = resolvedAvatarPath
                             val hasAvatar = !avatarPath.isNullOrBlank()
                             Box(
                                 modifier = Modifier
@@ -487,19 +489,13 @@ fun QrScannerScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(18.dp))
 
                             Text(
                                 text = user?.fullName?.ifBlank { user?.username } ?: "KnotLink User",
                                 color = if (isNightMode) Color.White else Color(0xFF0F172A),
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
-                            )
-
-                            Text(
-                                text = displayUsername,
-                                color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                fontSize = 13.sp
                             )
 
                             Spacer(modifier = Modifier.height(20.dp))
