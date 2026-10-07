@@ -220,9 +220,27 @@ fun QrScannerScreen(
         ?.takeIf { it != "@" }
         ?: "@username"
 
-    LaunchedEffect(user?.supabaseUid) {
-        // Repair/confirm the Room-backed immutable UUID before rendering.
-        resolvedQrUuid = viewModel.ensureStableQrUuid().orEmpty()
+    LaunchedEffect(user?.supabaseUid, user?.email) {
+        // Render immediately from the UUID already held by Room, then repair it
+        // from Supabase in the background. This prevents the QR page from being
+        // stuck forever on "Generating QR Code..." during session restoration.
+        val localUuid = user?.supabaseUid?.trim().orEmpty()
+        if (localUuid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
+            resolvedQrUuid = localUuid
+        }
+        val stableUuid = viewModel.ensureStableQrUuid()
+        if (!stableUuid.isNullOrBlank()) {
+            resolvedQrUuid = stableUuid
+        } else {
+            // One last authoritative auth-session read. If this is still blank,
+            // the UI shows an explicit state instead of an endless generator.
+            val authenticatedUuid = com.example.data.supabase.SupabaseService
+                .getAuthenticatedUserId()
+                .orEmpty()
+            if (authenticatedUuid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))) {
+                resolvedQrUuid = authenticatedUuid
+            }
+        }
     }
 
     // Never fall back to the legacy qrIdentifier here. A non-UUID fallback
@@ -545,7 +563,7 @@ fun QrScannerScreen(
                                     }
                                 } else {
                                     Text(
-                                        text = "Generating QR Code...",
+                                        text = if (qrIdentifier.isBlank()) "Preparing your permanent QR..." else "QR generation failed",
                                         color = Color(0xFF64748B),
                                         fontSize = 12.sp
                                     )
