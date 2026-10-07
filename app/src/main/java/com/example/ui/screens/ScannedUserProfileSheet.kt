@@ -40,7 +40,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,12 +58,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Locale
 import com.example.R
 import com.example.ui.viewmodel.ScannedUser
-
+import com.example.data.cloudflare.CloudflareR2Service
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScannedUserProfileSheet(
@@ -72,6 +77,30 @@ fun ScannedUserProfileSheet(
     val sheetBg = if (isNightMode) Color(0xFF171820) else Color.White
     val textColor = if (isNightMode) Color.White else Color(0xFF0F172A)
     val subTextColor = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+    var resolvedAvatar by remember(scannedUser.avatarUrl) { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+
+    LaunchedEffect(scannedUser.avatarUrl) {
+        val value = scannedUser.avatarUrl?.trim().orEmpty()
+        resolvedAvatar = withContext(Dispatchers.IO) {
+            when {
+                value.isBlank() -> null
+                value.startsWith("users/") ->
+                    CloudflareR2Service.getCachedDownloadPath(
+                        context = LocalContext.current,
+                        objectKey = value,
+                        contentType = "image/jpeg"
+                    ).getOrNull()
+                value.startsWith("http://", true) ||
+                    value.startsWith("https://", true) ||
+                    value.startsWith("content://", true) ||
+                    value.startsWith("file://", true) ||
+                    value.startsWith("/") -> value
+                else -> null
+            }
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -118,9 +147,9 @@ fun ScannedUserProfileSheet(
                 contentAlignment = Alignment.Center
             ) {
                 val avatar = scannedUser.avatarUrl
-                if (!avatar.isNullOrBlank()) {
+                if (!resolvedAvatar.isNullOrBlank()) {
                     AsyncImage(
-                        model = avatar,
+                        model = resolvedAvatar,
                         contentDescription = scannedUser.name,
                         modifier = Modifier
                             .fillMaxSize()
