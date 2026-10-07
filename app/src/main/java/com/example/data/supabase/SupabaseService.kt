@@ -71,6 +71,7 @@ object SupabaseService {
 
     private var currentSession: SupabaseAuthSession? = null
     private var prefs: android.content.SharedPreferences? = null
+    private var applicationContext: android.content.Context? = null
     private val sessionRefreshLock = Any()
 
     // Authenticated requests must never silently fall back to ANON_KEY.
@@ -111,9 +112,46 @@ object SupabaseService {
         .build()
 
     fun init(context: android.content.Context) {
+        applicationContext = context.applicationContext
         if (prefs == null) {
-            prefs = context.applicationContext.getSharedPreferences("bitchat_supabase_prefs", android.content.Context.MODE_PRIVATE)
+            prefs = applicationContext?.getSharedPreferences(
+                "bitchat_supabase_prefs",
+                android.content.Context.MODE_PRIVATE
+            )
+        }
+        if (currentSession == null) {
             restoreSession()
+        }
+    }
+
+    private fun ensureInitialized() {
+        if (prefs != null && applicationContext != null) return
+        applicationContext?.let { init(it) }
+    }
+
+    suspend fun ensureAuthenticatedSession(): Result<SupabaseAuthSession> = withContext(Dispatchers.IO) {
+        try {
+            ensureInitialized()
+            if (currentSession == null) {
+                return@withContext Result.failure(IllegalStateException("Authenticated Supabase session required"))
+            }
+            if (!isJwtValid(currentSession?.accessToken)) {
+                if (!refreshSession()) {
+                    currentSession = null
+                    return@withContext Result.failure(IllegalStateException("Supabase session expired. Please log in again."))
+                }
+            }
+            val session = currentSession
+            if (session?.accessToken.isNullOrBlank() ||
+                session?.accessToken == SupabaseConfig.ANON_KEY ||
+                session?.user?.id.isNullOrBlank()
+            ) {
+                return@withContext Result.failure(IllegalStateException("Authenticated Supabase session required"))
+            }
+            Result.success(session)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore authenticated Supabase session", e)
+            Result.failure(e)
         }
     }
 
@@ -179,20 +217,8 @@ object SupabaseService {
 
     fun getSession(): SupabaseAuthSession? = currentSession
 
-    suspend fun getValidAccessToken(): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            if (currentSession == null) return@withContext Result.failure(Exception("Authenticated Supabase session required"))
-            if (!isJwtValid(currentSession?.accessToken)) {
-                if (!refreshSession()) return@withContext Result.failure(Exception("Supabase session expired"))
-            }
-            val token = currentSession?.accessToken.orEmpty()
-            if (token.isBlank() || token == SupabaseConfig.ANON_KEY) {
-                return@withContext Result.failure(Exception("Authenticated Supabase session required"))
-            }
-            Result.success(token)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    suspend fun getValidAccessToken(): Result<String> {
+        return ensureAuthenticatedSession().map { it.accessToken }
     }
 
     fun getAccessToken(): String {
@@ -211,12 +237,8 @@ object SupabaseService {
         return session.user?.id
     }
 
-    suspend fun getAuthenticatedUserId(): String? = withContext(Dispatchers.IO) {
-        if (currentSession == null) return@withContext null
-        if (!isJwtValid(currentSession?.accessToken)) {
-            if (!refreshSession()) return@withContext null
-        }
-        currentSession?.user?.id
+    suspend fun getAuthenticatedUserId(): String? {
+        return ensureAuthenticatedSession().getOrNull()?.user?.id
     }
 
     private fun refreshSessionBlocking(): String? {
@@ -609,6 +631,10 @@ object SupabaseService {
                 return@withContext Result.failure(Exception("Profile requires username, full name and avatar"))
             }
 
+            val token = ensureAuthenticatedSession().getOrElse {
+                return@withContext Result.failure(it)
+            }
+
             val body = JSONObject().apply {
                 put("p_username", username)
                 put("p_full_name", profile.fullName.trim())
@@ -619,7 +645,7 @@ object SupabaseService {
             val request = Request.Builder()
                 .url("${SupabaseConfig.REST_BASE_URL}/rpc/complete_profile")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Authorization", "Bearer ${token.accessToken}")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
