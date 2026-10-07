@@ -67,6 +67,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1299,12 +1300,19 @@ fun ProfileSettingsScreen(
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Image(
-                            bitmap = cachedQrBitmap.asImageBitmap(),
-                            contentDescription = "Personal KnotLink QR Code",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
+                        if (cachedQrBitmap != null) {
+                            Image(
+                                bitmap = cachedQrBitmap.asImageBitmap(),
+                                contentDescription = "Personal KnotLink QR Code",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                color = Color(0xFF2563EB),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
