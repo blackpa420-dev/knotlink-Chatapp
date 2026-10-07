@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.ImageFormat
+import android.util.Log
+import android.util.Size
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -289,6 +291,7 @@ fun QrScannerScreen(
                             val previewView = PreviewView(ctx)
                             val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                             val cameraExecutor = Executors.newSingleThreadExecutor()
+                            var analyzedFrameCount = 0
 
                             cameraProviderFuture.addListener({
                                 val cameraProvider = cameraProviderFuture.get()
@@ -307,6 +310,7 @@ fun QrScannerScreen(
 
                                 val imageAnalysis = ImageAnalysis.Builder()
                                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                    .setTargetResolution(Size(1280, 720))
                                     .build()
 
                                 imageAnalysis.setAnalyzer(cameraExecutor) { imageProxy ->
@@ -315,8 +319,13 @@ fun QrScannerScreen(
                                         return@setAnalyzer
                                     }
 
+                                    analyzedFrameCount++
+                                    if (analyzedFrameCount == 1 || analyzedFrameCount % 30 == 0) {
+                                        Log.d("KnotLinkQR", "Analyzer frame=$"+"analyzedFrameCount format=$"+"{imageProxy.format} size=$"+"{imageProxy.width}x$"+"{imageProxy.height} rotation=$"+"{imageProxy.imageInfo.rotationDegrees}")
+                                    }
                                     val qrResult = processImageProxy(imageProxy, reader)
                                     if (qrResult != null && isScanningActive) {
+                                        Log.i("KnotLinkQR", "QR decoded payloadLength=$"+"{qrResult.length} payload=$"+"{qrResult.take(120)}")
                                         isScanningActive = false
                                         scope.launch(Dispatchers.Main) {
                                             handleQrCodeText(
@@ -976,7 +985,10 @@ private fun ScannerOverlayFrame(isScanningActive: Boolean) {
 }
 
 private fun processImageProxy(imageProxy: ImageProxy, reader: MultiFormatReader): String? {
-    if (imageProxy.format != ImageFormat.YUV_420_888) return null
+    if (imageProxy.format != ImageFormat.YUV_420_888) {
+        Log.w("KnotLinkQR", "Unsupported image format=${imageProxy.format}")
+        return null
+    }
 
     val plane = imageProxy.planes.firstOrNull() ?: return null
     val width = imageProxy.width
@@ -984,75 +996,53 @@ private fun processImageProxy(imageProxy: ImageProxy, reader: MultiFormatReader)
     val rowStride = plane.rowStride
     val pixelStride = plane.pixelStride
     val buffer = plane.buffer.duplicate()
-
-    // CameraX YUV frames are not guaranteed to be tightly packed. The old
-    // implementation fed the raw plane directly to ZXing as if rowStride == width,
-    // which can make the QR decoder silently fail on physical devices.
     val luma = ByteArray(width * height)
     for (y in 0 until height) {
         val rowStart = y * rowStride
         for (x in 0 until width) {
             val index = rowStart + x * pixelStride
-            luma[y * width + x] = buffer.get(index)
+            if (index < buffer.limit()) luma[y * width + x] = buffer.get(index)
         }
+    }
+
+    fun decodeWithBinarizer(data: ByteArray, dataWidth: Int, dataHeight: Int, hybrid: Boolean): String? {
+        val source = PlanarYUVLuminanceSource(data, dataWidth, dataHeight, 0, 0, dataWidth, dataHeight, false)
+        val bitmap = if (hybrid) BinaryBitmap(HybridBinarizer(source))
+        else BinaryBitmap(com.google.zxing.common.GlobalHistogramBinarizer(source))
+        return try { reader.decodeWithState(bitmap).text }
+        catch (_: Exception) { null }
+        finally { reader.reset() }
     }
 
     fun decode(data: ByteArray, dataWidth: Int, dataHeight: Int): String? {
-        val source = PlanarYUVLuminanceSource(
-            data,
-            dataWidth,
-            dataHeight,
-            0,
-            0,
-            dataWidth,
-            dataHeight,
-            false
-        )
-        val bitmap = BinaryBitmap(HybridBinarizer(source))
-        return try {
-            reader.decodeWithState(bitmap).text
-        } catch (_: Exception) {
-            null
-        } finally {
-            reader.reset()
-        }
+        decodeWithBinarizer(data, dataWidth, dataHeight, true)?.let { return it }
+        return decodeWithBinarizer(data, dataWidth, dataHeight, false)
     }
 
-    // Try the native camera orientation first, then all 90-degree rotations.
-    // This makes scanning independent of portrait/landscape sensor orientation.
     decode(luma, width, height)?.let { return it }
 
     val rotation = imageProxy.imageInfo.rotationDegrees
     if (rotation == 90 || rotation == 270) {
         val rotated = ByteArray(width * height)
         if (rotation == 90) {
-            for (y in 0 until height) {
-                for (x in 0 until width) {
-                    rotated[x * height + (height - 1 - y)] = luma[y * width + x]
-                }
+            for (y in 0 until height) for (x in 0 until width) {
+                rotated[x * height + (height - 1 - y)] = luma[y * width + x]
             }
-            decode(rotated, height, width)?.let { return it }
         } else {
-            for (y in 0 until height) {
-                for (x in 0 until width) {
-                    rotated[(width - 1 - x) * height + y] = luma[y * width + x]
-                }
+            for (y in 0 until height) for (x in 0 until width) {
+                rotated[(width - 1 - x) * height + y] = luma[y * width + x]
             }
-            decode(rotated, height, width)?.let { return it }
         }
+        decode(rotated, height, width)?.let { return it }
     } else if (rotation == 180) {
         val rotated = ByteArray(width * height)
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                rotated[(height - 1 - y) * width + (width - 1 - x)] = luma[y * width + x]
-            }
+        for (y in 0 until height) for (x in 0 until width) {
+            rotated[(height - 1 - y) * width + (width - 1 - x)] = luma[y * width + x]
         }
         decode(rotated, width, height)?.let { return it }
     }
-
     return null
 }
-
 private suspend fun handleQrCodeText(
     rawPayload: String,
     viewModel: BitChatViewModel,
