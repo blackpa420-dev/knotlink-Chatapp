@@ -179,24 +179,30 @@ fun QrScannerScreen(
 
     // Resolve R2 avatar object keys before Coil renders the My QR profile.
     var resolvedAvatarPath by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(user?.avatarPath) {
+    LaunchedEffect(user?.avatarPath, user?.supabaseUid) {
         resolvedAvatarPath = withContext(Dispatchers.IO) {
-            runCatching {
-                val value = user?.avatarPath?.trim().orEmpty()
-                when {
-                    value.isBlank() -> null
-                    value.startsWith("http://", ignoreCase = true) ||
-                        value.startsWith("https://", ignoreCase = true) ||
-                        value.startsWith("content://", ignoreCase = true) ||
-                        value.startsWith("file://", ignoreCase = true) ||
-                        value.startsWith("/") -> value
-                    value.startsWith("users/") ->
-                        com.example.data.cloudflare.CloudflareR2Service
-                            .getDownloadUrl(value, "image/jpeg")
-                            .getOrNull()
-                    else -> value
+            val value = user?.avatarPath?.trim().orEmpty()
+            when {
+                value.isBlank() -> null
+                value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) ||
+                    value.startsWith("content://", ignoreCase = true) ||
+                    value.startsWith("file://", ignoreCase = true) ||
+                    value.startsWith("/") -> value
+                value.startsWith("users/") -> {
+                    // Retry once after auth/session readiness; this is common on
+                    // a freshly opened QR screen.
+                    var url = com.example.data.cloudflare.CloudflareR2Service
+                        .getDownloadUrl(value, "image/jpeg").getOrNull()
+                    if (url.isNullOrBlank()) {
+                        kotlinx.coroutines.delay(350L)
+                        url = com.example.data.cloudflare.CloudflareR2Service
+                            .getDownloadUrl(value, "image/jpeg").getOrNull()
+                    }
+                    url
                 }
-            }.getOrNull()
+                else -> value
+            }
         }
     }
 
