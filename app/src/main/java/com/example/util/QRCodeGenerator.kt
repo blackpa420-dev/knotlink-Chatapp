@@ -57,68 +57,10 @@ object QRCodeGenerator {
         val qrBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         qrBitmap.setPixels(pixels, 0, width, 0, 0, width, height)
 
-        val canvas = Canvas(qrBitmap)
-        val centerX = width / 2f
-        val centerY = height / 2f
-        // Keep a generous circular quiet zone around the logo so the QR remains
-        // reliably scannable while the KnotLink mark sits neatly inside the ring.
-        val bgRadius = width * 0.105f
-        val logoRadius = bgRadius * 0.68f
-
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE
-            style = Paint.Style.FILL
-        }
-        canvas.drawCircle(centerX, centerY, bgRadius, bgPaint)
-
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#2563EB")
-            style = Paint.Style.STROKE
-            strokeWidth = width * 0.012f
-        }
-        canvas.drawCircle(centerX, centerY, bgRadius, borderPaint)
-
-        val centerLogo = logoBitmap ?: context?.let { ctx ->
-            try { BitmapFactory.decodeResource(ctx.resources, R.drawable.appicon) } catch (_: Exception) { null }
-        }
-
-        if (centerLogo != null) {
-            val targetLogoSize = (logoRadius * 2f).toInt().coerceAtLeast(1)
-            val scaledLogo = Bitmap.createScaledBitmap(centerLogo, targetLogoSize, targetLogoSize, true)
-            val left = centerX - targetLogoSize / 2f
-            val top = centerY - targetLogoSize / 2f
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
-            // Render the app icon as a true rounded/circular mark inside the
-            // existing white circular quiet zone instead of letting a square
-            // icon touch the surrounding QR modules.
-            canvas.save()
-            val clipPath = Path().apply {
-                addCircle(centerX, centerY, logoRadius, Path.Direction.CW)
-            }
-            canvas.clipPath(clipPath)
-            canvas.drawBitmap(scaledLogo, left, top, paint)
-            canvas.restore()
-        } else {
-            val logoSize = width * 0.18f
-            val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#2563EB")
-                style = Paint.Style.FILL
-            }
-            val iconRadius = logoSize * 0.45f
-            val rect = RectF(centerX - iconRadius, centerY - iconRadius, centerX + iconRadius, centerY + iconRadius)
-            canvas.drawRoundRect(rect, iconRadius * 0.4f, iconRadius * 0.4f, logoPaint)
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = logoSize * 0.55f
-                textAlign = Paint.Align.CENTER
-                isFakeBoldText = true
-            }
-            val metrics = textPaint.fontMetrics
-            val textY = centerY - (metrics.ascent + metrics.descent) / 2f
-            canvas.drawText("K", centerX, textY, textPaint)
-        }
-
+        // Keep the QR itself clean and quiet-zone-safe. The branded KnotLink
+        // mark is rendered by the Compose layer as a small integrated center tile,
+        // where it can animate smoothly without a circular ring that looks like
+        // an unrelated overlay on top of the QR.
         return qrBitmap
     }
 }
