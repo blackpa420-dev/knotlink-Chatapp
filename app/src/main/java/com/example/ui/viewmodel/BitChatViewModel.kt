@@ -2080,6 +2080,13 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
         birthDate: String = ""
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // Profile editing can be reached from a restored local Room identity.
+            // Rehydrate Supabase Auth first so Room state is never mistaken for a live session.
+            SupabaseService.init(getApplication<Application>())
+            SupabaseService.ensureAuthenticatedSession().getOrElse {
+                return@withContext Result.failure(it)
+            }
+
             val current = repository.userIdentity.firstOrNull() ?: UserIdentityEntity()
             val cleanAvatar = avatarPath?.trim().orEmpty()
             var remoteAvatarPath = if (cleanAvatar.isNotBlank()) cleanAvatar else current.avatarPath.orEmpty()
