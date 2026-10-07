@@ -86,6 +86,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -155,14 +156,14 @@ fun ProfileSettingsScreen(
     user: UserIdentityEntity?,
     isNightMode: Boolean,
     onBack: () -> Unit,
-    onSaveProfile: (
+    onSaveProfile: suspend (
         fullName: String,
         avatarPath: String?,
         profession: String,
         email: String,
         isEmailVerified: Boolean,
         birthDate: String
-    ) -> Unit
+    ) -> Result<Unit>
 ) {
     val context = LocalContext.current
 
@@ -215,6 +216,8 @@ fun ProfileSettingsScreen(
     var pendingBitmapForCrop by remember { mutableStateOf<Bitmap?>(null) }
     var fullNameError by remember { mutableStateOf<String?>(null) }
     var showPhotoPickerOptions by remember { mutableStateOf(false) }
+    var isSavingProfile by remember { mutableStateOf(false) }
+    val saveScope = rememberCoroutineScope()
     var showProfessionSheet by remember { mutableStateOf(false) }
 
     // Camera Uri state for full-res capture
@@ -977,22 +980,46 @@ fun ProfileSettingsScreen(
                     // Save Profile Button
                     Button(
                         onClick = {
+                            if (isSavingProfile) return@Button
                             val err = validateFullName(fullName)
                             if (err != null) {
                                 fullNameError = err
-                            } else {
-                                onSaveProfile(
-                                    fullName.trim(),
-                                    currentAvatarPath,
-                                    profession,
-                                    registeredEmail.trim(),
-                                    true,
-                                    birthDate
-                                )
-                                Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
-                                onBack()
+                                return@Button
+                            }
+
+                            saveScope.launch {
+                                isSavingProfile = true
+                                try {
+                                    val result = onSaveProfile(
+                                        fullName.trim(),
+                                        currentAvatarPath,
+                                        profession,
+                                        registeredEmail.trim(),
+                                        true,
+                                        birthDate
+                                    )
+                                    if (result.isSuccess) {
+                                        Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
+                                        onBack()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            result.exceptionOrNull()?.message ?: "Profile update failed. Please try again.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        e.message ?: "Profile update failed. Please try again.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } finally {
+                                    isSavingProfile = false
+                                }
                             }
                         },
+                        enabled = !isSavingProfile,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
@@ -1002,17 +1029,27 @@ fun ProfileSettingsScreen(
                             contentColor = Color.White
                         )
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Save Profile Changes",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        if (isSavingProfile) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Saving...", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Save Profile Changes",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
