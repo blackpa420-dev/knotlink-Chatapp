@@ -177,6 +177,29 @@ fun QrScannerScreen(
     var scannedUser by remember { mutableStateOf<ScannedUser?>(null) }
     var resolvedQrUuid by remember { mutableStateOf("") }
 
+    // Resolve R2 avatar object keys before Coil renders the My QR profile.
+    var resolvedAvatarPath by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(user?.avatarPath) {
+        resolvedAvatarPath = withContext(Dispatchers.IO) {
+            runCatching {
+                val value = user?.avatarPath?.trim().orEmpty()
+                when {
+                    value.isBlank() -> null
+                    value.startsWith("http://", ignoreCase = true) ||
+                        value.startsWith("https://", ignoreCase = true) ||
+                        value.startsWith("content://", ignoreCase = true) ||
+                        value.startsWith("file://", ignoreCase = true) ||
+                        value.startsWith("/") -> value
+                    value.startsWith("users/") ->
+                        com.example.data.cloudflare.CloudflareR2Service
+                            .getDownloadUrl(value, "image/jpeg")
+                            .getOrNull()
+                    else -> value
+                }
+            }.getOrNull()
+        }
+    }
+
     // Personal QR Code Bitmap Generation
     // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.
     // The same canonical search flow can resolve this UID directly.
@@ -402,7 +425,7 @@ fun QrScannerScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             // Avatar with gradient border
-                            val avatarPath = user?.avatarPath
+                            val avatarPath = resolvedAvatarPath ?: user?.avatarPath
                             val hasAvatar = !avatarPath.isNullOrBlank()
                             Box(
                                 modifier = Modifier
@@ -468,7 +491,7 @@ fun QrScannerScreen(
                             )
 
                             Text(
-                                text = "@${user?.username ?: "user"}",
+                                text = displayUsername,
                                 color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
                                 fontSize = 13.sp
                             )
