@@ -476,62 +476,34 @@ object SupabaseService {
     ): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val cleanEmail = email.trim().lowercase()
-            val typesToTry = when (type.lowercase()) {
-                "recovery" -> listOf("recovery")
-                "signup" -> listOf("signup")
-                else -> listOf(type)
-            }
             var lastErrStr = ""
 
-            for (t in typesToTry) {
-                try {
-                    val resendUrl = "${SupabaseConfig.AUTH_BASE_URL}/resend"
-                    val resendBody = JSONObject().apply {
-                        put("email", cleanEmail)
-                        put("type", t)
-                    }
-                    val resendReq = Request.Builder()
-                        .url(resendUrl)
-                        .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                        .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
-                        .addHeader("Content-Type", "application/json")
-                        .post(resendBody.toString().toRequestBody(JSON_MEDIA_TYPE))
-                        .build()
-
-                    val resendResp = httpClient.newCall(resendReq).execute()
-                    val resendStr = resendResp.body?.string() ?: ""
-
-                    if (resendResp.isSuccessful) {
-                        Log.d(TAG, "OTP dispatched successfully via /resend ($t) to $cleanEmail")
-                        return@withContext Result.success(true)
-                    }
-
-                    val err = parseErrorMessage(resendStr, "")
-                    lastErrStr = err
-                    val isRateLimited = resendResp.code == 429 || resendResp.code == 422 ||
-                            err.contains("security", ignoreCase = true) ||
-                            err.contains("rate", ignoreCase = true) ||
-                            err.contains("seconds", ignoreCase = true) ||
-                            err.contains("limit", ignoreCase = true) ||
-                            err.contains("60", ignoreCase = true) ||
-                            err.contains("already", ignoreCase = true)
-
-                    if (isRateLimited) {
-                        Log.d(TAG, "OTP active/rate limited for $cleanEmail ($err)")
-                        return@withContext Result.success(true)
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error trying /resend type=$t for $cleanEmail", e)
-                }
-            }
-
             if (type.equals("recovery", ignoreCase = true)) {
+                val resendUrl = "${SupabaseConfig.AUTH_BASE_URL}/resend"
+                val body = JSONObject().apply {
+                    put("email", cleanEmail)
+                    put("type", "recovery")
+                }
+                val request = Request.Builder()
+                    .url(resendUrl)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                val response = httpClient.newCall(request).execute()
+                val responseBody = response.body?.string().orEmpty()
+                if (response.isSuccessful) {
+                    Log.d(TAG, "Recovery OTP dispatched to $cleanEmail")
+                    return@withContext Result.success(true)
+                }
                 return@withContext Result.failure(
-                    Exception(lastErrStr.ifBlank { "No account found for this email. Please create an account first." })
+                    Exception(parseErrorMessage(responseBody, "Failed to send password reset code"))
                 )
             }
 
-            // Non-recovery OTP fallback may create/verify the signup flow.
+            // New signup: /otp is the primary endpoint and is responsible for creating
+            // the unconfirmed auth user and dispatching the OTP.
             try {
                 val otpUrl = "${SupabaseConfig.AUTH_BASE_URL}/otp"
                 val otpBody = JSONObject().apply {
@@ -547,15 +519,51 @@ object SupabaseService {
                     .build()
 
                 val otpResp = httpClient.newCall(otpReq).execute()
-                val otpStr = otpResp.body?.string() ?: ""
-                if (otpResp.isSuccessful) return@withContext Result.success(true)
+                val otpStr = otpResp.body?.string().orEmpty()
+                if (otpResp.isSuccessful) {
+                    Log.d(TAG, "Signup OTP dispatched successfully via /otp to $cleanEmail")
+                    return@withContext Result.success(true)
+                }
 
-                lastErrStr = parseErrorMessage(otpStr, "Failed to send verification code")
+                lastErrStr = parseErrorMessage(otpStr, "")
+                Log.w(TAG, "Signup /otp failed for $cleanEmail: HTTP ${otpResp.code}: $lastErrStr")
             } catch (e: Exception) {
-                Log.w(TAG, "Error trying /otp for $cleanEmail", e)
+                lastErrStr = e.message.orEmpty()
+                Log.w(TAG, "Signup /otp request failed for $cleanEmail", e)
             }
 
-            Result.failure(Exception(lastErrStr.ifBlank { "Failed to send verification code" }))
+            // Existing unconfirmed signup fallback.
+            try {
+                val resendUrl = "${SupabaseConfig.AUTH_BASE_URL}/resend"
+                val resendBody = JSONObject().apply {
+                    put("email", cleanEmail)
+                    put("type", "signup")
+                }
+                val resendReq = Request.Builder()
+                    .url(resendUrl)
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                    .addHeader("Content-Type", "application/json")
+                    .post(resendBody.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+
+                val resendResp = httpClient.newCall(resendReq).execute()
+                val resendStr = resendResp.body?.string().orEmpty()
+                if (resendResp.isSuccessful) {
+                    Log.d(TAG, "Signup OTP dispatched via /resend fallback to $cleanEmail")
+                    return@withContext Result.success(true)
+                }
+
+                lastErrStr = parseErrorMessage(resendStr, lastErrStr)
+                Log.w(TAG, "Signup /resend fallback failed for $cleanEmail: HTTP ${resendResp.code}: $lastErrStr")
+            } catch (e: Exception) {
+                Log.w(TAG, "Signup /resend fallback request failed for $cleanEmail", e)
+                if (lastErrStr.isBlank()) lastErrStr = e.message.orEmpty()
+            }
+
+            Result.failure(
+                Exception(lastErrStr.ifBlank { "Failed to send verification code. Please try again." })
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Error sending OTP to $email", e)
             Result.failure(e)
