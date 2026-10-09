@@ -180,6 +180,10 @@ interface BitChatDao {
     @Query("UPDATE messages SET isDeletedForMe = 1 WHERE id = :messageId")
     suspend fun updateMessageDeletedForMe(messageId: Long)
 
+    /** Delete-for-everyone leaves no tombstone/"deleted" stamp: the row is removed outright. */
+    @Query("DELETE FROM messages WHERE serverMessageId = :anyId OR clientMessageId = :anyId")
+    suspend fun deleteMessageByAnyId(anyId: String)
+
     @Query("UPDATE messages SET isPinned = :isPinned, pinnedAt = :pinnedAt WHERE serverMessageId = :serverMessageId OR clientMessageId = :serverMessageId")
     suspend fun updateMessagePinnedStatus(serverMessageId: String, isPinned: Boolean, pinnedAt: Long?)
 

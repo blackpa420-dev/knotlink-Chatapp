@@ -307,6 +307,19 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
         // Startup history sync is handled by the identity/Reatime initialization path above.
 
+        // Messages deleted for everyone by the other side: remove the local row (no stamp).
+        viewModelScope.launch {
+            try {
+                SupabaseRealtimeManager.deletedMessageIds.collect { deletedId ->
+                    repository.removeMessageDeletedRemotely(deletedId)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w("BitChatViewModel", "deletedMessageIds collector stopped: ${e.message}")
+            }
+        }
+
         // Listen for Incoming Messages via Supabase Realtime and sync with Room DB
         viewModelScope.launch {
             try {
@@ -2737,13 +2750,17 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
 
-                SupabaseService.createCallSession(
+                val createdCall = SupabaseService.createCallSession(
                     SupabaseCallSession(
                         callId = callId, callerId = myUid, callerName = myName,
                         callerAvatar = callerPublicAvatar, receiverId = resolvedReceiverId,
                         callType = callType, status = "RINGING"
                     )
                 )
+                if (createdCall.isFailure) {
+                    // No server row = nobody can ever be rung. Fail fast (handled by the catch below).
+                    throw IllegalStateException(createdCall.exceptionOrNull()?.message ?: "Call could not be started")
+                }
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) {
                     try {

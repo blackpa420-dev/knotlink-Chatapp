@@ -32,6 +32,10 @@ object SupabaseRealtimeManager {
     private val _messageStatusUpdates = MutableSharedFlow<SupabaseMessage>(extraBufferCapacity = 128)
     val messageStatusUpdates: SharedFlow<SupabaseMessage> = _messageStatusUpdates.asSharedFlow()
 
+    /** Server message ids that were deleted for everyone (row is gone; no tombstone). */
+    private val _deletedMessageIds = MutableSharedFlow<String>(extraBufferCapacity = 128)
+    val deletedMessageIds: SharedFlow<String> = _deletedMessageIds.asSharedFlow()
+
     private val _incomingCalls = MutableSharedFlow<SupabaseCallSession>(extraBufferCapacity = 32)
     val incomingCalls: SharedFlow<SupabaseCallSession> = _incomingCalls.asSharedFlow()
 
@@ -281,6 +285,11 @@ object SupabaseRealtimeManager {
                                     })
                                 }
                                 put(JSONObject().apply {
+                                    put("event", "INSERT")
+                                    put("schema", "public")
+                                    put("table", SupabaseConfig.TABLE_MESSAGE_DELETIONS)
+                                })
+                                put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
                                     put("table", SupabaseConfig.TABLE_TYPING_STATUS)
@@ -414,6 +423,12 @@ object SupabaseRealtimeManager {
                                         }
                                         if (msg.id.isNotBlank() && msg.status.isNotBlank()) {
                                             scope.launch { _messageStatusUpdates.emit(msg) }
+                                        }
+                                    }
+                                    SupabaseConfig.TABLE_MESSAGE_DELETIONS -> {
+                                        val deletedId = record.optString("message_id", "")
+                                        if (deletedId.isNotBlank()) {
+                                            scope.launch { _deletedMessageIds.emit(deletedId) }
                                         }
                                     }
                                     SupabaseConfig.TABLE_CALL_SESSIONS -> {

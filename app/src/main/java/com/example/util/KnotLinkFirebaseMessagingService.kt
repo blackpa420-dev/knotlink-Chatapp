@@ -86,6 +86,8 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             val callType = data["call_type"] ?: "Voice"
             val senderId = data["sender_id"] ?: ""
             val chatId = data["chat_id"] ?: data["room_id"] ?: senderId
+            // Server (fcm-dispatch) sends the real call id as call_id and the real chat id as chat_id.
+            val callId = data["call_id"]?.ifBlank { null } ?: chatId
             val rawSenderAvatarUrl = data["sender_avatar"] ?: ""
             // FCM must render the notification immediately. Do not perform a
             // Supabase/profile network lookup here; Android gives onMessageReceived
@@ -108,22 +110,52 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                 }
             }
 
-            // Handle Call Cancelled / Ended / Declined Signal
+            // Other side deleted a message for everyone: drop it locally (no stamp) and any notification.
+            if (type.equals("message_deleted", ignoreCase = true)) {
+                val deletedId = data["message_id"].orEmpty()
+                if (deletedId.isNotBlank()) {
+                    scope.launch {
+                        try {
+                            com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
+                                .bitChatDao().deleteMessageByAnyId(deletedId)
+                        } catch (e: Throwable) {
+                            Log.w("KnotLinkFCM", "Remote delete failed: ${e.message}")
+                        }
+                    }
+                }
+                return
+            }
+
+            // Handle Call Cancelled / Ended / Declined / Missed Signal
             if (type.equals("call_ended", ignoreCase = true) ||
                 type.equals("call_declined", ignoreCase = true) ||
-                type.equals("call_cancelled", ignoreCase = true)) {
+                type.equals("call_cancelled", ignoreCase = true) ||
+                type.equals("call_missed", ignoreCase = true)) {
 
                 Log.i("KnotLinkFCM", "Received call termination push ($type) for $callerName")
-                NotificationHelper.cancelCallNotification(applicationContext, callerName, chatId)
+                NotificationHelper.cancelCallNotification(applicationContext, callerName, callId)
 
                 val endIntent = Intent("com.knotlink.CALL_ENDED").apply {
                     putExtra("caller_name", callerName)
-                    putExtra("call_id", chatId)
+                    putExtra("call_id", callId)
                     putExtra("chat_id", chatId)
                     putExtra("caller_id", senderId)
                     setPackage(packageName)
                 }
                 applicationContext.sendBroadcast(endIntent)
+
+                // The callee gets a visible "Missed call" notification (server marks that copy with notify=1).
+                if (type.equals("call_missed", ignoreCase = true) && data["notify"] == "1") {
+                    NotificationHelper.showIncomingMessageNotification(
+                        context = applicationContext,
+                        senderName = callerName,
+                        text = body,
+                        chatId = chatId,
+                        avatarBitmap = null,
+                        senderId = senderId,
+                        serverMessageId = null
+                    )
+                }
                 return
             }
 
@@ -138,7 +170,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     context = applicationContext,
                     callerName = callerName,
                     callType = callType,
-                    callId = chatId,
+                    callId = callId,
                     callerId = senderId,
                     callerAvatarBitmap = null
                 )
@@ -152,7 +184,7 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                                 context = applicationContext,
                                 callerName = callerName,
                                 callType = callType,
-                                callId = chatId,
+                                callId = callId,
                                 callerId = senderId,
                                 callerAvatarBitmap = bitmap,
                                 silentUpdate = true
@@ -169,10 +201,10 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                         val ts = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
                         val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
                         val timeStr = sdf.format(java.util.Date(ts))
-                        val callLogId = if (chatId.isNotBlank()) "remote_call_$chatId" else "remote_call_${java.util.UUID.randomUUID().toString().take(8)}"
+                        val callLogId = if (callId.isNotBlank()) "remote_call_$callId" else "remote_call_${java.util.UUID.randomUUID().toString().take(8)}"
                         val callLog = com.example.data.local.CallLogEntity(
                             id = callLogId,
-                            contactId = if (senderId.isNotBlank()) senderId else chatId,
+                            contactId = if (senderId.isNotBlank()) senderId else callId,
                             contactName = callerName,
                             callType = if (callType.equals("Video", ignoreCase = true) || callType.equals("VIDEO", ignoreCase = true)) "VIDEO" else "AUDIO",
                             direction = "INCOMING",
@@ -194,8 +226,8 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     putExtra("caller_name", callerName)
                     putExtra("caller_id", senderId)
                     putExtra("call_type", callType)
-                    putExtra("call_id", chatId)
-                    putExtra("room_id", chatId)
+                    putExtra("call_id", callId)
+                    putExtra("room_id", callId)
                     setPackage(packageName)
                 }
                 applicationContext.sendBroadcast(callIntent)

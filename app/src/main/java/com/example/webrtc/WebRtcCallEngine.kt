@@ -32,10 +32,11 @@ enum class CallQuality(
     val targetFps: Int,
     val scaleResolutionDownBy: Double
 ) {
-    ULTRA_2K("2K Ultra HD", "2560x1440", 2560, 1440, 2200, 30, 1.0),
-    FHD_1080P("1080p Full HD", "1920x1080", 1920, 1080, 1500, 30, 1.333333),
-    HD_720P("720p HD", "1280x720", 1280, 720, 850, 30, 2.0),
-    SD_480P("480p SD", "640x480", 640, 480, 450, 24, 3.0),
+    // scaleResolutionDownBy is computed at runtime from the REAL capture size (see configureVideoSenderBitrate).
+    ULTRA_2K("2K Ultra HD", "2560x1440", 2560, 1440, 4000, 30, 1.0),
+    FHD_1080P("1080p Full HD", "1920x1080", 1920, 1080, 2500, 30, 1.333333),
+    HD_720P("720p HD", "1280x720", 1280, 720, 1200, 30, 2.0),
+    SD_480P("480p SD", "640x480", 640, 480, 600, 24, 3.0),
     LOW_360P("360p Low Bandwidth", "480x360", 480, 360, 300, 20, 4.0)
 }
 
@@ -137,6 +138,10 @@ class WebRtcCallEngine private constructor(private val context: Context) {
 
     // Media resources
     private var videoCapturer: CameraVideoCapturer? = null
+    // Actual camera capture size/fps (best the camera supports, capped at 2K). Quality tiers downscale from this.
+    @Volatile private var captureWidth = 1280
+    @Volatile private var captureHeight = 720
+    @Volatile private var captureFps = 30
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var localVideoTrackInstance: VideoTrack? = null
@@ -233,8 +238,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 // 1. Setup local tracks
                 setupLocalMedia(isVideo)
 
-                // 2. Create PeerConnection
-                setupPeerConnection(callId, isCaller, isVideo)
+                // 2. Create PeerConnection (Cloudflare TURN creds; short timeout so call setup is never blocked)
+                val turnServers = fetchCloudflareTurnServers(callId)
+                setupPeerConnection(callId, isCaller, isVideo, turnServers)
 
                 // 3. Start signaling and negotiation
                 if (isCaller) {
@@ -349,15 +355,24 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     videoSource = vSource
                     capturer.initialize(helper, context, vSource.capturerObserver)
                     
+                    val (capW, capH, capFps) = pickCaptureProfile()
                     try {
-                        capturer.startCapture(1280, 720, 30)
-                        Log.d(TAG, "Camera started capture at 1280x720 @ 30 FPS")
+                        capturer.startCapture(capW, capH, capFps)
+                        captureWidth = capW; captureHeight = capH; captureFps = capFps
+                        Log.d(TAG, "Camera started capture at ${capW}x${capH} @ $capFps FPS")
                     } catch (e: Throwable) {
-                        Log.w(TAG, "720p capture unavailable, trying 640x480")
+                        Log.w(TAG, "${capW}x${capH} capture unavailable, trying 1280x720")
                         try {
-                            capturer.startCapture(640, 480, 24)
+                            capturer.startCapture(1280, 720, 30)
+                            captureWidth = 1280; captureHeight = 720; captureFps = 30
                         } catch (e2: Throwable) {
-                            Log.e(TAG, "All camera startCapture attempts failed", e2)
+                            Log.w(TAG, "720p capture unavailable, trying 640x480")
+                            try {
+                                capturer.startCapture(640, 480, 24)
+                                captureWidth = 640; captureHeight = 480; captureFps = 24
+                            } catch (e3: Throwable) {
+                                Log.e(TAG, "All camera startCapture attempts failed", e3)
+                            }
                         }
                     }
 
@@ -390,6 +405,27 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         } catch (e: Throwable) {
             Log.e(TAG, "ensureCameraStarted exception: ${e.message}", e)
         }
+    }
+
+    /** Largest real camera format <= 2560x1440 (>= 24 fps); falls back to 1280x720@30. */
+    private fun pickCaptureProfile(): Triple<Int, Int, Int> {
+        try {
+            val enumerator = Camera2Enumerator(context)
+            val front = _engineState.value.isFrontCamera
+            val name = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) == front }
+                ?: enumerator.deviceNames.firstOrNull()
+            if (name != null) {
+                val best = enumerator.getSupportedFormats(name)
+                    ?.filter { it.width >= it.height && it.width <= 2560 && it.height <= 1440 && it.framerate.max / 1000 >= 24 }
+                    ?.maxByOrNull { it.width.toLong() * it.height.toLong() * 100_000L + it.framerate.max.toLong() }
+                if (best != null && best.height >= 480) {
+                    return Triple(best.width, best.height, minOf(30, best.framerate.max / 1000))
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "pickCaptureProfile failed: ${e.message}")
+        }
+        return Triple(1280, 720, 30)
     }
 
     private fun createVideoCapturer(isFront: Boolean): CameraVideoCapturer? {
@@ -432,8 +468,46 @@ class WebRtcCallEngine private constructor(private val context: Context) {
         return null
     }
 
-    private fun setupPeerConnection(callId: String, isCaller: Boolean, isVideo: Boolean) {
-        val iceServers = listOf(
+    private suspend fun fetchCloudflareTurnServers(callId: String): List<PeerConnection.IceServer> {
+        return try {
+            val arr = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    com.example.data.supabase.SupabaseService.fetchTurnIceServers(callId).getOrNull()
+                }
+            } ?: return emptyList()
+            val out = ArrayList<PeerConnection.IceServer>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val urlsJson = o.optJSONArray("urls")
+                val urls = ArrayList<String>()
+                if (urlsJson != null) {
+                    for (j in 0 until urlsJson.length()) urls.add(urlsJson.optString(j))
+                } else {
+                    o.optString("urls").takeIf { it.isNotBlank() }?.let { urls.add(it) }
+                }
+                val usable = urls.filter { it.isNotBlank() && !it.contains(":53") }
+                if (usable.isEmpty()) continue
+                val b = PeerConnection.IceServer.builder(usable)
+                val user = o.optString("username", "")
+                val cred = o.optString("credential", "")
+                if (user.isNotBlank()) b.setUsername(user)
+                if (cred.isNotBlank()) b.setPassword(cred)
+                out.add(b.createIceServer())
+            }
+            out
+        } catch (e: Throwable) {
+            Log.w(TAG, "Cloudflare TURN unavailable, using fallback ICE servers: ${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun setupPeerConnection(
+        callId: String,
+        isCaller: Boolean,
+        isVideo: Boolean,
+        cloudflareIceServers: List<PeerConnection.IceServer> = emptyList()
+    ) {
+        val fallbackIceServers = listOf(
             PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
             PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer(),
@@ -453,6 +527,8 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                 .createIceServer()
         )
 
+        // Cloudflare STUN+TURN first; the public relay list is only a last resort if the fetch failed.
+        val iceServers = if (cloudflareIceServers.isNotEmpty()) cloudflareIceServers else fallbackIceServers
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
@@ -474,6 +550,9 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                             isConnecting = false,
                             connectedAt = connectedAt
                         )
+                        if (_engineState.value.callType == "VIDEO") {
+                            configureVideoSenderBitrate(_engineState.value.currentQuality)
+                        }
                         scope.launch {
                             try {
                                 com.example.data.supabase.SupabaseService.updateCallSessionStatus(callId, "CONNECTED", connectedAt = connectedAt)
@@ -847,7 +926,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     videoCapturePausedByScreen = true
                 } else {
                     if (!videoCapturePausedByScreen || !_engineState.value.isCallActive) return@launch
-                    videoCapturer?.startCapture(1280, 720, 30)
+                    videoCapturer?.startCapture(captureWidth, captureHeight, captureFps)
                     localVideoTrackInstance?.setEnabled(true)
                     videoCapturePausedByScreen = false
                 }
@@ -978,7 +1057,7 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     encoding.minBitrateBps = (quality.targetBitrateKbps * 0.30 * 1000).toInt().coerceAtLeast(100_000)
                     encoding.maxBitrateBps = quality.targetBitrateKbps * 1000
                     encoding.maxFramerate = quality.targetFps
-                    encoding.scaleResolutionDownBy = quality.scaleResolutionDownBy
+                    encoding.scaleResolutionDownBy = maxOf(1.0, captureWidth.toDouble() / quality.targetWidth.toDouble())
                 }
                 // Prefer preserving motion smoothness; WebRTC can reduce resolution
                 // before aggressively reducing frame rate when bandwidth falls.
@@ -1003,7 +1082,16 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     val isCellular = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
                     // Keep normal calls capped at FHD/720p. The previous 2K Wi-Fi
                     // ceiling created large visible quality swings on mobile devices.
-                    val transportCeiling = if (isWifi) CallQuality.FHD_1080P else if (isCellular) CallQuality.HD_720P else CallQuality.HD_720P
+                    // ULTRA_2K.ordinal=0 (best) ... LOW_360P.ordinal=4 (worst). Ceiling = best tier allowed here,
+                    // limited by what the camera really captures.
+                    val best2k = captureHeight >= 1440
+                    val best1080 = captureHeight >= 1080
+                    val transportCeiling = when {
+                        isWifi && best2k -> CallQuality.ULTRA_2K
+                        isWifi && best1080 -> CallQuality.FHD_1080P
+                        isCellular && best1080 -> CallQuality.FHD_1080P
+                        else -> CallQuality.HD_720P
+                    }
                     var rttMs = _engineState.value.roundTripTimeMs
                     var packetLoss = _engineState.value.packetLossPercent
 
@@ -1041,18 +1129,18 @@ class WebRtcCallEngine private constructor(private val context: Context) {
                     val target = when {
                         veryBad -> CallQuality.LOW_360P
                         bad -> CallQuality.SD_480P
-                        isWifi -> CallQuality.FHD_1080P
-                        isCellular -> if (packetLoss >= 4f || rttMs >= 180L) CallQuality.HD_720P else CallQuality.HD_720P
+                        isWifi -> transportCeiling
+                        isCellular -> if (packetLoss >= 4f || rttMs >= 180L) CallQuality.HD_720P else transportCeiling
                         else -> CallQuality.HD_720P
                     }
-                    val capped = if (target.ordinal > transportCeiling.ordinal) transportCeiling else target
-                    // Hysteresis prevents visible quality oscillation: downgrades need
-                    // a sustained problem and upgrades need a longer stable window.
+                    // Never exceed the ceiling: if the wanted tier is better (lower ordinal) than the ceiling, use the ceiling.
+                    val capped = if (target.ordinal < transportCeiling.ordinal) transportCeiling else target
+                    // Hysteresis: drop quality quickly when the network degrades, raise it slowly once stable.
+                    val isUpgrade = capped.ordinal < current.ordinal
+                    val isDowngrade = capped.ordinal > current.ordinal
                     val canUpgrade = now - lastQualityChangeAt >= 15_000L
-                    val canChange = now - lastQualityChangeAt >= 8_000L
-                    if (capped.ordinal > current.ordinal && !canUpgrade) {
-                        // Keep current quality until the connection is stable.
-                    } else if (capped != current && canChange) {
+                    val canDowngrade = now - lastQualityChangeAt >= 4_000L
+                    if ((isUpgrade && canUpgrade) || (isDowngrade && canDowngrade)) {
                         configureVideoSenderBitrate(capped)
                         lastQualityChangeAt = now
                         _engineState.value = _engineState.value.copy(

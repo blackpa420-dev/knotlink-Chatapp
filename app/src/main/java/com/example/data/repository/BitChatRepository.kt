@@ -1837,8 +1837,8 @@ class BitChatRepository(val dao: BitChatDao) {
                         }
                     }
                     // Real-time update for deletes
-                    if (supaMsg.isDeletedForEveryone && !existing.isDeletedForEveryone) {
-                        dao.updateMessageDeletedForEveryone(supaMsg.id, System.currentTimeMillis())
+                    if (supaMsg.isDeletedForEveryone) {
+                        dao.deleteMessageByAnyId(supaMsg.id)
                     }
                 }
 
@@ -2361,7 +2361,9 @@ class BitChatRepository(val dao: BitChatDao) {
         val local = dao.getMessageById(messageId)
 
         if (deleteForEveryone) {
-            dao.updateMessageDeletedForEveryone(targetId, now)
+            // No "this message was deleted" stamp anywhere: remove the row locally;
+            // the server removes it (and its R2 media) and tells the other side.
+            dao.deleteMessageByAnyId(targetId)
             if (!serverMessageId.isNullOrBlank()) {
                 val result = SupabaseService.deleteMessageForEveryone(serverMessageId)
                 if (result.isSuccess && local != null) {
@@ -2388,7 +2390,17 @@ class BitChatRepository(val dao: BitChatDao) {
             }
         } else {
             dao.updateMessageDeletedForMe(messageId)
+            // Persist "delete for me" server-side so it survives reinstall / other devices.
+            // When both people have deleted it, the server purges it (and its media) for good.
+            if (!serverMessageId.isNullOrBlank()) {
+                try { SupabaseService.deleteMessageForMe(serverMessageId) } catch (_: Throwable) {}
+            }
         }
+    }
+
+    /** Remote "deleted for everyone" signal (message_deletions realtime / push). */
+    suspend fun removeMessageDeletedRemotely(serverMessageId: String) {
+        if (serverMessageId.isNotBlank()) dao.deleteMessageByAnyId(serverMessageId)
     }
 
     suspend fun toggleReaction(

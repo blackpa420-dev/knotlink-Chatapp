@@ -1530,6 +1530,23 @@ object SupabaseService {
             }
         } catch (e: Exception) { Result.failure(e) }
     }
+    suspend fun deleteMessageForMe(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val body = JSONObject().put("p_message_id", messageId.trim())
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/delete_message_for_me")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                Result.success(response.isSuccessful)
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
     suspend fun sendTypingStatus(
         chatId: String,
         userId: String,
@@ -1706,55 +1723,70 @@ object SupabaseService {
 
     suspend fun createCallSession(call: SupabaseCallSession): Result<SupabaseCallSession> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}"
+            // Direct INSERT on call_sessions is not allowed for clients (RLS). The
+            // create_call RPC validates the callee, rejects busy users and keeps the
+            // client-generated call id (WebRTC starts with it before the row exists).
+            // The incoming-call push is sent by the database trigger -> fcm-dispatch.
+            val callId = (if (call.id.isNotBlank()) call.id else call.callId).trim()
+            val body = JSONObject().apply {
+                put("p_call_id", callId)
+                put("p_callee_id", call.receiverId.trim())
+                put("p_call_type", call.callType.lowercase())
+                if (call.sdpOffer.isNotBlank()) put("p_sdp_offer", call.sdpOffer)
+            }
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/create_call")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates,return=representation")
-                .post(call.toJson().toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to start call"))
-            }
-
-            val jsonArray = try { JSONArray(resStr) } catch (_: Throwable) { JSONArray() }
-            val createdCall = if (jsonArray.length() > 0) {
-                SupabaseCallSession.fromJson(jsonArray.getJSONObject(0))
-            } else {
-                call
-            }
-
-            // Send instant FCM High-Priority Push Notification for incoming call
-            if (call.receiverId.isNotBlank()) {
-                @Suppress("OPT_IN_USAGE")
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        com.example.util.FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = call.receiverId,
-                            type = "call",
-                            title = "Incoming ${call.callType} Call",
-                            body = "${call.callerName} is calling you...",
-                            senderName = call.callerName,
-                            chatId = call.id,
-                            callType = call.callType,
-                            senderAvatar = call.callerAvatar,
-                            senderId = call.callerId
-                        )
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "Error sending call FCM push: ${e.message}")
-                    }
+            httpClient.newCall(request).execute().use { response ->
+                val resStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "create_call failed HTTP ${response.code}: $resStr")
+                    return@withContext Result.failure(
+                        Exception(parseErrorMessage(resStr, "Failed to start call (${response.code})"))
+                    )
                 }
+                val obj = if (resStr.trimStart().startsWith("[")) {
+                    val arr = JSONArray(resStr)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else {
+                    JSONObject(resStr)
+                }
+                Result.success(if (obj != null) SupabaseCallSession.fromJson(obj) else call)
             }
-
-            Result.success(createdCall)
         } catch (e: Exception) {
             Log.e(TAG, "Error in createCallSession", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Short-lived Cloudflare Realtime TURN credentials for an active call (Edge Function `turn-credentials`).
+     * Returns the raw `iceServers` JSON array: [{ "urls": [...], "username": "...", "credential": "..." }, ...].
+     */
+    suspend fun fetchTurnIceServers(callId: String): Result<JSONArray> = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put("callId", callId.trim())
+            val request = Request.Builder()
+                .url("${SupabaseConfig.PROJECT_URL}/functions/v1/turn-credentials")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                val resStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "turn-credentials HTTP ${response.code}")
+                    return@withContext Result.failure(Exception("TURN credentials unavailable (${response.code})"))
+                }
+                Result.success(JSONObject(resStr).optJSONArray("iceServers") ?: JSONArray())
+            }
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }
@@ -1942,37 +1974,25 @@ object SupabaseService {
     }
 
     suspend fun addCallIceCandidate(callId: String, candidateObj: JSONObject): Result<Boolean> = withContext(Dispatchers.IO) {
-        val mutex = callCandidateMutexes.getOrPut(callId) { Mutex() }
-        mutex.withLock {
-            try {
-                val currentCandidates = localCallCandidates.getOrPut(callId) {
-                    try {
-                        val currentSession = getCallSession(callId).getOrNull()
-                        JSONArray(currentSession?.iceCandidates ?: "[]")
-                    } catch (e: Exception) {
-                        JSONArray()
-                    }
-                }
-                currentCandidates.put(candidateObj)
-
-                val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}?id=eq.$callId"
-                val bodyObj = JSONObject().apply {
-                    put("ice_candidates", currentCandidates.toString())
-                }
-                val request = Request.Builder()
-                    .url(url)
-                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                    .addHeader("Content-Type", "application/json")
-                    .addHeader("Prefer", "return=minimal")
-                    .patch(bodyObj.toString().toRequestBody(JSON_MEDIA_TYPE))
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                Result.success(response.isSuccessful)
-            } catch (e: Exception) {
-                Result.failure(e)
+        try {
+            // Atomic server-side append (add_call_ice_candidate RPC): no read-modify-write of the whole
+            // array, so caller and callee can never overwrite each other's candidates, and no response body.
+            val body = JSONObject().apply {
+                put("p_call_id", callId.trim())
+                put("p_candidate", candidateObj)
             }
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/add_call_ice_candidate")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                Result.success(response.isSuccessful)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

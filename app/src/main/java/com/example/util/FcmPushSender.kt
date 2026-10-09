@@ -13,14 +13,17 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Client-side FCM facade.
+ * Client-side FCM facade (now a deliberate no-op).
  *
- * Firebase service-account credentials are never shipped in the APK.
- * FCM HTTP v1 delivery happens in the authenticated Supabase Edge Function.
+ * Push delivery is fully server-side: database triggers on messages / call_sessions /
+ * message_deletions call the `fcm-dispatch` Edge Function, which sends FCM HTTP v1 pushes
+ * (works even if this app is closed, and never double-sends). The old `fcm-send-v2`
+ * function was deleted. The method is kept so existing call sites compile unchanged.
  */
 object FcmPushSender {
     private const val TAG = "FcmPushSender"
-    private const val USER_FUNCTION_NAME = "fcm-send-v2"
+    private const val USER_FUNCTION_NAME = "fcm-send-v2" // deleted server-side; unused while SERVER_SIDE_PUSH
+    private const val SERVER_SIDE_PUSH = true
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
@@ -40,6 +43,7 @@ object FcmPushSender {
         serverMessageId: String? = null,
         messageType: String? = null
     ) = withContext(Dispatchers.IO) {
+        if (SERVER_SIDE_PUSH) return@withContext
         if (targetUserIdOrName.isBlank()) {
             Log.w(TAG, "FCM Push skipped: target user is blank")
             return@withContext
