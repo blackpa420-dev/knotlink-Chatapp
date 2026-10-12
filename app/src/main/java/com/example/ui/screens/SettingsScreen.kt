@@ -142,6 +142,7 @@ import coil.compose.AsyncImage
 import com.example.ui.components.BitChatBottomNavBar
 import com.example.ui.components.BitChatNavTab
 import com.example.ui.components.GlassPanel
+import com.example.ui.components.KnotLinkQrCode
 import java.io.File
 import com.example.ui.theme.BitBackground
 import com.example.ui.theme.BitError
@@ -205,7 +206,7 @@ fun SettingsScreen(
                 QRCodeGenerator.generateProfileQRCode(
                     userId = publicId,
                     context = context,
-                    size = 512
+                    size = 768
                 )
             }.getOrNull()
         } else {
@@ -828,22 +829,10 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .size(230.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.White)
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(20.dp))
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            bitmap = cachedQrBitmap.asImageBitmap(),
-                            contentDescription = "Personal KnotLink QR Code",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
-                    }
+                    KnotLinkQrCode(
+                        bitmap = cachedQrBitmap,
+                        modifier = Modifier.size(260.dp)
+                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
 

@@ -114,6 +114,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.example.data.local.UserIdentityEntity
+import com.example.ui.components.KnotLinkQrCode
 import com.example.util.QRCodeGenerator
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -243,7 +244,7 @@ fun ProfileSettingsScreen(
                     QRCodeGenerator.generateProfileQRCode(
                         userId = publicId,
                         context = context,
-                        size = 512
+                        size = 768
                     )
                 }.getOrNull()
             }
@@ -1323,24 +1324,20 @@ fun ProfileSettingsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Zoomed-in Large QR Code
-                    Box(
-                        modifier = Modifier
-                            .size(230.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color.White)
-                            .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(20.dp))
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val qrBitmap = cachedQrBitmap
-                        if (qrBitmap != null) {
-                            Image(
-                                bitmap = qrBitmap.asImageBitmap(),
-                                contentDescription = "Personal KnotLink QR Code",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        } else {
+                    val qrBitmap = cachedQrBitmap
+                    if (qrBitmap != null) {
+                        KnotLinkQrCode(
+                            bitmap = qrBitmap,
+                            modifier = Modifier.size(260.dp)
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(260.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
                             CircularProgressIndicator(
                                 color = Color(0xFF2563EB),
                                 modifier = Modifier.size(32.dp)

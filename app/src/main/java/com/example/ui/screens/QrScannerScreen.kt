@@ -110,6 +110,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.ui.components.BitChatBottomNavBar
 import com.example.ui.components.BitChatNavTab
+import com.example.ui.components.KnotLinkQrCode
 import com.example.ui.viewmodel.BitChatViewModel
 import com.example.ui.viewmodel.ScannedUser
 import com.example.ui.viewmodel.ScannedUserResult
@@ -251,7 +252,7 @@ fun QrScannerScreen(
             null
         } else {
             try {
-                QRCodeGenerator.generateProfileQRCode(userId = qrIdentifier, context = context, size = 512)
+                QRCodeGenerator.generateProfileQRCode(userId = qrIdentifier, context = context, size = 768)
             } catch (e: Exception) {
                 null
             }
@@ -538,30 +539,20 @@ fun QrScannerScreen(
 
                             Spacer(modifier = Modifier.height(20.dp))
 
-                            // Sharp QR Code Display Container
-                            Box(
-                                modifier = Modifier
-                                    .size(240.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(Color.White)
-                                    .border(1.5.dp, Color(0xFFE2E8F0), RoundedCornerShape(20.dp))
-                                    .padding(12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (qrBitmap != null) {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Image(
-                                            bitmap = qrBitmap.asImageBitmap(),
-                                            contentDescription = "My KnotLink QR Code",
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-
-                                        // No logo is embedded in the QR.
-                                    }
-                                } else {
+                            // Telegram-style QR: black round dots on white, animated KnotLink logo in the middle.
+                            if (qrBitmap != null) {
+                                KnotLinkQrCode(
+                                    bitmap = qrBitmap,
+                                    modifier = Modifier.size(260.dp)
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(260.dp)
+                                        .clip(RoundedCornerShape(24.dp))
+                                        .background(Color.White),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
                                         text = if (qrIdentifier.isBlank()) "Preparing your permanent QR..." else "QR generation failed",
                                         color = Color(0xFF64748B),

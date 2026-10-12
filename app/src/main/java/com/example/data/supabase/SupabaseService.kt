@@ -780,7 +780,9 @@ object SupabaseService {
             val request = Request.Builder()
                 .url("${SupabaseConfig.REST_BASE_URL}/rpc/lookup_qr_profile")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${SupabaseConfig.ANON_KEY}")
+                // Prefer the signed-in user's token; getAccessToken() falls back to the anon key
+                // only when no session exists, which the RPC also allows.
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
@@ -969,16 +971,20 @@ object SupabaseService {
 
             val encoded = java.net.URLEncoder.encode(canonical, "UTF-8")
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?username=eq.$encoded&select=*&limit=1"
+            // Profiles are readable only by signed-in users. Restore the session first so a
+            // process-recreated app never sends the anon key and gets an empty/denied result.
+            val bearer = ensureAuthenticatedSession().getOrNull()?.accessToken ?: getAccessToken()
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Authorization", "Bearer $bearer")
                 .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    Log.w(TAG, "getProfileByUsername($canonical): HTTP ${response.code} body=${responseBody.take(200)}")
                     return@withContext Result.failure(Exception("Failed to load username: ${response.code}"))
                 }
                 val arr = JSONArray(responseBody)
@@ -1007,23 +1013,29 @@ object SupabaseService {
                 "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?or=(username.ilike.%25$encoded%25,full_name.ilike.%25$encoded%25)&select=*&limit=50"
             }
 
+            // Same reason as getProfileByUsername: never search profiles with the anon key.
+            val bearer = ensureAuthenticatedSession().getOrNull()?.accessToken ?: getAccessToken()
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Authorization", "Bearer $bearer")
                 .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
+                    Log.w(TAG, "searchProfiles($q): HTTP ${response.code} body=${responseBody.take(200)}")
                     return@withContext Result.failure(Exception("Profile search failed: ${response.code}"))
                 }
                 val arr = JSONArray(responseBody)
                 val list = mutableListOf<SupabaseProfile>()
                 val seen = mutableSetOf<String>()
                 for (i in 0 until arr.length()) {
-                    val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(i)))
+                    // Keep the stable R2 object key (users/<uuid>/avatar/...). Signing up to 50 URLs per
+                    // search was slow and egress-heavy, and the signed URL expired after 15 minutes while
+                    // being cached in Room. The UI resolves the key through the on-disk avatar cache.
+                    val profile = SupabaseProfile.fromJson(arr.getJSONObject(i))
                     if (profile.id.isNotBlank() && seen.add(profile.id)) {
                         cacheProfile(profile)
                         list.add(profile)

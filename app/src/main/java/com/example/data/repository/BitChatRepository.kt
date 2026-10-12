@@ -1067,6 +1067,24 @@ class BitChatRepository(val dao: BitChatDao) {
      * QR passes exactMatch=true so the scanned identifier must resolve to the
      * same real profile that this search flow would return manually.
      */
+    /**
+     * Avatars are stored as R2 object keys (users/<uuid>/avatar/...). Older cache rows may hold a
+     * presigned URL instead, which expires after 15 minutes. Convert those back to the stable key so
+     * the UI can always resolve the picture through the on-disk avatar cache.
+     */
+    private fun canonicalAvatarKey(raw: String?): String? {
+        val value = raw?.trim().orEmpty()
+        if (value.isBlank()) return null
+        if ((value.startsWith("https://", true) || value.startsWith("http://", true)) &&
+            value.contains(".r2.cloudflarestorage.com/")
+        ) {
+            val path = value.substringAfter(".r2.cloudflarestorage.com/").substringBefore('?')
+            val idx = path.indexOf("users/")
+            if (idx >= 0) return path.substring(idx)
+        }
+        return value
+    }
+
     suspend fun searchUsers(query: String, exactMatch: Boolean = false): List<PublicUserProfile> {
         val cleanQuery = query.trim().lowercase().removePrefix("@")
         if (cleanQuery.isEmpty()) return emptyList()
@@ -1078,15 +1096,17 @@ class BitChatRepository(val dao: BitChatDao) {
         fun toPublicProfile(p: SupabaseProfile): PublicUserProfile = PublicUserProfile(
             uid = p.id, publicId = p.publicId.ifBlank { p.username.ifBlank { p.id } },
             username = p.username, displayName = p.fullName.ifBlank { p.username },
-            avatarUrl = p.avatarUrl, bio = p.bio.ifBlank { "Verified KnotLink User" },
+            avatarUrl = canonicalAvatarKey(p.avatarUrl), bio = p.bio.ifBlank { "Verified KnotLink User" },
             profession = p.profession.ifBlank { "✨ KnotLink Member" },
             mutualGroups = listOf("KnotLink Network"),
-            avatarType = p.avatarUrl?.ifBlank { "default" } ?: "default"
+            avatarType = canonicalAvatarKey(p.avatarUrl)?.ifBlank { "default" } ?: "default"
         )
 
         // Room-first: previously seen profiles are resolved locally.
+        // Skip incomplete cache stubs (no username/name): they would otherwise hide the real
+        // remote result and show a raw ID instead of the person's name and avatar.
         val localProfiles = dao.getAllCachedProfiles().asSequence()
-            .filter { p -> p.uid.isNotBlank() && (
+            .filter { p -> p.uid.isNotBlank() && p.username.isNotBlank() && p.fullName.isNotBlank() && (
                 p.uid.lowercase().contains(cleanQuery) ||
                 p.username.lowercase().removePrefix("@").contains(cleanQuery) ||
                 p.fullName.lowercase().contains(cleanQuery) ||

@@ -30,6 +30,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -2329,15 +2330,11 @@ fun SearchOverlayScreen(
                                             .padding(14.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        val userAv = user.avatarUrl
-                                        val hasUserAvatar = !userAv.isNullOrBlank() && (
-                                            userAv.startsWith("http://", ignoreCase = true) ||
-                                            userAv.startsWith("https://", ignoreCase = true) ||
-                                            userAv.startsWith("content://", ignoreCase = true) ||
-                                            userAv.startsWith("file://", ignoreCase = true) ||
-                                            userAv.startsWith("/")
-                                        )
-                                        if (hasUserAvatar) {
+                                        // Avatars come as R2 object keys; resolve them via the on-disk cache.
+                                        val userAv by produceState<String?>(null, user.avatarUrl) {
+                                            value = viewModel.resolveAvatarDisplayUrl(user.avatarUrl)
+                                        }
+                                        if (!userAv.isNullOrBlank()) {
                                             AsyncImage(
                                                 model = userAv,
                                                 contentDescription = "User Avatar",
@@ -2376,7 +2373,7 @@ fun SearchOverlayScreen(
                                                 )
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text(
-                                                    text = "@${user.username}",
+                                                    text = user.username.trim().let { if (it.startsWith("@")) it else "@$it" },
                                                     color = Color(0xFF2563EB),
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Medium
