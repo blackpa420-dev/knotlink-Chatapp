@@ -989,14 +989,18 @@ fun ProfileSettingsScreen(
                             saveScope.launch {
                                 isSavingProfile = true
                                 try {
-                                    val result = onSaveProfile(
-                                        fullName.trim(),
-                                        currentAvatarPath,
-                                        profession,
-                                        registeredEmail.trim(),
-                                        true,
-                                        birthDate
-                                    )
+                                    // Never leave the button on "Saving..." forever: a stalled upload or
+                                    // network call now ends with a visible error after 60 seconds.
+                                    val result = kotlinx.coroutines.withTimeoutOrNull(60_000L) {
+                                        onSaveProfile(
+                                            fullName.trim(),
+                                            currentAvatarPath,
+                                            profession,
+                                            registeredEmail.trim(),
+                                            true,
+                                            birthDate
+                                        )
+                                    } ?: Result.failure(Exception("Saving took too long. Check your connection and try again."))
                                     if (result.isSuccess) {
                                         Toast.makeText(context, "Profile updated successfully!", Toast.LENGTH_SHORT).show()
                                         onBack()
@@ -1025,7 +1029,11 @@ fun ProfileSettingsScreen(
                         shape = RoundedCornerShape(27.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color(0xFF2563EB),
-                            contentColor = Color.White
+                            contentColor = Color.White,
+                            // Without these the disabled (saving) button falls back to the default
+                            // grey/white Material colours and no longer matches the screen.
+                            disabledContainerColor = Color(0xFF2563EB).copy(alpha = 0.7f),
+                            disabledContentColor = Color.White
                         )
                     ) {
                         if (isSavingProfile) {

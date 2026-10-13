@@ -777,21 +777,30 @@ object SupabaseService {
             if (!uuidRegex.matches(raw)) return@withContext Result.failure(Exception("Invalid QR UUID"))
 
             val body = JSONObject().apply { put("p_user_id", raw) }
-            val request = Request.Builder()
-                .url("${SupabaseConfig.REST_BASE_URL}/rpc/lookup_qr_profile")
-                .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                // Prefer the signed-in user's token; getAccessToken() falls back to the anon key
-                // only when no session exists, which the RPC also allows.
-                .addHeader("Authorization", "Bearer ${getAccessToken()}")
-                .addHeader("Content-Type", "application/json")
-                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-                .build()
-
-            httpClient.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "lookupQrProfileByUuid($raw): RPC HTTP ${response.code} body=$responseBody")
-                    return@withContext Result.failure(Exception("QR profile lookup failed: HTTP ${response.code}"))
+            // The RPC is open to both signed-in users and the anon key. A stale/expired user token
+            // made some scans fail (HTTP 400/401), so retry once with the anon key.
+            suspend fun call(bearer: String): Pair<Int, String> {
+                val request = Request.Builder()
+                    .url("${SupabaseConfig.REST_BASE_URL}/rpc/lookup_qr_profile")
+                    .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                    .addHeader("Authorization", "Bearer $bearer")
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                    .build()
+                return httpClient.newCall(request).execute().use { it.code to it.body?.string().orEmpty() }
+            }
+            val sessionToken = ensureAuthenticatedSession().getOrNull()?.accessToken ?: getAccessToken()
+            var (code, responseBody) = call(sessionToken)
+            if (code !in 200..299 && sessionToken != SupabaseConfig.ANON_KEY) {
+                Log.w(TAG, "lookupQrProfileByUuid($raw): HTTP $code with user token, retrying with anon key")
+                val retry = call(SupabaseConfig.ANON_KEY)
+                code = retry.first
+                responseBody = retry.second
+            }
+            run {
+                if (code !in 200..299) {
+                    Log.e(TAG, "lookupQrProfileByUuid($raw): RPC HTTP $code body=$responseBody")
+                    return@withContext Result.failure(Exception("QR profile lookup failed: HTTP $code"))
                 }
 
                 val rows = JSONArray(responseBody)
@@ -1049,6 +1058,8 @@ object SupabaseService {
         }
     }
 
+    private val registeredPushTokens: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+
     suspend fun updateFcmToken(userId: String, fcmToken: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val currentUid = getAuthenticatedUserId().orEmpty()
@@ -1057,6 +1068,11 @@ object SupabaseService {
                 return@withContext Result.failure(Exception("Push token registration requires the current user's UUID"))
             }
 
+            // The same token was re-sent several times per launch and every call returned HTTP 409.
+            // Register once per (user, token) per app run, and upsert on the real unique key.
+            val tokenKey = currentUid.lowercase() + "|" + fcmToken.trim()
+            if (registeredPushTokens.contains(tokenKey)) return@withContext Result.success(true)
+
             val body = JSONObject().apply {
                 put("user_id", currentUid)
                 put("fcm_token", fcmToken.trim())
@@ -1064,7 +1080,7 @@ object SupabaseService {
             }
 
             val request = Request.Builder()
-                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PUSH_TOKENS}")
+                .url("${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PUSH_TOKENS}?on_conflict=user_id,fcm_token")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
@@ -1076,6 +1092,8 @@ object SupabaseService {
                 if (!response.isSuccessful) {
                     val responseBody = response.body?.string().orEmpty()
                     Log.w(TAG, "Push token registration failed: ${response.code}: $responseBody")
+                } else {
+                    registeredPushTokens.add(tokenKey)
                 }
                 Result.success(response.isSuccessful)
             }
@@ -1716,55 +1734,46 @@ object SupabaseService {
     // CALL SESSIONS (VOICE & VIDEO CALL SIGNALS)
     // ==========================================
 
+    /**
+     * Starts a call through the `start_call` RPC. Direct INSERTs on call_sessions are revoked for
+     * clients (row-level security alone cannot validate the callee or stop spoofed caller names),
+     * and the incoming-call push is sent server-side by a database trigger, so the app must not
+     * send its own FCM push here.
+     */
     suspend fun createCallSession(call: SupabaseCallSession): Result<SupabaseCallSession> = withContext(Dispatchers.IO) {
         try {
-            val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_CALL_SESSIONS}"
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            val calleeId = call.receiverId.trim()
+            if (!calleeId.matches(uuidRegex)) {
+                return@withContext Result.failure(Exception("Call recipient must be a canonical UUID"))
+            }
+            val body = JSONObject().apply {
+                put("p_callee_id", calleeId)
+                put("p_call_type", call.callType.lowercase().let { if (it == "video") "video" else "audio" })
+                val callId = (if (call.id.isNotBlank()) call.id else call.callId).trim()
+                // Always send p_call_id: start_call has two overloads and PostgREST can only pick the
+                // executable 4-argument one when the id is present.
+                put("p_call_id", if (callId.matches(uuidRegex)) callId else java.util.UUID.randomUUID().toString())
+            }
             val request = Request.Builder()
-                .url(url)
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/start_call")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
-                .addHeader("Prefer", "resolution=merge-duplicates,return=representation")
-                .post(call.toJson().toString().toRequestBody(JSON_MEDIA_TYPE))
+                .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            val resStr = response.body?.string() ?: ""
-
-            if (!response.isSuccessful) {
-                return@withContext Result.failure(Exception("Failed to start call"))
-            }
-
-            val jsonArray = try { JSONArray(resStr) } catch (_: Throwable) { JSONArray() }
-            val createdCall = if (jsonArray.length() > 0) {
-                SupabaseCallSession.fromJson(jsonArray.getJSONObject(0))
-            } else {
-                call
-            }
-
-            // Send instant FCM High-Priority Push Notification for incoming call
-            if (call.receiverId.isNotBlank()) {
-                @Suppress("OPT_IN_USAGE")
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    try {
-                        com.example.util.FcmPushSender.sendPushToUser(
-                            targetUserIdOrName = call.receiverId,
-                            type = "call",
-                            title = "Incoming ${call.callType} Call",
-                            body = "${call.callerName} is calling you...",
-                            senderName = call.callerName,
-                            chatId = call.id,
-                            callType = call.callType,
-                            senderAvatar = call.callerAvatar,
-                            senderId = call.callerId
-                        )
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "Error sending call FCM push: ${e.message}")
-                    }
+            httpClient.newCall(request).execute().use { response ->
+                val resStr = response.body?.string().orEmpty()
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "start_call failed HTTP ${response.code}: $resStr")
+                    return@withContext Result.failure(Exception(parseErrorMessage(resStr, "Failed to start call (${response.code})")))
                 }
+                val obj = try {
+                    if (resStr.trimStart().startsWith("[")) JSONArray(resStr).optJSONObject(0) else JSONObject(resStr)
+                } catch (_: Throwable) { null }
+                Result.success(if (obj != null) SupabaseCallSession.fromJson(obj) else call)
             }
-
-            Result.success(createdCall)
         } catch (e: Exception) {
             Log.e(TAG, "Error in createCallSession", e)
             Result.failure(e)

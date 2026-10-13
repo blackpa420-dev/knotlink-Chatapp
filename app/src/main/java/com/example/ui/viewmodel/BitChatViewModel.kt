@@ -2123,7 +2123,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
             val current = repository.userIdentity.firstOrNull() ?: UserIdentityEntity()
             val cleanAvatar = avatarPath?.trim().orEmpty()
-            var remoteAvatarPath = if (cleanAvatar.isNotBlank()) cleanAvatar else current.avatarPath.orEmpty()
+            // Expired presigned R2 URLs must never be stored as the avatar: turn them back into the
+            // permanent users/<uuid>/avatar/... key so every other account can still load the photo.
+            var remoteAvatarPath = repository.canonicalAvatarKey(
+                if (cleanAvatar.isNotBlank()) cleanAvatar else current.avatarPath.orEmpty()
+            ).orEmpty()
             val isR2Key = remoteAvatarPath.startsWith("users/")
             val isRemoteUrl = remoteAvatarPath.startsWith("http://", true) || remoteAvatarPath.startsWith("https://", true)
             if (remoteAvatarPath.isNotBlank() && !isR2Key && !isRemoteUrl) {

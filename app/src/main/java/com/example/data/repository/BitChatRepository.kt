@@ -662,16 +662,13 @@ class BitChatRepository(val dao: BitChatDao) {
             }
         }
 
-        // For direct chats, the server-generated UUID chat is authoritative.
-        // Never write a new message against an old hash/username-derived chat id.
-        val canonicalDirectChatId = if (
-            isFromUser &&
-            !chatId.startsWith("group_") &&
-            otherParticipant.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-        ) {
-            SupabaseService.getOrCreateDirectChat(otherParticipant).getOrNull()
-        } else null
-        val targetChatId = canonicalDirectChatId ?: existingChat?.id ?: chatId
+        // Messages are always stored under the LOCAL chat id so the chat-list card and the open
+        // conversation read the same Room rows. The server chat UUID is only used on the wire
+        // (send_direct_message creates/looks up the chat from the recipient UUID itself).
+        val targetChatId = existingChat?.id
+            ?: if (isFromUser && !chatId.startsWith("group_") && isCanonicalUuid(otherParticipant))
+                legacyDirectChatId(currentUid, otherParticipant)
+            else chatId
 
         val message = MessageEntity(
             chatId = targetChatId,
@@ -734,7 +731,12 @@ class BitChatRepository(val dao: BitChatDao) {
             }
             val formattedName = chatId.replace("chat_", "").replace("user_", "").replace("_", " ")
                 .split(" ").joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }
-            val chatName = contact?.name ?: if (otherParticipant.isNotBlank() && !otherParticipant.startsWith("user_") && !otherParticipant.startsWith("chat_")) otherParticipant else if (formattedName.isNotBlank()) formattedName else "Chat"
+            // Never show a UUID or the hex hash of a chat id as a contact name.
+            val profileName = otherParticipant.takeIf { it.isNotBlank() }?.let { uid ->
+                (getLocalProfile(uid) ?: SupabaseService.getProfile(uid).getOrNull())
+                    ?.let { p -> p.fullName.ifBlank { p.username } }
+            }?.takeIf { it.isNotBlank() }
+            val chatName = contact?.name ?: profileName ?: "KnotLink User"
             val avatar = contact?.avatarType ?: "default"
             val newChat = com.example.data.local.ChatEntity(
                 id = targetChatId,
@@ -1072,7 +1074,7 @@ class BitChatRepository(val dao: BitChatDao) {
      * presigned URL instead, which expires after 15 minutes. Convert those back to the stable key so
      * the UI can always resolve the picture through the on-disk avatar cache.
      */
-    private fun canonicalAvatarKey(raw: String?): String? {
+    fun canonicalAvatarKey(raw: String?): String? {
         val value = raw?.trim().orEmpty()
         if (value.isBlank()) return null
         if ((value.startsWith("https://", true) || value.startsWith("http://", true)) &&
@@ -1154,6 +1156,47 @@ class BitChatRepository(val dao: BitChatDao) {
         }
     }
 
+    private val rekeyedServerChats: MutableSet<String> = java.util.Collections.synchronizedSet(mutableSetOf())
+
+    private fun isCanonicalUuid(value: String): Boolean =
+        value.trim().matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+
+    /**
+     * The one local identity for a direct conversation. Calls, notifications and the chat screen all
+     * key off this "chat_<hash>" id, while the server's chat UUID only exists on the wire. Messages
+     * from the server are re-keyed to this id so the list card and the conversation screen read the
+     * same Room rows (previously messages landed under the UUID and the opened chat looked empty).
+     */
+    private fun legacyDirectChatId(uidA: String, uidB: String): String {
+        val sorted = listOf(uidA, uidB).filter { it.isNotBlank() }.distinct().sorted()
+        return "chat_" + (sorted.getOrElse(0) { "a" } + "_" + sorted.getOrElse(1) { "b" }).hashCode().absoluteValue.toString(16)
+    }
+
+    /** Move a direct chat (and its messages) to [targetId] so a single Room chat row exists. */
+    private suspend fun migrateDirectChat(chat: ChatEntity, targetId: String): ChatEntity {
+        if (chat.id == targetId || chat.id.startsWith("group_") || targetId.isBlank()) return chat
+        dao.updateMessageChatId(chat.id, targetId)
+        val existing = dao.getChatById(targetId)
+        val merged = if (existing == null) {
+            chat.copy(id = targetId)
+        } else {
+            val existingNameUgly = existing.name.isBlank() || existing.name == "Contact" || existing.name == "User" || existing.name.contains("-") || Regex("^[0-9a-fA-F]{12,}$").matches(existing.name.trim())
+            existing.copy(
+                name = if (existingNameUgly) chat.name else existing.name,
+                avatarType = if (existing.avatarType.isBlank() || existing.avatarType == "default") chat.avatarType else existing.avatarType,
+                participantUids = existing.participantUids.ifBlank { chat.participantUids },
+                lastMessage = if (chat.lastUpdated > existing.lastUpdated) chat.lastMessage else existing.lastMessage,
+                timeString = if (chat.lastUpdated > existing.lastUpdated) chat.timeString else existing.timeString,
+                lastUpdated = maxOf(chat.lastUpdated, existing.lastUpdated),
+                unreadCount = maxOf(existing.unreadCount, chat.unreadCount),
+                isMuted = existing.isMuted || chat.isMuted
+            )
+        }
+        dao.insertChats(listOf(merged))
+        dao.deleteChatById(chat.id)
+        return merged
+    }
+
     suspend fun findOrCreateCanonicalChat(
         chatId: String,
         opponentUid: String,
@@ -1167,14 +1210,12 @@ class BitChatRepository(val dao: BitChatDao) {
         val cleanOpponentUid = opponentUid.trim()
         val cleanOpponentName = opponentName.trim()
 
-        // V2 direct chats are server-generated UUIDs. Resolve the canonical chat once
-        // when opening the conversation; never derive chat identity from username/hash.
-        val resolvedCanonicalChatId = if (
-            cleanOpponentUid.matches(Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
-        ) {
-            SupabaseService.getOrCreateDirectChat(cleanOpponentUid).getOrNull() ?: chatId
-        } else {
-            chatId
+        // Local identity stays "chat_<hash>" (see legacyDirectChatId). The server UUID is never used
+        // as a Room chat id, which also saves one RPC per incoming message.
+        val resolvedCanonicalChatId = when {
+            chatId.startsWith("group_") || chatId.startsWith("chat_") -> chatId
+            isCanonicalUuid(cleanOpponentUid) -> legacyDirectChatId(myUid, cleanOpponentUid)
+            else -> chatId
         }
 
         // 1. Direct ID match
@@ -1208,7 +1249,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     (cleanOpponentUid.isNotBlank() && chat.participantUids.split(",").map { it.trim().lowercase() }.contains(cleanOpponentUid.lowercase())) ||
                     (cleanOpponentName.isNotBlank() && cleanOpponentName != "User" && cleanOpponentName != "Contact" && chat.name.equals(cleanOpponentName, ignoreCase = true))
                 )
-            }
+            }?.let { migrateDirectChat(it, resolvedCanonicalChatId) }
             if (byParticipant != null) {
                 val isCurrentNameUgly = byParticipant.name.isBlank() || 
                     byParticipant.name == "Contact" || 
@@ -1284,9 +1325,24 @@ class BitChatRepository(val dao: BitChatDao) {
         }
     }
 
-    suspend fun handleIncomingMessage(supaMsg: SupabaseMessage, currentActiveChatId: String? = null): MessageEntity {
+    suspend fun handleIncomingMessage(serverMsg: SupabaseMessage, currentActiveChatId: String? = null): MessageEntity {
         val currentIdentity = dao.getUserIdentity().firstOrNull()
         val myUid = currentIdentity?.supabaseUid?.ifBlank { currentIdentity.email } ?: "user_me"
+        // Direct messages arrive with the server chat UUID; store them under the local chat id.
+        val supaMsg = if (isCanonicalUuid(serverMsg.chatId)) {
+            val opponent = if (serverMsg.senderId.equals(myUid, ignoreCase = true)) serverMsg.receiverId else serverMsg.senderId
+            if (isCanonicalUuid(opponent)) {
+                val localChatId = dao.getAllChatsList().firstOrNull { chat ->
+                    chat.chatType != "GROUP" && !chat.id.startsWith("group_") &&
+                        chat.participantUids.split(",").any { it.trim().equals(opponent.trim(), ignoreCase = true) }
+                }?.id ?: legacyDirectChatId(myUid, opponent.trim())
+                // Rows saved by older builds under the UUID are moved once per app run.
+                if (rekeyedServerChats.add(serverMsg.chatId)) {
+                    dao.updateMessageChatId(serverMsg.chatId, localChatId)
+                }
+                serverMsg.copy(chatId = localChatId)
+            } else serverMsg
+        } else serverMsg
         val myUsername = currentIdentity?.username ?: ""
         val myEmail = currentIdentity?.email ?: ""
         val myCleanName = myUsername.trim().removePrefix("@").lowercase().removeSuffix(".link")
@@ -1990,6 +2046,9 @@ class BitChatRepository(val dao: BitChatDao) {
 
     suspend fun syncMessagesForChat(chatId: String) = withContext(Dispatchers.IO) {
         if (chatId.isBlank()) return@withContext
+        // Local ids ("chat_<hash>") are not server chat UUIDs; querying messages?chat_id=eq.chat_xxx
+        // only returns HTTP 400. The account-wide sync already delivers these messages.
+        if (!isCanonicalUuid(chatId)) return@withContext
         try {
             dao.getUserIdentity().firstOrNull() ?: return@withContext
             val latestLocal = dao.getLatestLocalMessageTimestamp(chatId) ?: 0L
@@ -2053,7 +2112,7 @@ class BitChatRepository(val dao: BitChatDao) {
         }
 
         val sortedUids = listOf(myUid, finalUid).filter { it.isNotBlank() }.distinct().sorted()
-        val chatId = "chat_" + (sortedUids.getOrElse(0) { "a" } + "_" + sortedUids.getOrElse(1) { "b" }).hashCode().absoluteValue.toString(16)
+        val chatId = legacyDirectChatId(myUid, finalUid)
 
         // Check if an existing direct chat with this participant already exists
         val allLocal = dao.getAllChatsList()
@@ -2065,7 +2124,7 @@ class BitChatRepository(val dao: BitChatDao) {
                 (targetName.isNotBlank() && targetName != "User" && targetName != "Contact" && chat.name.equals(targetName, ignoreCase = true)) ||
                 (finalName.isNotBlank() && finalName != "User" && finalName != "Contact" && chat.name.equals(finalName, ignoreCase = true))
             )
-        }
+        }?.let { migrateDirectChat(it, chatId) }
 
         if (existingByParticipant != null) {
             val shouldUpdateName = finalName.isNotBlank() && finalName != "User" && finalName != "Contact" && existingByParticipant.name != finalName
