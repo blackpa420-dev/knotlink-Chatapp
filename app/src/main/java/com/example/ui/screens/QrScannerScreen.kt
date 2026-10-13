@@ -213,11 +213,8 @@ fun QrScannerScreen(
     // Personal QR Code Bitmap Generation
     // QR identity is the stable Supabase Auth/profile UID, never a local placeholder username.
     // The same canonical search flow can resolve this UID directly.
-    val displayUsername = user?.username
-        ?.trim()
-        ?.let { if (it.startsWith("@")) it else "@$it" }
-        ?.takeIf { it != "@" }
-        ?: "@username"
+    // Never show an internal id (UUID / hex) as a handle; the chip is hidden when no real handle exists.
+    val displayUsername: String = com.example.util.safeHandle(user?.username) ?: ""
 
     LaunchedEffect(user?.supabaseUid, user?.email) {
         // Render immediately from the UUID already held by Room, then repair it
@@ -539,7 +536,7 @@ fun QrScannerScreen(
                             Spacer(modifier = Modifier.height(14.dp))
 
                             Text(
-                                text = user?.fullName?.ifBlank { user?.username } ?: "KnotLink User",
+                                text = com.example.util.safeDisplayName(user?.fullName?.ifBlank { user?.username }),
                                 color = if (isNightMode) Color.White else Color(0xFF0F172A),
                                 fontSize = 19.sp,
                                 fontWeight = FontWeight.Bold
@@ -555,41 +552,6 @@ fun QrScannerScreen(
                                 )
                             }
 
-                            val displayUid = resolvedQrUuid.ifBlank { user?.supabaseUid.orEmpty() }
-                            if (displayUid.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Surface(
-                                    onClick = {
-                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                                        val clip = android.content.ClipData.newPlainText("KnotLink ID", displayUid)
-                                        clipboard?.setPrimaryClip(clip)
-                                        Toast.makeText(context, "KnotLink ID copied!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isNightMode) Color(0xFF242735) else Color(0xFFF1F5F9),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isNightMode) Color(0xFF3B82F6).copy(alpha = 0.3f) else Color(0xFFCBD5E1))
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "ID: ${displayUid.take(18)}${if (displayUid.length > 18) "..." else ""}",
-                                            color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                            fontSize = 12.sp,
-                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy ID",
-                                            tint = Color(0xFF3B82F6),
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                    }
-                                }
-                            }
 
                             Spacer(modifier = Modifier.height(18.dp))
 
@@ -619,7 +581,7 @@ fun QrScannerScreen(
 
                             // Username shown below the QR. The UUID remains
                             // the internal/copyable identity, but is not exposed here.
-                            Row(
+                            if (displayUsername.isNotBlank()) Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isNightMode) Color(0xFF212536) else Color(0xFFF1F5F9))

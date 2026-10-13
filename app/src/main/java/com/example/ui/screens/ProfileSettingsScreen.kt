@@ -271,7 +271,7 @@ fun ProfileSettingsScreen(
     // Username is fixed with .link
     val rawUsername = user?.username ?: "user"
     val cleanName = rawUsername.removePrefix("@").removeSuffix(".link")
-    val formattedHandle = "${cleanName.ifBlank { "user" }}.link"
+    val formattedHandle = if (com.example.util.looksLikeInternalId(rawUsername)) "" else "${cleanName.ifBlank { "user" }}.link"
 
     val bdDateToday = remember { com.example.data.local.getBdCurrentJoinedDate() }
     val joinedDate = if (user?.joinedDate.isNullOrBlank() || user?.joinedDate == "28 Jul 2026") {

@@ -452,7 +452,7 @@ fun SettingsScreen(
                     val displayName = user?.fullName?.ifBlank { null } ?: "Tap to Set Full Name"
                     val rawUsername = user?.username ?: "user"
                     val cleanUsername = rawUsername.removePrefix("@").removeSuffix(".chat").removeSuffix(".bit").removeSuffix(".link")
-                    val formattedHandle = "@${cleanUsername.ifBlank { "user" }}.link"
+                    val formattedHandle = if (com.example.util.looksLikeInternalId(rawUsername)) "" else "@${cleanUsername.ifBlank { "user" }}.link"
                     val userProfession = user?.profession?.ifBlank { "Student" } ?: "Student"
 
                     Column(modifier = Modifier.weight(1f)) {

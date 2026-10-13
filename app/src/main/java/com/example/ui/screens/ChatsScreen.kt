@@ -1752,7 +1752,7 @@ fun SwipeableChatItemRow(
                     val displayName = remember(chat.name) {
                         when {
                             chat.name.startsWith("chat_") -> "Contact"
-                            Regex("^[0-9a-fA-F]{12,}$").matches(chat.name.trim()) -> "KnotLink User"
+                            com.example.util.looksLikeInternalId(chat.name) -> "KnotLink User"
                             chat.name.contains("-") && chat.name.length >= 25 -> "Contact"
                             chat.name.contains("_") && !chat.name.contains(" ") && chat.name.length >= 16 -> "Contact"
                             else -> chat.name

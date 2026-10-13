@@ -332,15 +332,13 @@ object SupabaseService {
             val latest = currentSession
             if (latest != null && isJwtValid(latest.accessToken)) return latest.accessToken
             return try {
-                val form = FormBody.Builder()
-                    .add("grant_type", "refresh_token")
-                    .add("refresh_token", refreshToken)
-                    .build()
+                // Supabase Auth only accepts a JSON body here. The old form-encoded body made every
+                // refresh fail with HTTP 400 "bad_json", so sessions died after the 1h access token.
                 val request = Request.Builder()
                     .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
                     .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                    .addHeader("Content-Type", "application/x-www-form-urlencoded")
-                    .post(form)
+                    .addHeader("Content-Type", "application/json")
+                    .post(JSONObject().put("refresh_token", refreshToken).toString().toRequestBody(JSON_MEDIA_TYPE))
                     .build()
                 val response = OkHttpClient.Builder()
                     .connectTimeout(15, TimeUnit.SECONDS)
@@ -374,15 +372,11 @@ object SupabaseService {
                     false
                 } else {
                     try {
-                        val form = FormBody.Builder()
-                            .add("grant_type", "refresh_token")
-                            .add("refresh_token", refreshToken)
-                            .build()
                         val request = Request.Builder()
                             .url("${SupabaseConfig.AUTH_BASE_URL}/token?grant_type=refresh_token")
                             .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                            .addHeader("Content-Type", "application/x-www-form-urlencoded")
-                            .post(form)
+                            .addHeader("Content-Type", "application/json")
+                            .post(JSONObject().put("refresh_token", refreshToken).toString().toRequestBody(JSON_MEDIA_TYPE))
                             .build()
                         val response = OkHttpClient.Builder()
                             .connectTimeout(15, TimeUnit.SECONDS)

@@ -195,7 +195,7 @@ fun ScannedUserProfileSheet(
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = scannedUser.name.trim().ifBlank { "KnotLink User" },
+                text = com.example.util.safeDisplayName(scannedUser.name),
                 color = textColor,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
@@ -205,52 +205,17 @@ fun ScannedUserProfileSheet(
 
             Spacer(modifier = Modifier.height(5.dp))
 
-            Text(
-                text = scannedUser.username.trim().let { if (it.startsWith("@")) it else "@$it" },
-                color = Color(0xFF60A5FA),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                maxLines = 1
-            )
-
-            val displayUid = scannedUser.uid.ifBlank { scannedUser.publicId }
-            if (displayUid.isNotBlank()) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Surface(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                            val clip = android.content.ClipData.newPlainText("KnotLink ID", displayUid)
-                            clipboard?.setPrimaryClip(clip)
-                            Toast.makeText(context, "KnotLink ID copied!", Toast.LENGTH_SHORT).show()
-                        },
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isNightMode) Color(0xFF242735) else Color(0xFFF1F5F9),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isNightMode) Color(0xFF3B82F6).copy(alpha = 0.35f) else Color(0xFFCBD5E1))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "KnotLink ID: $displayUid",
-                            color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569),
-                            fontSize = 12.sp,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "Copy ID",
-                            tint = Color(0xFF3B82F6),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
+            com.example.util.safeHandle(scannedUser.username)?.let { handle ->
+                Text(
+                    text = handle,
+                    color = Color(0xFF60A5FA),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1
+                )
             }
+
 
             Spacer(modifier = Modifier.height(22.dp))
 

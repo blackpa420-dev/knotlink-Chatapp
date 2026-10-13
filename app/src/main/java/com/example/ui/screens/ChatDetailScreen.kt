@@ -637,7 +637,7 @@ fun ChatDetailScreen(
             val clean = resolvedName.replace("[Group]", "", ignoreCase = true).trim()
             if (clean.startsWith("GC ", ignoreCase = true)) clean else "GC $clean"
         } else {
-            resolvedName
+            com.example.util.safeDisplayName(resolvedName)
         }
     }
 
