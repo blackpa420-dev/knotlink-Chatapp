@@ -2702,32 +2702,11 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 // IMPORTANT: this avatar belongs to the REMOTE PEER, never the
                 // current user. Do not fall back to my own avatar here, otherwise
                 // both devices can show the caller's photo in the native notification.
-                var resolvedAvatar = ""
-                var resolvedReceiverId = contactId
-
-                if (contactId.startsWith("chat_") || contactId.startsWith("group_")) {
-                    val chat = repository.getChatById(contactId)
-                    val remoteUid = chat?.participantUids
-                        ?.split(",")
-                        ?.map { it.trim() }
-                        ?.firstOrNull { it != myUid && it.isNotBlank() }
-
-                    if (!remoteUid.isNullOrBlank()) {
-                        resolvedReceiverId = remoteUid
-                        resolvedAvatar = SupabaseService.getProfile(remoteUid)
-                            .getOrNull()
-                            ?.avatarUrl
-                            .orEmpty()
-                    }
-                } else {
-                    val prof = repository.getProfileCachedFirst(contactId)
-                        ?: SupabaseService.getProfileByUsername(contactName).getOrNull()
-
-                    if (prof != null) {
-                        resolvedReceiverId = prof.id.ifBlank { contactId }
-                        resolvedAvatar = prof.avatarUrl.orEmpty()
-                    }
-                }
+                // The call is addressed to the other person's account UUID. Resolve it from every
+                // local source first; never fall back to a local chat id (the server rejects it).
+                val resolvedReceiverId = repository.resolvePeerUuid(contactId, contactName)
+                    ?: throw IllegalStateException("Could not find this contact's account. Open their profile and try again.")
+                val resolvedAvatar = repository.getProfileCachedFirst(resolvedReceiverId)?.avatarUrl.orEmpty()
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
                 _activeCall.value = _activeCall.value.copy(contactAvatar = resolvedAvatar)
@@ -2749,13 +2728,16 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) return@launch
 
-                SupabaseService.createCallSession(
+                val createdCall = SupabaseService.createCallSession(
                     SupabaseCallSession(
                         callId = callId, callerId = myUid, callerName = myName,
                         callerAvatar = callerPublicAvatar, receiverId = resolvedReceiverId,
                         callType = callType, status = "RINGING"
                     )
                 )
+                if (createdCall.isFailure) {
+                    throw IllegalStateException(createdCall.exceptionOrNull()?.message ?: "Could not start the call")
+                }
 
                 if (!isActive || activeCallSessionId != callId || !_activeCall.value.isActive) {
                     try {
@@ -2776,6 +2758,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 throw e
             } catch (e: Throwable) {
                 Log.e("BitChatViewModel", "Outgoing call setup failed", e)
+                showToast(e.message ?: "Call could not be started", isError = true)
                 if (activeCallSessionId == callId) {
                     try {
                         SupabaseService.updateCallSessionStatus(callId, "CANCELLED", endedAt = System.currentTimeMillis())

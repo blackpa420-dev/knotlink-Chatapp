@@ -271,6 +271,42 @@ class BitChatRepository(val dao: BitChatDao) {
      * we do not hit Supabase again for every screen/open. Network is used only on
      * a local cache miss, then the fresh profile is written back to Room.
      */
+    /**
+     * Finds the other person's account UUID for a direct chat / contact. Calls and messages can only
+     * be addressed to a real account UUID, so this checks every local source (chat participants,
+     * stored messages, same-named chats, contacts, cached profile) before asking the server.
+     */
+    suspend fun resolvePeerUuid(candidate: String, displayName: String): String? {
+        val key = candidate.trim()
+        val me = dao.getUserIdentity().firstOrNull()?.supabaseUid?.trim().orEmpty()
+        fun ok(v: String?): Boolean = v != null && isCanonicalUuid(v) && !v.trim().equals(me, ignoreCase = true)
+
+        fun firstPeer(participants: String): String? =
+            participants.split(",").map { it.trim() }.firstOrNull { ok(it) }
+
+        dao.getChatById(key)?.let { chat -> firstPeer(chat.participantUids)?.let { return it } }
+        for (m in dao.getRecentMessagesList(key)) {
+            listOf(m.receiverUid, m.senderUid).firstOrNull { ok(it) }?.let { return it.trim() }
+        }
+        if (displayName.isNotBlank()) {
+            dao.getAllChatsList()
+                .firstOrNull { it.id != key && it.chatType != "GROUP" && it.name.equals(displayName, ignoreCase = true) }
+                ?.let { c -> firstPeer(c.participantUids)?.let { return it } }
+        }
+        dao.getAllContactsList()
+            .firstOrNull { it.id.equals(key, ignoreCase = true) || (displayName.isNotBlank() && it.name.equals(displayName, ignoreCase = true)) }
+            ?.id?.takeIf { ok(it) }?.let { return it.trim() }
+        if (ok(key)) {
+            val p = getLocalProfile(key) ?: SupabaseService.getProfile(key).getOrNull()
+            if (p != null && ok(p.id)) return p.id.trim()
+        }
+        for (name in listOf(displayName, key).filter { it.isNotBlank() }) {
+            val p = SupabaseService.getProfileByUsername(name).getOrNull()
+            if (p != null && ok(p.id)) return p.id.trim()
+        }
+        return null
+    }
+
     suspend fun getProfileCachedFirst(identifier: String): SupabaseProfile? {
         val key = identifier.trim()
         if (key.isBlank()) return null
