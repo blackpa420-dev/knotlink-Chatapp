@@ -235,10 +235,7 @@ fun ProfileSettingsScreen(
     var cachedQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     LaunchedEffect(isQrVisible, publicId) {
-        if (isQrVisible && cachedQrBitmap == null && publicId.matches(
-                Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-            )
-        ) {
+        if (isQrVisible && cachedQrBitmap == null && publicId.isNotBlank()) {
             cachedQrBitmap = withContext(Dispatchers.Default) {
                 runCatching {
                     QRCodeGenerator.generateProfileQRCode(

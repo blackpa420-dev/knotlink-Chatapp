@@ -29,14 +29,10 @@ import kotlin.math.hypot
 object QRCodeGenerator {
 
     /** Diameter of the empty centre hole as a fraction of the bitmap width. */
-    const val LOGO_CLEAR_FRACTION = 0.26f
+    const val LOGO_CLEAR_FRACTION = 0.24f
 
     private const val QUIET_MODULES = 1
-    private const val DOT_RADIUS = 0.49f
-
-    private val uuidRegex = Regex(
-        "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-    )
+    private const val DOT_RADIUS = 0.46f
 
     @Suppress("UNUSED_PARAMETER")
     fun generateProfileQRCode(
@@ -46,8 +42,10 @@ object QRCodeGenerator {
         size: Int = 768
     ): Bitmap {
         val canonicalUserId = userId.trim()
-        require(uuidRegex.matches(canonicalUserId)) {
-            "KnotLink QR requires the authenticated Supabase UUID"
+        if (canonicalUserId.isBlank()) {
+            val emptyBitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            Canvas(emptyBitmap).drawColor(Color.WHITE)
+            return emptyBitmap
         }
 
         val hints = EnumMap<EncodeHintType, Any>(EncodeHintType::class.java).apply {
@@ -81,9 +79,9 @@ object QRCodeGenerator {
         fun drawEye(moduleX: Int, moduleY: Int) {
             val l = (QUIET_MODULES + moduleX) * cell
             val t = (QUIET_MODULES + moduleY) * cell
-            canvas.drawRoundRect(RectF(l, t, l + 7 * cell, t + 7 * cell), 2.2f * cell, 2.2f * cell, ink)
-            canvas.drawRoundRect(RectF(l + cell, t + cell, l + 6 * cell, t + 6 * cell), 1.5f * cell, 1.5f * cell, paper)
-            canvas.drawRoundRect(RectF(l + 2 * cell, t + 2 * cell, l + 5 * cell, t + 5 * cell), 1.0f * cell, 1.0f * cell, ink)
+            canvas.drawRoundRect(RectF(l, t, l + 7 * cell, t + 7 * cell), 2.4f * cell, 2.4f * cell, ink)
+            canvas.drawRoundRect(RectF(l + cell, t + cell, l + 6 * cell, t + 6 * cell), 1.6f * cell, 1.6f * cell, paper)
+            canvas.drawRoundRect(RectF(l + 2 * cell, t + 2 * cell, l + 5 * cell, t + 5 * cell), 1.1f * cell, 1.1f * cell, ink)
         }
         drawEye(0, 0)
         drawEye(n - 7, 0)
@@ -93,7 +91,7 @@ object QRCodeGenerator {
             (x < 7 && y < 7) || (x >= n - 7 && y < 7) || (x < 7 && y >= n - 7)
 
         val centre = size / 2f
-        val holeRadius = size * LOGO_CLEAR_FRACTION / 2f + cell * 0.6f
+        val holeRadius = size * LOGO_CLEAR_FRACTION / 2f + cell * 0.4f
         val dotRadius = cell * DOT_RADIUS
 
         for (y in 0 until n) {

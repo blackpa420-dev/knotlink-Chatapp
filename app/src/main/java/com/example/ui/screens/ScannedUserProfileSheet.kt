@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.ReportProblem
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -81,7 +83,7 @@ fun ScannedUserProfileSheet(
 
     val context = LocalContext.current
 
-    LaunchedEffect(scannedUser.avatarUrl) {
+    LaunchedEffect(scannedUser.avatarUrl, scannedUser.uid) {
         val value = scannedUser.avatarUrl?.trim().orEmpty()
         resolvedAvatar = withContext(Dispatchers.IO) {
             when {
@@ -91,13 +93,13 @@ fun ScannedUserProfileSheet(
                         context = context,
                         objectKey = value,
                         contentType = "image/jpeg"
-                    ).getOrNull()
+                    ).getOrNull() ?: CloudflareR2Service.getDownloadUrl(value, "image/jpeg").getOrNull()
                 value.startsWith("http://", true) ||
                     value.startsWith("https://", true) ||
                     value.startsWith("content://", true) ||
                     value.startsWith("file://", true) ||
                     value.startsWith("/") -> value
-                else -> null
+                else -> value
             }
         }
     }
@@ -146,10 +148,26 @@ fun ScannedUserProfileSheet(
                     .padding(3.dp),
                 contentAlignment = Alignment.Center
             ) {
-                val avatar = scannedUser.avatarUrl
-                if (!resolvedAvatar.isNullOrBlank()) {
+                val effectiveAvatar = resolvedAvatar ?: scannedUser.avatarUrl?.takeIf { it.isNotBlank() }
+                if (!effectiveAvatar.isNullOrBlank()) {
+                    val avatarModel: Any = remember(effectiveAvatar) {
+                        when {
+                            effectiveAvatar.startsWith("http://", true) ||
+                                effectiveAvatar.startsWith("https://", true) ||
+                                effectiveAvatar.startsWith("content://", true) -> effectiveAvatar
+                            effectiveAvatar.startsWith("file://", true) -> {
+                                val f = java.io.File(effectiveAvatar.removePrefix("file://"))
+                                if (f.exists()) f else effectiveAvatar
+                            }
+                            effectiveAvatar.startsWith("/") -> {
+                                val f = java.io.File(effectiveAvatar)
+                                if (f.exists()) f else effectiveAvatar
+                            }
+                            else -> effectiveAvatar
+                        }
+                    }
                     AsyncImage(
-                        model = resolvedAvatar,
+                        model = avatarModel,
                         contentDescription = scannedUser.name,
                         modifier = Modifier
                             .fillMaxSize()
@@ -195,6 +213,44 @@ fun ScannedUserProfileSheet(
                 textAlign = TextAlign.Center,
                 maxLines = 1
             )
+
+            val displayUid = scannedUser.uid.ifBlank { scannedUser.publicId }
+            if (displayUid.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("KnotLink ID", displayUid)
+                            clipboard?.setPrimaryClip(clip)
+                            Toast.makeText(context, "KnotLink ID copied!", Toast.LENGTH_SHORT).show()
+                        },
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isNightMode) Color(0xFF242735) else Color(0xFFF1F5F9),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isNightMode) Color(0xFF3B82F6).copy(alpha = 0.35f) else Color(0xFFCBD5E1))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "KnotLink ID: $displayUid",
+                            color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF475569),
+                            fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Copy ID",
+                            tint = Color(0xFF3B82F6),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(22.dp))
 

@@ -12,6 +12,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,8 +26,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -54,9 +61,10 @@ fun KnotLinkQrCode(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(26.dp))
             .background(Color.White)
-            .padding(12.dp),
+            .border(1.dp, Color(0xFFE2E8F0), RoundedCornerShape(26.dp))
+            .padding(14.dp),
         contentAlignment = Alignment.Center
     ) {
         Image(
@@ -65,62 +73,88 @@ fun KnotLinkQrCode(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Fit
         )
-        // A little smaller than the hole the generator clears, so a white margin remains.
-        KnotLinkQrLogo(modifier = Modifier.fillMaxSize(QRCodeGenerator.LOGO_CLEAR_FRACTION - 0.03f))
+        // Telegram-style center emblem: circular badge with white halo and crisp silhouette
+        KnotLinkQrLogo(modifier = Modifier.fillMaxSize(QRCodeGenerator.LOGO_CLEAR_FRACTION - 0.02f))
     }
 }
 
 @Composable
 private fun KnotLinkQrLogo(modifier: Modifier = Modifier) {
-    val pop = remember { Animatable(0.5f) }
+    val pop = remember { Animatable(0.75f) }
     LaunchedEffect(Unit) {
         pop.animateTo(
             targetValue = 1f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessLow
+                stiffness = Spring.StiffnessMedium
             )
         )
     }
 
-    val idle = rememberInfiniteTransition(label = "knotlinkQrLogo")
-    val tilt by idle.animateFloat(
-        initialValue = -6f,
-        targetValue = 6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "tilt"
-    )
-    val breathe by idle.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "breathe"
-    )
-
     Box(
         modifier = modifier
             .graphicsLayer {
-                val s = pop.value * breathe
-                scaleX = s
-                scaleY = s
-                rotationZ = tilt
+                scaleX = pop.value
+                scaleY = pop.value
             }
             .clip(CircleShape)
             .background(Color.White)
-            .padding(3.dp)
+            .padding(3.5.dp)
             .clip(CircleShape)
+            .background(
+                androidx.compose.ui.graphics.Brush.linearGradient(
+                    listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
+                )
+            ),
+        contentAlignment = Alignment.Center
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.appicon),
-            contentDescription = "KnotLink",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
+        KnotLinkSilhouette(
+            modifier = Modifier
+                .fillMaxSize(0.62f),
+            color = Color.White
         )
+    }
+}
+
+/**
+ * Authentic Telegram-style KnotLink interlocking links silhouette.
+ */
+@Composable
+private fun KnotLinkSilhouette(
+    modifier: Modifier = Modifier,
+    color: Color = Color.White
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val strokeW = (w * 0.15f).coerceAtLeast(3f)
+
+        // Draw left link loop (tilted at -25 degrees)
+        rotate(degrees = -25f, pivot = Offset(w * 0.38f, h * 0.5f)) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(w * 0.14f, h * 0.30f),
+                size = Size(w * 0.44f, h * 0.40f),
+                cornerRadius = CornerRadius(h * 0.20f, h * 0.20f),
+                style = Stroke(
+                    width = strokeW,
+                    cap = StrokeCap.Round
+                )
+            )
+        }
+
+        // Draw right link loop (tilted at 25 degrees, interlinked)
+        rotate(degrees = 25f, pivot = Offset(w * 0.62f, h * 0.5f)) {
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(w * 0.42f, h * 0.30f),
+                size = Size(w * 0.44f, h * 0.40f),
+                cornerRadius = CornerRadius(h * 0.20f, h * 0.20f),
+                style = Stroke(
+                    width = strokeW,
+                    cap = StrokeCap.Round
+                )
+            )
+        }
     }
 }

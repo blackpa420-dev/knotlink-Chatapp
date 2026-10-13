@@ -296,27 +296,71 @@ class BitChatRepository(val dao: BitChatDao) {
     private suspend fun getLocalProfile(identifier: String): SupabaseProfile? {
         val key = identifier.trim()
         if (key.isBlank()) return null
+
+        // 1. Check local authenticated user identity first
+        val currentIdentity = dao.getUserIdentity().firstOrNull()
+        if (currentIdentity != null) {
+            val uid = currentIdentity.supabaseUid.trim()
+            val rawUsername = currentIdentity.username.trim()
+            val cleanUsername = rawUsername.removePrefix("@")
+            val cleanKey = key.removePrefix("@")
+            if (uid.equals(key, ignoreCase = true) ||
+                rawUsername.equals(key, ignoreCase = true) ||
+                cleanUsername.equals(cleanKey, ignoreCase = true) ||
+                currentIdentity.publicId.equals(cleanKey, ignoreCase = true)
+            ) {
+                return SupabaseProfile(
+                    id = uid.ifBlank { key },
+                    username = currentIdentity.username,
+                    fullName = currentIdentity.fullName.ifBlank { currentIdentity.username },
+                    avatarUrl = currentIdentity.avatarPath,
+                    bio = "Verified KnotLink User",
+                    profession = currentIdentity.profession,
+                    email = currentIdentity.email,
+                    isOnline = true
+                )
+            }
+        }
+
+        // 2. Check cached profiles table
         val cached = when {
             key.matches(Regex("^[0-9a-fA-F-]{36}$")) -> dao.getCachedProfile(key)
             key.contains("@") -> dao.getCachedProfileByEmail(key.lowercase())
             else -> dao.getCachedProfileByUsername(key.removePrefix("@")) ?: dao.getCachedProfile(key)
         }
-        return cached?.let {
-            SupabaseProfile(
-                id = it.uid,
-                username = it.username,
-                fullName = it.fullName,
-                avatarUrl = it.avatarUrl,
-                bio = it.bio,
-                profession = it.profession,
-                email = it.email,
-                lastSeen = it.lastSeen,
-                isOnline = it.isOnline
+        if (cached != null) {
+            return SupabaseProfile(
+                id = cached.uid,
+                username = cached.username,
+                fullName = cached.fullName,
+                avatarUrl = cached.avatarUrl,
+                bio = cached.bio,
+                profession = cached.profession,
+                email = cached.email,
+                lastSeen = cached.lastSeen,
+                isOnline = cached.isOnline
             )
         }
+
+        // 3. Check contacts table
+        val contact = dao.getAllContactsList().firstOrNull {
+            it.id.equals(key, ignoreCase = true) || it.name.equals(key, ignoreCase = true)
+        }
+        if (contact != null) {
+            return SupabaseProfile(
+                id = contact.id,
+                username = contact.name,
+                fullName = contact.name,
+                avatarUrl = contact.avatarType.takeIf { it != "default" && it.isNotBlank() },
+                bio = contact.statusText.ifBlank { "Verified KnotLink User" },
+                isOnline = contact.isOnline
+            )
+        }
+
+        return null
     }
 
-    private suspend fun cacheProfileLocally(profile: SupabaseProfile?) {
+    suspend fun cacheProfileLocally(profile: SupabaseProfile?) {
         if (profile == null || profile.id.isBlank()) return
         dao.upsertCachedProfile(
             CachedProfileEntity(

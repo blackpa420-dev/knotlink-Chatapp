@@ -803,15 +803,19 @@ object SupabaseService {
                     return@withContext Result.failure(Exception("QR profile lookup failed: HTTP $code"))
                 }
 
-                val rows = JSONArray(responseBody)
-                if (rows.length() == 0) {
+                val obj = if (responseBody.trimStart().startsWith("[")) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() == 0) null else arr.getJSONObject(0)
+                } else if (responseBody.trimStart().startsWith("{")) {
+                    JSONObject(responseBody)
+                } else null
+
+                if (obj == null) {
                     Log.w(TAG, "lookupQrProfileByUuid($raw): RPC returned no profile")
                     return@withContext Result.success(null)
                 }
 
-                val profile = SupabaseProfile.fromJson(rows.getJSONObject(0)).copy(
-                    bio = "KnotLink User"
-                )
+                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(obj))
                 cacheProfile(profile)
                 Log.i(TAG, "lookupQrProfileByUuid($raw): RPC FOUND id=${profile.id} username=${profile.username} avatar=${!profile.avatarUrl.isNullOrBlank()}")
                 Result.success(profile)
@@ -885,38 +889,40 @@ object SupabaseService {
             }
 
             // QR/profile lookups are authenticated profile reads. Restore/refresh
-            // the Supabase session first so a process-recreated app never sends
-            // a stale/empty token and incorrectly turns a real profile into
-            // "user not found".
-            val session = ensureAuthenticatedSession().getOrElse {
-                Log.w(TAG, "getProfile($raw): authenticated session unavailable: ${it.message}")
-                return@withContext Result.failure(it)
-            }
+            // the Supabase session first, but gracefully fall back to existing token/anon key.
+            val bearer = ensureAuthenticatedSession().getOrNull()?.accessToken ?: getAccessToken()
 
             val url = "${SupabaseConfig.REST_BASE_URL}/${SupabaseConfig.TABLE_PROFILES}?id=eq.$raw&select=*"
             val request = Request.Builder()
                 .url(url)
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
-                .addHeader("Authorization", "Bearer ${session.accessToken}")
+                .addHeader("Authorization", "Bearer $bearer")
                 .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
                 val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
+                if (response.isSuccessful) {
+                    val arr = JSONArray(responseBody)
+                    if (arr.length() > 0) {
+                        val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
+                        cacheProfile(profile)
+                        Log.d(TAG, "getProfile($raw): resolved username=${profile.username}")
+                        return@withContext Result.success(profile)
+                    }
+                } else {
                     Log.w(TAG, "getProfile($raw): HTTP ${response.code}")
-                    return@withContext Result.failure(Exception("Failed to load profile: ${response.code}"))
                 }
-                val arr = JSONArray(responseBody)
-                if (arr.length() == 0) {
-                    Log.w(TAG, "getProfile($raw): profile row not found")
-                    return@withContext Result.success(null)
-                }
-                val profile = hydrateProfileMedia(SupabaseProfile.fromJson(arr.getJSONObject(0)))
-                cacheProfile(profile)
-                Log.d(TAG, "getProfile($raw): resolved username=${profile.username}")
-                Result.success(profile)
             }
+
+            // Fallback: search by username or public ID if direct UUID query had no match
+            val fallback = getProfileByUsername(raw).getOrNull()
+            if (fallback != null) {
+                return@withContext Result.success(fallback)
+            }
+
+            Log.w(TAG, "getProfile($raw): profile row not found")
+            Result.success(null)
         } catch (e: Exception) {
             Log.e(TAG, "Error in getProfile($userId)", e)
             Result.failure(e)

@@ -179,35 +179,33 @@ fun QrScannerScreen(
     var scannedUser by remember { mutableStateOf<ScannedUser?>(null) }
     var resolvedQrUuid by remember { mutableStateOf("") }
 
-    // Resolve the avatar into the stable local R2 cache. The QR page must
-    // never depend on a short-lived signed URL staying alive in Coil.
+    // Resolve the avatar into the stable local R2 cache or signed URL.
     var resolvedAvatarPath by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(user?.avatarPath, user?.supabaseUid) {
         resolvedAvatarPath = withContext(Dispatchers.IO) {
             var value = user?.avatarPath?.trim().orEmpty()
-            if (value.isBlank()) {
-                val uid = user?.supabaseUid?.trim().orEmpty()
-                if (uid.isNotBlank()) {
-                    value = com.example.data.supabase.SupabaseService
-                        .getProfileFresh(uid)
-                        .getOrNull()
-                        ?.avatarUrl
-                        ?.trim()
-                        .orEmpty()
+            val uid = user?.supabaseUid?.trim().orEmpty()
+            if (value.isBlank() && uid.isNotBlank()) {
+                val cached = viewModel.getProfileCachedFirst(uid)
+                if (!cached?.avatarUrl.isNullOrBlank()) {
+                    value = cached.avatarUrl!!.trim()
                 }
             }
-            when {
-                value.isBlank() -> null
-                value.startsWith("content://", ignoreCase = true) ||
-                    value.startsWith("file://", ignoreCase = true) ||
-                    value.startsWith("/") ||
-                    value.startsWith("http://", ignoreCase = true) ||
-                    value.startsWith("https://", ignoreCase = true) -> value
-                value.startsWith("users/") ->
-                    com.example.data.cloudflare.CloudflareR2Service
-                        .getCachedDownloadPath(context, value, "image/jpeg")
-                        .getOrNull()
-                else -> null
+            if (value.isBlank() && uid.isNotBlank()) {
+                val remote = com.example.data.supabase.SupabaseService
+                    .getProfile(uid)
+                    .getOrNull()
+                    ?.avatarUrl
+                    ?.trim()
+                    .orEmpty()
+                if (remote.isNotBlank()) {
+                    value = remote
+                }
+            }
+            if (value.isNotBlank()) {
+                viewModel.resolveAvatarDisplayUrl(value) ?: value
+            } else {
+                null
             }
         }
     }
@@ -472,31 +470,41 @@ fun QrScannerScreen(
                             // Avatar with gradient border
                             // Render only the resolved avatar URL/path. Never pass an R2
                     // object key directly to Coil.
-                    val avatarPath = resolvedAvatarPath
-                            val hasAvatar = !avatarPath.isNullOrBlank()
+                            val rawPath = resolvedAvatarPath ?: user?.avatarPath?.trim()
+                            val avatarModel: Any? = remember(rawPath) {
+                                if (rawPath.isNullOrBlank()) null
+                                else when {
+                                    rawPath.startsWith("http://", true) ||
+                                        rawPath.startsWith("https://", true) ||
+                                        rawPath.startsWith("content://", true) -> rawPath
+                                    rawPath.startsWith("file://", true) -> {
+                                        val f = java.io.File(rawPath.removePrefix("file://"))
+                                        if (f.exists()) f else rawPath
+                                    }
+                                    rawPath.startsWith("/") -> {
+                                        val f = java.io.File(rawPath)
+                                        if (f.exists()) f else rawPath
+                                    }
+                                    else -> rawPath
+                                }
+                            }
+                            val hasAvatar = avatarModel != null
                             Box(
                                 modifier = Modifier
-                                    .size(68.dp)
+                                    .size(76.dp)
                                     .clip(CircleShape)
                                     .border(
-                                        2.dp,
+                                        2.5.dp,
                                         Brush.linearGradient(
-                                            listOf(Color(0xFF2563EB), Color(0xFF8B5CF6))
+                                            listOf(Color(0xFF2563EB), Color(0xFF06B6D4))
                                         ),
                                         CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (hasAvatar) {
-                                    val model: Any = if (avatarPath!!.startsWith("http://") || avatarPath.startsWith("https://") || avatarPath.startsWith("content://")) {
-                                        avatarPath
-                                    } else {
-                                        val clean = avatarPath.removePrefix("file://")
-                                        val f = File(clean)
-                                        if (f.exists()) f else avatarPath
-                                    }
                                     AsyncImage(
-                                        model = model,
+                                        model = avatarModel,
                                         contentDescription = "User Avatar",
                                         modifier = Modifier
                                             .fillMaxSize()
@@ -528,7 +536,7 @@ fun QrScannerScreen(
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(18.dp))
+                            Spacer(modifier = Modifier.height(14.dp))
 
                             Text(
                                 text = user?.fullName?.ifBlank { user?.username } ?: "KnotLink User",
@@ -537,7 +545,53 @@ fun QrScannerScreen(
                                 fontWeight = FontWeight.Bold
                             )
 
-                            Spacer(modifier = Modifier.height(20.dp))
+                            if (displayUsername.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = displayUsername,
+                                    color = Color(0xFF60A5FA),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            val displayUid = resolvedQrUuid.ifBlank { user?.supabaseUid.orEmpty() }
+                            if (displayUid.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Surface(
+                                    onClick = {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText("KnotLink ID", displayUid)
+                                        clipboard?.setPrimaryClip(clip)
+                                        Toast.makeText(context, "KnotLink ID copied!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isNightMode) Color(0xFF242735) else Color(0xFFF1F5F9),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isNightMode) Color(0xFF3B82F6).copy(alpha = 0.3f) else Color(0xFFCBD5E1))
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "ID: ${displayUid.take(18)}${if (displayUid.length > 18) "..." else ""}",
+                                            color = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                            fontSize = 12.sp,
+                                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.ContentCopy,
+                                            contentDescription = "Copy ID",
+                                            tint = Color(0xFF3B82F6),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
 
                             // Telegram-style QR: black round dots on white, animated KnotLink logo in the middle.
                             if (qrBitmap != null) {
