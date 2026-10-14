@@ -251,7 +251,15 @@ class BitChatRepository(val dao: BitChatDao) {
     }
 
     suspend fun deleteChat(chatId: String) {
+        val chat = dao.getChatById(chatId)
+        val peer = chat?.participantUids?.split(",")?.map { it.trim() }
+            ?.firstOrNull { isCanonicalUuid(it) && !it.equals(dao.getUserIdentity().firstOrNull()?.supabaseUid?.trim().orEmpty(), ignoreCase = true) }
+        dao.clearMessagesForChat(chatId)
         dao.deleteChatById(chatId)
+        if (peer != null) {
+            // Hide the history on the server for this account only, otherwise the next sync restores it.
+            SupabaseService.deleteChatForMe(peer)
+        }
     }
 
     suspend fun insertChats(chats: List<ChatEntity>) {
@@ -1667,7 +1675,8 @@ class BitChatRepository(val dao: BitChatDao) {
             Log.w("BitChatRepo", "Error fetching sender profile: ${e.message}")
         }
 
-        val isChatOpen = currentActiveChatId == supaMsg.chatId
+        // "Open" means visible on screen right now; a chat left open in a backgrounded app must not auto-read.
+        val isChatOpen = currentActiveChatId == supaMsg.chatId && com.example.util.NotificationHelper.isAppForeground
 
         // Reuse canonical chat or create new one safely
         val targetChat = findOrCreateCanonicalChat(
@@ -1994,7 +2003,7 @@ class BitChatRepository(val dao: BitChatDao) {
                     }
                     // Real-time update for deletes
                     if (supaMsg.isDeletedForEveryone && !existing.isDeletedForEveryone) {
-                        dao.updateMessageDeletedForEveryone(supaMsg.id, System.currentTimeMillis())
+                        removeMessageLocally(supaMsg.id)
                     }
                 }
 
@@ -2315,8 +2324,16 @@ class BitChatRepository(val dao: BitChatDao) {
         context: Context,
         onProgress: (Double) -> Unit = {}
     ): String {
-        val bytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
+        val rawBytes = context.contentResolver.openInputStream(fileUri)?.use { it.readBytes() }
             ?: throw IllegalArgumentException("Cannot read file")
+        // Photos are downscaled (max 1600px) and re-encoded before upload: small, fast, still sharp.
+        var mimeType = mimeType
+        var bytes = rawBytes
+        if (mimeType.startsWith("image/", true) && !mimeType.contains("gif", true)) {
+            compressImageBytes(rawBytes, 1600, 82)?.let { bytes = it; mimeType = "image/jpeg" }
+        }
+        // R2 media keys live under the SERVER chat UUID; the app's local chat id (chat_<hash>) is not accepted.
+        val serverChatId = resolveServerChatId(chatId)
         val ext = when {
             mimeType.contains("png", ignoreCase = true) -> "png"
             mimeType.contains("webp", ignoreCase = true) -> "webp"
@@ -2329,9 +2346,44 @@ class BitChatRepository(val dao: BitChatDao) {
             mimeType.contains("pdf", ignoreCase = true) -> "pdf"
             else -> "bin"
         }
-        val fileName = "chat_${chatId}_${UUID.randomUUID().toString().take(8)}.${ext}"
-        return SupabaseService.uploadChatMedia(chatId, fileName, bytes, mimeType).getOrThrow()
+        val fileName = "chat_${UUID.randomUUID().toString().take(8)}.${ext}"
+        return SupabaseService.uploadChatMedia(serverChatId, fileName, bytes, mimeType).getOrThrow()
     }
+
+    private suspend fun resolveServerChatId(chatId: String): String {
+        if (isCanonicalUuid(chatId)) return chatId
+        val me = dao.getUserIdentity().firstOrNull()?.supabaseUid?.trim().orEmpty()
+        val chat = dao.getChatById(chatId)
+        val peer = chat?.participantUids?.split(",")?.map { it.trim() }
+            ?.firstOrNull { isCanonicalUuid(it) && !it.equals(me, ignoreCase = true) }
+            ?: resolvePeerUuid(chatId, chat?.name.orEmpty())
+            ?: throw IllegalStateException("Could not find the chat partner for this photo")
+        return SupabaseService.getOrCreateDirectChat(peer).getOrThrow()
+    }
+
+    private fun compressImageBytes(input: ByteArray, maxSide: Int, quality: Int): ByteArray? {
+        return try {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeByteArray(input, 0, input.size, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            var sample = 1
+            while ((bounds.outWidth / sample) > maxSide * 2 || (bounds.outHeight / sample) > maxSide * 2) sample *= 2
+            val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+            var bmp = android.graphics.BitmapFactory.decodeByteArray(input, 0, input.size, opts) ?: return null
+            val longest = maxOf(bmp.width, bmp.height)
+            if (longest > maxSide) {
+                val f = maxSide.toFloat() / longest
+                bmp = android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * f).toInt().coerceAtLeast(1), (bmp.height * f).toInt().coerceAtLeast(1), true)
+            }
+            val out = java.io.ByteArrayOutputStream()
+            bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, out)
+            val result = out.toByteArray()
+            if (result.size < input.size) result else null
+        } catch (e: Throwable) { null }
+    }
+
+    /** Avatars: 512px square-ish JPEG, typically < 100 KB. */
+    fun compressAvatarBytes(input: ByteArray): ByteArray = compressImageBytes(input, 512, 85) ?: input
 
     suspend fun createGroupChat(
         title: String,
@@ -2520,7 +2572,8 @@ class BitChatRepository(val dao: BitChatDao) {
         val local = dao.getMessageById(messageId)
 
         if (deleteForEveryone) {
-            dao.updateMessageDeletedForEveryone(targetId, now)
+            // No "this message was deleted" stamp: the row disappears on both sides.
+            removeMessageLocally(targetId, messageId)
             if (!serverMessageId.isNullOrBlank()) {
                 val result = SupabaseService.deleteMessageForEveryone(serverMessageId)
                 if (result.isSuccess && local != null) {
@@ -2546,7 +2599,32 @@ class BitChatRepository(val dao: BitChatDao) {
                 }
             }
         } else {
-            dao.updateMessageDeletedForMe(messageId)
+            removeMessageLocally(targetId, messageId)
+            if (!serverMessageId.isNullOrBlank()) {
+                SupabaseService.deleteMessageForMe(serverMessageId)
+            }
+        }
+    }
+
+    /** Physically removes a message (and its pin row) from Room. */
+    suspend fun removeMessageLocally(serverOrClientId: String, rowId: Long? = null) {
+        runCatching { dao.deleteMessageByServerId(serverOrClientId) }
+        if (rowId != null) runCatching { dao.deleteMessageByRowId(rowId) }
+        runCatching { dao.deletePinnedByMessageId(serverOrClientId) }
+    }
+
+    /** Applies deletions made by the other side (invisible server records), also when the app was closed. */
+    suspend fun syncMessageDeletions() {
+        try {
+            val last = dao.getSyncState("message_deletions")?.lastSyncedAt ?: 0L
+            val iso = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+                .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                .format(Date(maxOf(0L, last - 60_000L)))
+            val ids = SupabaseService.fetchMessageDeletionsSince(iso).getOrNull() ?: return
+            ids.forEach { removeMessageLocally(it) }
+            dao.upsertSyncState(SyncStateEntity("message_deletions", System.currentTimeMillis()))
+        } catch (e: Exception) {
+            Log.w("BitChatRepo", "syncMessageDeletions failed: " + e.message)
         }
     }
 

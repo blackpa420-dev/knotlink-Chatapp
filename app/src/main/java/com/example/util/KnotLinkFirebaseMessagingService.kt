@@ -92,7 +92,8 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
             // only a short processing window for high-priority pushes.
             val senderAvatarUrl = if (
                 rawSenderAvatarUrl.startsWith("http://") ||
-                rawSenderAvatarUrl.startsWith("https://")
+                rawSenderAvatarUrl.startsWith("https://") ||
+                rawSenderAvatarUrl.startsWith("users/")
             ) {
                 rawSenderAvatarUrl
             } else {
@@ -106,6 +107,35 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                 } catch (_: Throwable) {
                     ""
                 }
+            }
+
+            if (type.equals("message_deleted", ignoreCase = true)) {
+                val deletedId = data["message_id"].orEmpty()
+                if (deletedId.isNotBlank()) {
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            val dao = com.example.data.local.BitChatDatabase.getDatabase(applicationContext).bitChatDao()
+                            dao.deleteMessageByServerId(deletedId)
+                            dao.deletePinnedByMessageId(deletedId)
+                        } catch (_: Throwable) {}
+                    }
+                }
+                return
+            }
+
+            if (type.equals("call_missed", ignoreCase = true)) {
+                NotificationHelper.cancelCallNotification(applicationContext, callerName, chatId)
+                applicationContext.sendBroadcast(Intent("com.knotlink.CALL_ENDED").apply {
+                    putExtra("caller_name", callerName); putExtra("call_id", data["call_id"] ?: chatId)
+                    putExtra("chat_id", chatId); putExtra("caller_id", senderId); setPackage(packageName)
+                })
+                if (data["notify"] == "1") {
+                    NotificationHelper.showIncomingMessageNotification(
+                        context = applicationContext, senderName = callerName, text = body, chatId = "missed_" + (data["call_id"] ?: chatId),
+                        senderId = senderId, serverMessageId = "missed_" + (data["call_id"] ?: chatId)
+                    )
+                }
+                return
             }
 
             // Handle Call Cancelled / Ended / Declined Signal
@@ -237,106 +267,22 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
                     }
                 }
 
-                // 2. INSTANT ROOM DB INSERTION so inbox is immediately updated without network lag
-                val ts = data["timestamp"]?.toLongOrNull() ?: System.currentTimeMillis()
-                val sdf = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
-                val timeStr = sdf.format(java.util.Date(ts))
-
-                if (hasCanonicalMessageId && chatId.isNotBlank() && body.isNotBlank() && senderId.matches(uuidRegex)) {
-                    scope.launch {
+                // The authoritative row is fetched from Supabase and stored under the LOCAL chat id by the
+                // normal sync (never insert the push preview itself: its chat_id is the server UUID).
+                if (hasCanonicalMessageId) {
+                    scope.launch(Dispatchers.IO) {
                         try {
                             val db = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
-                            val dao = db.bitChatDao()
-
-                            // Check if message was already saved (e.g., from Supabase Realtime)
-                            val existingMsg = if (msgId.isNotBlank()) dao.findMessageByServerId(msgId) else null
-                            if (existingMsg != null) {
-                                Log.d("KnotLinkFCM", "Message $msgId already present in local DB. Skipping duplicate insertion.")
-                                return@launch
+                            val identity = db.bitChatDao().getUserIdentitySync()
+                            val uid = identity?.supabaseUid.orEmpty()
+                            if (uid.isNotBlank()) {
+                                val repository = com.example.data.repository.BitChatRepository(db.bitChatDao())
+                                repository.syncAllChatHistory(uid, identity?.username.orEmpty())
                             }
-
-                            val msgType = data["knotlink_message_type"] ?: "TEXT"
-                            val isRichMedia = msgType != "TEXT" || 
-                                              body.startsWith("🎙️") || 
-                                              body.startsWith("🖼️") || 
-                                              body.startsWith("📹") || 
-                                              body.startsWith("📄") || 
-                                              body.contains("Voice message") || 
-                                              body.contains("Video message") || 
-                                              body.contains("Photo") || 
-                                              body.contains("Document")
-
-                            if (!isRichMedia) {
-                                val newMsg = com.example.data.local.MessageEntity(
-                                    chatId = chatId,
-                                    senderName = callerName,
-                                    text = body,
-                                    timestampString = timeStr,
-                                    isFromUser = false,
-                                    isRead = false,
-                                    senderUid = senderId,
-                                    serverMessageId = msgId,
-                                    syncStatus = "SYNCED",
-                                    deliveryState = "DELIVERED",
-                                    timestamp = ts,
-                                    messageType = "TEXT"
-                                )
-                                dao.insertMessageIfAbsent(newMsg)
-                                try {
-                                    SupabaseService.markMessageDelivered(msgId)
-                                } catch (_: Throwable) {}
-                            } else {
-                                // FCM carries only a compact preview for media. Never
-                                // persist that preview as the real message body. Recover
-                                // the authoritative row from Supabase, then acknowledge
-                                // delivery only after Room reconciliation.
-                                try {
-                                    val db2 = com.example.data.local.BitChatDatabase.getDatabase(applicationContext)
-                                    val repository = com.example.data.repository.BitChatRepository(db2.bitChatDao())
-                                    repository.syncMessagesForChat(chatId)
-                                    SupabaseService.markMessageDelivered(msgId)
-                                } catch (e: Throwable) {
-                                    Log.w("KnotLinkFCM", "Media message recovery failed: ${e.message}")
-                                }
-                            }
-
-                            val allLocal = dao.getAllChatsList()
-                            // Direct-chat identity is UUID-only. Never map a push to
-                            // an existing chat by display name; names are mutable/display data.
-                            val existingChat = dao.getChatById(chatId)
-                                ?: allLocal.find { chat ->
-                                    chat.chatType != "GROUP" &&
-                                        chat.category != "Group" &&
-                                        senderId.isNotBlank() &&
-                                        chat.participantUids.split(",")
-                                            .map { it.trim().lowercase() }
-                                            .contains(senderId.lowercase())
-                                }
-
-                            if (existingChat != null) {
-                                val updatedChat = existingChat.copy(
-                                    lastMessage = body,
-                                    timeString = timeStr,
-                                    lastUpdated = ts,
-                                    unreadCount = existingChat.unreadCount + 1
-                                )
-                                dao.insertChats(listOf(updatedChat))
-                            } else {
-                                val newChat = com.example.data.local.ChatEntity(
-                                    id = chatId,
-                                    name = callerName,
-                                    lastMessage = body,
-                                    timeString = timeStr,
-                                    unreadCount = 1,
-                                    isOnline = false,
-                                    category = "All",
-                                    lastUpdated = ts,
-                                    participantUids = senderId
-                                )
-                                dao.insertChats(listOf(newChat))
-                            }
+                            // Delivered only: it becomes READ when the person actually sees it.
+                            SupabaseService.markMessageDelivered(msgId)
                         } catch (e: Throwable) {
-                            Log.e("KnotLinkFCM", "Error inserting message to DB: ${e.message}")
+                            Log.w("KnotLinkFCM", "Push message sync failed: ${e.message}")
                         }
                     }
                 }
@@ -375,6 +321,15 @@ class KnotLinkFirebaseMessagingService : FirebaseMessagingService() {
 
     private fun downloadBitmapFromUrl(url: String): android.graphics.Bitmap? {
         if (url.isBlank()) return null
+        val r2Key = com.example.data.cloudflare.R2CoilInterceptor.extractKey(url)
+        if (r2Key != null) {
+            return try {
+                val path = kotlinx.coroutines.runBlocking {
+                    com.example.data.cloudflare.CloudflareR2Service.getCachedDownloadPath(applicationContext, r2Key).getOrNull()
+                }
+                if (path.isNullOrBlank()) null else android.graphics.BitmapFactory.decodeFile(path)
+            } catch (_: Throwable) { null }
+        }
         return try {
             val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             connection.doInput = true

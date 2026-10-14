@@ -1511,8 +1511,10 @@ object SupabaseService {
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
             if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
             val body = JSONObject().put("p_message_id", messageId.trim()).put("p_body", newText.trim())
+            // Polls and checklists are updated by BOTH participants (vote / tick), plain edits only by the sender.
+            val interactive = newText.contains("[POLL_DATA|") || newText.contains("[CHECKLIST_JSON|")
             val request = Request.Builder()
-                .url("${SupabaseConfig.REST_BASE_URL}/rpc/edit_message")
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/" + if (interactive) "update_interactive_message" else "edit_message")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
                 .addHeader("Authorization", "Bearer ${getAccessToken()}")
                 .addHeader("Content-Type", "application/json")
@@ -1528,7 +1530,7 @@ object SupabaseService {
         try {
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
             if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
-            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_pinned", isPinned)
+            val body = JSONObject().put("p_message_id", messageId.trim()).put("p_is_pinned", isPinned)
             val request = Request.Builder()
                 .url("${SupabaseConfig.REST_BASE_URL}/rpc/set_message_pinned")
                 .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -1537,11 +1539,60 @@ object SupabaseService {
                 .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
                 .build()
             httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) Result.success(false)
-                else Result.success(response.body?.string()?.trim()?.toBoolean() == true)
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "set_message_pinned failed HTTP ${response.code}: ${response.body?.string().orEmpty().take(200)}")
+                    Result.success(false)
+                } else Result.success(true)
             }
         } catch (e: Exception) { Result.failure(e) }
     }
+    suspend fun deleteMessageForMe(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!messageId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/delete_message_for_me")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(JSONObject().put("p_message_id", messageId.trim()).toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(request).execute().use { Result.success(it.isSuccessful) }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun deleteChatForMe(peerUserId: String): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!peerUserId.trim().matches(uuidRegex)) return@withContext Result.success(false)
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/rpc/delete_chat_for_me")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .addHeader("Content-Type", "application/json")
+                .post(JSONObject().put("p_peer_id", peerUserId.trim()).toString().toRequestBody(JSON_MEDIA_TYPE))
+                .build()
+            httpClient.newCall(request).execute().use { Result.success(it.isSuccessful) }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /** Message ids removed for everyone since [sinceIso] (invisible deletion-sync records). */
+    suspend fun fetchMessageDeletionsSince(sinceIso: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val request = Request.Builder()
+                .url("${SupabaseConfig.REST_BASE_URL}/message_deletions?deleted_at=gt.${java.net.URLEncoder.encode(sinceIso, "UTF-8")}&select=message_id&limit=500")
+                .addHeader("apikey", SupabaseConfig.ANON_KEY)
+                .addHeader("Authorization", "Bearer ${getAccessToken()}")
+                .get().build()
+            httpClient.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (!response.isSuccessful) return@withContext Result.success(emptyList())
+                val arr = JSONArray(text)
+                Result.success((0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optString("message_id")?.takeIf { id -> id.isNotBlank() } })
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun deleteMessageForEveryone(messageId: String): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
         val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")

@@ -126,6 +126,7 @@ class MainActivity : FragmentActivity() {
       // Configure Coil ImageLoader with GIF support
       val imageLoader = coil.ImageLoader.Builder(this)
         .components {
+          add(com.example.data.cloudflare.R2CoilInterceptor(applicationContext))
           if (Build.VERSION.SDK_INT >= 28) {
             add(coil.decode.ImageDecoderDecoder.Factory())
           } else {
@@ -318,6 +319,7 @@ class MainActivity : FragmentActivity() {
 
   override fun onStart() {
     super.onStart()
+    NotificationHelper.isAppForeground = true
     try {
       com.example.data.supabase.SupabaseRealtimeManager.onAppForeground()
     } catch (_: Throwable) {}
@@ -325,6 +327,7 @@ class MainActivity : FragmentActivity() {
 
   override fun onStop() {
     super.onStop()
+    NotificationHelper.isAppForeground = false
     // Keep realtime alive for an active call, including system PiP.
     // Otherwise remote hang-up/signaling can be delayed until the activity returns.
     val activeCall = bitChatViewModel?.activeCall?.value

@@ -32,6 +32,9 @@ object SupabaseRealtimeManager {
     private val _messageStatusUpdates = MutableSharedFlow<SupabaseMessage>(extraBufferCapacity = 128)
     val messageStatusUpdates: SharedFlow<SupabaseMessage> = _messageStatusUpdates.asSharedFlow()
 
+    private val _deletedMessageIds = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val deletedMessageIds: SharedFlow<String> = _deletedMessageIds.asSharedFlow()
+
     private val _incomingCalls = MutableSharedFlow<SupabaseCallSession>(extraBufferCapacity = 32)
     val incomingCalls: SharedFlow<SupabaseCallSession> = _incomingCalls.asSharedFlow()
 
@@ -281,6 +284,11 @@ object SupabaseRealtimeManager {
                                     })
                                 }
                                 put(JSONObject().apply {
+                                    put("event", "INSERT")
+                                    put("schema", "public")
+                                    put("table", "message_deletions")
+                                })
+                                put(JSONObject().apply {
                                     put("event", "*")
                                     put("schema", "public")
                                     put("table", SupabaseConfig.TABLE_TYPING_STATUS)
@@ -415,6 +423,10 @@ object SupabaseRealtimeManager {
                                         if (msg.id.isNotBlank() && msg.status.isNotBlank()) {
                                             scope.launch { _messageStatusUpdates.emit(msg) }
                                         }
+                                    }
+                                    "message_deletions" -> {
+                                        val deletedId = record.optString("message_id")
+                                        if (deletedId.isNotBlank()) scope.launch { _deletedMessageIds.emit(deletedId) }
                                     }
                                     SupabaseConfig.TABLE_CALL_SESSIONS -> {
                                         val call = SupabaseCallSession.fromJson(record)

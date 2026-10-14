@@ -292,6 +292,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                                         }
                                     }
 
+                                    runCatching { repository.syncMessageDeletions() }
                                     runCatching {
                                         repository.syncCallHistory(currentUid, currentUsername)
                                     }
@@ -323,7 +324,8 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     val isFreshMessage = supaMsg.timestamp > (appLaunchTime - 12000L)
 
                     // ONLY show notification if the message was actually addressed to me and not sent by me
-                    if (!isFromMe && handledEntity.id > 0L && activeChat != supaMsg.chatId && isFreshMessage) {
+                    if (!isFromMe && handledEntity.id > 0L && isFreshMessage && !supaMsg.isRead &&
+                        !(com.example.util.NotificationHelper.isAppForeground && activeChat == supaMsg.chatId)) {
                         try {
                             val senderDisplayName = handledEntity.senderName.ifBlank { supaMsg.senderName }
                             var senderAvatarBitmap: android.graphics.Bitmap? = null
@@ -387,6 +389,15 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 }
             } catch (e: Throwable) {
                 Log.w("BitChat_Debug", "Incoming messages flow error: ${e.message}")
+            }
+        }
+
+        // Messages deleted for everyone by the other side: remove the row, no stamp.
+        viewModelScope.launch {
+            try {
+                SupabaseRealtimeManager.deletedMessageIds.collect { id -> repository.removeMessageLocally(id) }
+            } catch (e: Throwable) {
+                Log.w("BitChat_Debug", "Deleted messages flow error: ${e.message}")
             }
         }
 
@@ -1986,7 +1997,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 val fileName = "avatar_${System.currentTimeMillis()}.jpg"
-                val uploadRes = SupabaseService.uploadAvatar(fileName, bytes, "image/jpeg")
+                val uploadRes = SupabaseService.uploadAvatar(fileName, repository.compressAvatarBytes(bytes), "image/jpeg")
                 if (uploadRes.isFailure || uploadRes.getOrNull().isNullOrBlank()) {
                     val remoteError = uploadRes.exceptionOrNull()?.message.orEmpty()
                     Log.e("BitChatViewModel", "Profile avatar R2 upload failed for uid=${myUid}: $remoteError")
@@ -2146,7 +2157,7 @@ class BitChatViewModel(application: Application) : AndroidViewModel(application)
                     if (file.exists()) file.readBytes() else null
                 }
                 if (bytes == null || bytes.isEmpty()) return@withContext Result.failure(Exception("Selected profile photo could not be read. Please select it again."))
-                val upload = SupabaseService.uploadAvatar("avatar_" + System.currentTimeMillis() + ".jpg", bytes, "image/jpeg")
+                val upload = SupabaseService.uploadAvatar("avatar_" + System.currentTimeMillis() + ".jpg", repository.compressAvatarBytes(bytes), "image/jpeg")
                 remoteAvatarPath = upload.getOrElse { error ->
                     Log.e("BitChatViewModel", "Profile avatar upload failed", error)
                     return@withContext Result.failure(Exception("Profile photo upload failed: " + (error.message ?: "R2 upload error"), error))

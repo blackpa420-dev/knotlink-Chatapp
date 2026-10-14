@@ -169,7 +169,7 @@ object CloudflareR2Service {
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val key = objectKey.trim()
-            if (!key.startsWith("users/")) return@withContext Result.failure(Exception("Invalid R2 avatar key"))
+            if (!key.startsWith("users/") && !key.startsWith("chats/")) return@withContext Result.failure(Exception("Invalid R2 object key"))
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(key.toByteArray(Charsets.UTF_8))
                 .joinToString("") { "%02x".format(it.toInt() and 0xff) }

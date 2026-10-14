@@ -447,8 +447,9 @@ fun ChatDetailScreen(
         hasInitialScrolled = false
     }
 
-    LaunchedEffect(isUserNearBottom, hasInitialScrolled, messages.size, chatId) {
-        if (!hasInitialScrolled || !isUserNearBottom) return@LaunchedEffect
+    val appInForeground = com.example.util.NotificationHelper.isAppForeground
+    LaunchedEffect(isUserNearBottom, hasInitialScrolled, messages.size, chatId, appInForeground) {
+        if (!appInForeground || !hasInitialScrolled || !isUserNearBottom) return@LaunchedEffect
 
         val unreadServerMessageIds = messages
             .filter { !it.isFromUser && (it.deliveryState != "READ" || !it.isRead) }

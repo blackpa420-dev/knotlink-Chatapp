@@ -1,5 +1,7 @@
 package com.example.util
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -26,6 +28,25 @@ object NotificationHelper {
 
     @Volatile
     var activeChatId: String? = null
+
+    /** True only while the activity is visible. Observable so screens can react when the app returns. */
+    var isAppForeground by androidx.compose.runtime.mutableStateOf(false)
+
+    private const val NOTIFIED_PREFS = "knotlink_notified_ids"
+
+    /** Persistent (cross-process, 3 days) "already notified" check so a message never alerts twice. */
+    @Synchronized
+    fun claimNotification(context: Context, id: String): Boolean {
+        return try {
+            val prefs = context.applicationContext.getSharedPreferences(NOTIFIED_PREFS, Context.MODE_PRIVATE)
+            if (prefs.contains(id)) return false
+            val now = System.currentTimeMillis()
+            val editor = prefs.edit()
+            prefs.all.forEach { (k, v) -> if (v is Long && now - v > 3L * 24 * 3600 * 1000) editor.remove(k) }
+            editor.putLong(id, now).apply()
+            true
+        } catch (_: Throwable) { true }
+    }
 
     private val recentlyShownMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val ongoingCallAvatarCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
@@ -249,7 +270,7 @@ object NotificationHelper {
         try {
             if (!isAvatarUpdate) {
                 // If user is currently actively viewing this chat, do not buzz/notify
-                if (chatId.isNotBlank() && chatId == activeChatId) {
+                if (isAppForeground && chatId.isNotBlank() && chatId == activeChatId) {
                     android.util.Log.d("NotificationHelper", "Skipping notification: Chat $chatId is currently active")
                     return
                 }
@@ -260,7 +281,7 @@ object NotificationHelper {
                 } else {
                     "msg_hash_${chatId}_${text.hashCode()}"
                 }
-                if (isRecentlyShown(dedupeKey)) {
+                if (isRecentlyShown(dedupeKey) || !claimNotification(context, dedupeKey)) {
                     android.util.Log.d("NotificationHelper", "Duplicate notification for $dedupeKey suppressed")
                     return
                 }

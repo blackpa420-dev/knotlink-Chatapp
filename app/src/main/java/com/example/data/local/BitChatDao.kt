@@ -180,6 +180,15 @@ interface BitChatDao {
     @Query("UPDATE messages SET isDeletedForEveryone = 1, deletedAt = :deletedAt WHERE serverMessageId = :serverMessageId OR clientMessageId = :serverMessageId")
     suspend fun updateMessageDeletedForEveryone(serverMessageId: String, deletedAt: Long)
 
+    @Query("DELETE FROM messages WHERE serverMessageId = :serverMessageId OR clientMessageId = :serverMessageId")
+    suspend fun deleteMessageByServerId(serverMessageId: String)
+
+    @Query("DELETE FROM messages WHERE id = :messageId")
+    suspend fun deleteMessageByRowId(messageId: Long)
+
+    @Query("DELETE FROM pinned_messages WHERE messageId = :messageId")
+    suspend fun deletePinnedByMessageId(messageId: String)
+
     @Query("UPDATE messages SET isDeletedForMe = 1 WHERE id = :messageId")
     suspend fun updateMessageDeletedForMe(messageId: Long)
 
